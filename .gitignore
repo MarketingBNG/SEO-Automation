@@ -48,3 +48,4 @@ next-env.d.ts
 secrets/
 data/
 !.env.example
+.neon

@@ -5,7 +5,8 @@
  *
  *   OLD_APP_DIR=../seo-blog-automation npm run migrate:sqlite
  *
- * Needs DATABASE_URL and BLOB_READ_WRITE_TOKEN in .env, and `npx prisma migrate deploy` run first.
+ * Needs DATABASE_URL in .env and `npx prisma migrate deploy` run first. Files are uploaded only when
+ * BLOB_READ_WRITE_TOKEN is set; to upload them later on their own run with FILES_ONLY=1.
  * Ids are preserved (so drafts->keywords, facts->drafts etc. stay linked) and the id sequences are
  * advanced afterwards. Refuses to run if the target tables already contain data.
  */
@@ -40,7 +41,11 @@ async function main() {
   if (!fs.existsSync(DB_PATH)) throw new Error(`SQLite database not found at ${DB_PATH}`);
   const sqlite = new DatabaseSync(DB_PATH, { readOnly: true });
 
-  for (const table of TABLES) {
+  const uploadFiles = !!process.env.BLOB_READ_WRITE_TOKEN;
+  const filesOnly = process.env.FILES_ONLY === '1';
+  if (filesOnly && !uploadFiles) throw new Error('FILES_ONLY=1 needs BLOB_READ_WRITE_TOKEN');
+
+  for (const table of filesOnly ? [] : TABLES) {
     const count = await (prisma as any)[table].count();
     if (count > 0) throw new Error(`Target table "${table}" already has ${count} rows - aborting so nothing is duplicated.`);
   }
@@ -48,7 +53,9 @@ async function main() {
   // 1. Files: uploads/** -> Blob under the same relative key.
   const uploadsDir = path.join(OLD_APP_DIR, 'uploads');
   let files = 0;
-  if (fs.existsSync(uploadsDir)) {
+  if (!uploadFiles) {
+    console.log('BLOB_READ_WRITE_TOKEN not set - skipping file upload (run again later with FILES_ONLY=1)');
+  } else if (fs.existsSync(uploadsDir)) {
     const walk = (dir: string): string[] =>
       fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
         e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]
@@ -60,6 +67,10 @@ async function main() {
     }
   }
   console.log(`Uploaded ${files} file(s) to Blob`);
+  if (filesOnly) {
+    await prisma.$disconnect();
+    return;
+  }
 
   // 2. Rows.
   for (const table of TABLES) {
