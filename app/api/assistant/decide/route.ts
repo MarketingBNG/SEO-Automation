@@ -3,7 +3,8 @@ import { decide } from '@/lib/assistant/engine';
 import { streamNdjson } from '@/lib/assistant/stream';
 
 export const runtime = 'nodejs';
-export const maxDuration = 800;
+// Vercel Hobby plan limit. On Pro, raise to 800 for long generations.
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const { conversationId, decisions } = (await req.json().catch(() => ({}))) || {};

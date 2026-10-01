@@ -3,6 +3,6 @@
   "crons": [
     { "path": "/api/skill/auto-check", "schedule": "0 3 * * *" },
     { "path": "/api/strategy/auto-check", "schedule": "30 3 * * *" },
-    { "path": "/api/cron/sweep", "schedule": "*/15 * * * *" }
+    { "path": "/api/cron/sweep", "schedule": "0 4 * * *" }
   ]
 }

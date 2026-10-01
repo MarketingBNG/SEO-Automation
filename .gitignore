@@ -49,3 +49,6 @@ secrets/
 data/
 !.env.example
 .neon
+
+.vercel
+.env*

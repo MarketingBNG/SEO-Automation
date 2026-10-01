@@ -10,7 +10,8 @@ import { methodNotAllowed } from '../_lib/http';
 // deploy-friendly (a background job surviving after the response is sent would not work once this
 // runs as a Vercel serverless function).
 export const runtime = 'nodejs';
-export const maxDuration = 800;
+// Vercel Hobby plan limit. On Pro, raise to 800 for long generations.
+export const maxDuration = 300;
 
 // Claims the oldest pending keyword atomically: two concurrent requests can't both pick the same one.
 async function claimNextPending(): Promise<any | null> {

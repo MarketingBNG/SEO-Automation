@@ -7,7 +7,8 @@ import { methodNotAllowed } from '../_lib/http';
 // Generation takes several minutes (live Google checks plus web research), so it streams
 // newline-delimited JSON progress like blog generation, and closing the request stops it.
 export const runtime = 'nodejs';
-export const maxDuration = 800;
+// Vercel Hobby plan limit. On Pro, raise to 800 for long generations.
+export const maxDuration = 300;
 
 export async function GET() {
   const rows = await prisma.seo_strategies.findMany({ orderBy: { id: 'desc' } });
