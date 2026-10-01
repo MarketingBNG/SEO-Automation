@@ -59,6 +59,19 @@ function Section({ title, description, children }: { title: string; description:
   );
 }
 
+type ConnState = 'checking' | 'ok' | 'off' | 'fail' | undefined;
+
+// Green / amber / red status shown in the top-right of each connector card.
+function ConnBadge({ state }: { state: ConnState }) {
+  if (!state) return null;
+  if (state === 'checking') return <Pill tone="warn"><Loader2 className="size-3 animate-spin" /> Checking</Pill>;
+  if (state === 'ok') return <Pill tone="success">● Connected</Pill>;
+  if (state === 'off') return <Pill tone="warn">● Not connected</Pill>;
+  return <Pill tone="danger">● Error</Pill>;
+}
+
+const CONN_TESTS = ['wordpress', 'gsc', 'gbp', 'zoho', 'seranking', 'surfer', 'serphouse'] as const;
+
 function ConnCard({
   icon: Icon, title, description, badge, className, children,
 }: {
@@ -152,6 +165,23 @@ function YoastFieldsCard() {
 export default function SettingsTab() {
   const [status, setStatus] = useState<string | null>(null);
 
+  // Connection status for each connector, checked automatically when Settings opens.
+  const [conn, setConn] = useState<Record<string, ConnState>>(() => Object.fromEntries(CONN_TESTS.map((n) => [n, 'checking'])));
+  const markConn = (name: string, json: any) =>
+    setConn((c) => ({ ...c, [name]: json?.ok ? 'ok' : json?.connected === false ? 'off' : 'fail' }));
+  useEffect(() => {
+    let alive = true;
+    for (const name of CONN_TESTS) {
+      fetch(`/api/${name}/test`)
+        .then((r) => r.json())
+        .then((json) => alive && markConn(name, json))
+        .catch(() => alive && setConn((c) => ({ ...c, [name]: 'fail' })));
+    }
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const [gscStatus, setGscStatus] = useState<string | null>(null);
   const [queries, setQueries] = useState<any[] | null>(null);
   const [loadingQueries, setLoadingQueries] = useState(false);
@@ -204,6 +234,7 @@ export default function SettingsTab() {
     try {
       const res = await fetch('/api/wordpress/test');
       const json = await res.json();
+      markConn('wordpress', json);
       setStatus(json.ok ? `Connected as ${json.connectedAs}` : `Failed: ${json.error}`);
     } catch (err: any) {
       setStatus('Failed: ' + err.message);
@@ -215,6 +246,7 @@ export default function SettingsTab() {
     try {
       const res = await fetch('/api/gsc/test');
       const json = await res.json();
+      markConn('gsc', json);
       setGscStatus(
         json.ok
           ? `Connected, property: ${json.sites.map((s: any) => s.url).join(', ')}`
@@ -299,6 +331,7 @@ export default function SettingsTab() {
     try {
       const res = await fetch('/api/gbp/test');
       const json = await res.json();
+      markConn('gbp', json);
       if (!json.connected) {
         setGbpStatus('Not connected yet. Click "Connect" below.');
       } else if (!json.ok) {
@@ -317,6 +350,7 @@ export default function SettingsTab() {
     try {
       const res = await fetch('/api/zoho/test');
       const json = await res.json();
+      markConn('zoho', json);
       if (!json.connected) {
         setZohoStatus('Not connected yet. Click "Connect" below.');
       } else if (!json.ok) {
@@ -362,6 +396,7 @@ export default function SettingsTab() {
     try {
       const res = await fetch('/api/seranking/test');
       const json = await res.json();
+      markConn('seranking', json);
       setSeRankingStatus(
         json.ok
           ? `Connected: ${json.sites.map((s: any) => `${s.title} (${s.keywordCount} keywords)`).join(', ')}. ${json.unitsLeft}/${json.unitsLimit} units left.`
@@ -426,9 +461,10 @@ export default function SettingsTab() {
     try {
       const res = await fetch('/api/serphouse/test');
       const json = await res.json();
+      markConn('serphouse', json);
       setSerphouseStatus(
         json.ok
-          ? `Connected. Sample check "virtual cfo services": ${json.sample.position ? `position ${json.sample.position}` : 'not in top results'}.`
+          ? 'Connected. API key is valid. Use "Check ranking" below for a live lookup (can take up to a minute).'
           : `Failed: ${json.error}`
       );
     } catch (err: any) {
@@ -457,6 +493,7 @@ export default function SettingsTab() {
     try {
       const res = await fetch('/api/surfer/test');
       const json = await res.json();
+      markConn('surfer', json);
       setSurferStatus(
         json.ok
           ? `Connected: workspace "${json.workspaces[0]?.name}" (${json.workspaces[0]?.location}).`
@@ -496,6 +533,7 @@ export default function SettingsTab() {
         <ConnCard
           icon={Globe}
           title="WordPress connection"
+          badge={<ConnBadge state={conn.wordpress} />}
           description={
             <>
               Configured via the .env file on the server (WORDPRESS_SITE_URL, WORDPRESS_USERNAME,
@@ -517,6 +555,7 @@ export default function SettingsTab() {
           icon={Search}
           className="xl:col-span-2"
           title="Google Search Console connection"
+          badge={<ConnBadge state={conn.gsc} />}
           description={
             <>
               Read-only, via a service account (GOOGLE_SERVICE_ACCOUNT_KEY_PATH and GSC_SITE_URL in
@@ -608,6 +647,7 @@ export default function SettingsTab() {
         <ConnCard
           icon={Building2}
           title="Google Business Profile"
+          badge={<ConnBadge state={conn.gbp} />}
           description={
             <>
               Needs a one-time consent from whoever manages the Business Profile listing. Click
@@ -630,6 +670,7 @@ export default function SettingsTab() {
           icon={Spline}
           className="xl:col-span-2"
           title="Zoho CRM"
+          badge={<ConnBadge state={conn.zoho} />}
           description={
             <>
               Lead → consult → signed deal tracking (India data center). Needs a one-time consent
@@ -741,6 +782,7 @@ export default function SettingsTab() {
         <ConnCard
           icon={Search}
           title="SE Ranking"
+          badge={<ConnBadge state={conn.seranking} />}
           description={
             <>
               Daily keyword rank tracking, via SERANKING_API_KEY in .env. Uses the existing
@@ -797,6 +839,7 @@ export default function SettingsTab() {
         <ConnCard
           icon={Wand2}
           title="Surfer SEO (content terms)"
+          badge={<ConnBadge state={conn.surfer} />}
           description={
             <>
               Fetches the terms/keywords Surfer recommends including for a topic, via
@@ -849,6 +892,7 @@ export default function SettingsTab() {
         <ConnCard
           icon={Search}
           title="SERPHouse (ad-hoc rank check)"
+          badge={<ConnBadge state={conn.serphouse} />}
           description={
             <>
               On-demand &quot;where do we rank for X right now&quot; lookup, via SERPHOUSE_API_KEY in .env.

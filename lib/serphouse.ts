@@ -49,4 +49,16 @@ async function checkRanking(keyword, siteDomain) {
   };
 }
 
-export { liveSearch, checkRanking };
+// Fast "is the API key valid?" check against the account endpoint.
+async function accountInfo() {
+  const res = await fetch('https://api.serphouse.com/account/info', {
+    headers: { Authorization: `Bearer ${getKey()}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  const json: any = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) throw new Error('SERPHouse rejected the API key. Check SERPHOUSE_API_KEY.');
+  if (!res.ok) throw new Error(`SERPHouse API error (${res.status}): ${json.msg || JSON.stringify(json).slice(0, 200)}`);
+  return json.results || json;
+}
+
+export { liveSearch, checkRanking, accountInfo };
