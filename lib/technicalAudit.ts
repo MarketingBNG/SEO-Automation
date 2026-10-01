@@ -4,8 +4,10 @@ import * as XLSX from 'xlsx';
 // Parses a Screaming Frog CSV export (works with the standard "Internal All" export, and is
 // tolerant of other Screaming Frog report exports - it just uses whichever of these columns
 // are actually present). Column names match Screaming Frog's default export headers.
-function parseScreamingFrogCsv(filePath) {
-  const workbook = XLSX.readFile(filePath);
+// Takes the uploaded file's bytes. (XLSX.readFile cannot reach the filesystem in the ESM build,
+// which made every upload fail with "Cannot access file /tmp/...".)
+function parseScreamingFrogCsv(data: Buffer | Uint8Array) {
+  const workbook = XLSX.read(data, { type: 'buffer' });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
 

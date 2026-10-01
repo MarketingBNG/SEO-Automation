@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import prisma from '@/lib/prisma';
 import { parseScreamingFrogCsv } from '@/lib/technicalAudit';
 import * as activity from '@/lib/activity';
@@ -16,17 +13,9 @@ export async function POST(req: NextRequest) {
     const file = form.get('file');
     if (!file || typeof file === 'string') return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
 
-    // PORT NOTE: lib/technicalAudit's parseScreamingFrogCsv reads from a file path (as formidable
-    // provided). The upload is written to the OS temp dir (writable on Vercel) and removed after.
+    // Parse straight from memory; no temp file needed.
     const buf = Buffer.from(await file.arrayBuffer());
-    const tmp = path.join(os.tmpdir(), `sf-${Date.now()}-${Math.random().toString(36).slice(2)}${path.extname(file.name || '')}`);
-    fs.writeFileSync(tmp, buf);
-    let result: any;
-    try {
-      result = await parseScreamingFrogCsv(tmp);
-    } finally {
-      fs.unlink(tmp, () => {});
-    }
+    const result: any = parseScreamingFrogCsv(buf);
 
     const created = await prisma.technical_crawls.create({
       data: {
