@@ -1,0 +1,247 @@
+// Ported 1:1 from the original lib/db.js (SQLite). Table and column names are kept exactly as
+// they were (snake_case), and JSON / timestamp columns stay TEXT in the same
+// 'YYYY-MM-DD HH:MM:SS' UTC format SQLite's datetime('now') produced, so every existing read,
+// JSON.parse and string date comparison behaves identically.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model keywords {
+  id         Int      @id @default(autoincrement())
+  batch_name String?
+  keyword    String
+  notes      String?
+  status     String   @default("pending")
+  error      String?
+  created_at String   @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  drafts     drafts[]
+
+  @@index([status])
+}
+
+model drafts {
+  id                  Int            @id @default(autoincrement())
+  keyword_id          Int
+  title               String?
+  meta_description    String?
+  content_html        String?
+  research_notes      String?
+  // READY_FOR_REVIEW | NEEDS_ATTENTION (set by the automated pipeline)
+  production_state    String?
+  repair_attempts     Int            @default(0)
+  validation_issues   String? // JSON array
+  word_count          Int?
+  // in_progress | pending_review | approved | rejected | published
+  status              String         @default("in_progress")
+  featured_image_path String?
+  wp_post_id          Int?
+  wp_post_url         String?
+  created_at          String         @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  updated_at          String         @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  target_wp_post_id   Int?
+  validation_warnings String? // JSON
+  people_also_ask     String? // JSON
+  keyword_plan        String? // JSON
+  keyword             keywords       @relation(fields: [keyword_id], references: [id])
+  facts               facts[]
+  draft_images        draft_images[]
+}
+
+model facts {
+  id             Int     @id @default(autoincrement())
+  draft_id       Int
+  fact_id        String?
+  claim          String
+  source_name    String?
+  source_url     String?
+  jurisdiction   String?
+  effective_date String?
+  applicability  String?
+  exceptions     String?
+  // verified | needs_verify
+  status         String  @default("needs_verify")
+  reviewer       String?
+  review_date    String?
+  created_at     String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  draft          drafts  @relation(fields: [draft_id], references: [id])
+
+  @@index([draft_id])
+}
+
+model settings {
+  key   String @id
+  value String
+}
+
+model training_examples {
+  id           Int     @id @default(autoincrement())
+  title        String?
+  content_html String
+  notes        String?
+  created_at   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+model activity_log {
+  id          Int     @id @default(autoincrement())
+  action      String
+  entity_type String?
+  entity_id   Int?
+  details     String?
+  actor       String  @default("system")
+  created_at  String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+model research_digests {
+  id         Int     @id @default(autoincrement())
+  topic      String?
+  summary    String
+  sources    String? // JSON
+  status     String  @default("pending_approval")
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  decided_at String?
+}
+
+model client_insights {
+  id            Int     @id @default(autoincrement())
+  transcript_id String?
+  title         String?
+  meeting_date  String?
+  overview      String?
+  action_items  String?
+  keywords      String? // JSON
+  status        String  @default("pending_review")
+  created_at    String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  decided_at    String?
+}
+
+model blog_audits {
+  id                      Int     @id @default(autoincrement())
+  title                   String?
+  source_url              String?
+  content_html            String?
+  verdict                 String?
+  summary                 String?
+  issues                  String? // JSON
+  suggestions             String? // JSON
+  facts                   String? // JSON
+  word_count              Int?
+  wp_post_id              Int?
+  wp_post_url             String?
+  rewrite_title           String?
+  rewrite_content_html    String?
+  rewrite_status          String?
+  created_at              String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  rewrite_meta            String? // JSON
+  people_also_ask         String? // JSON
+  rewrite_people_also_ask String? // JSON
+}
+
+model image_library {
+  id           Int            @id @default(autoincrement())
+  filename     String?
+  // Storage key (Vercel Blob pathname) of the full-size original; was a local file path.
+  path         String
+  notes        String?
+  created_at   String         @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  model_path   String?
+  mime_type    String?
+  width        Int?
+  height       Int?
+  draft_images draft_images[]
+}
+
+model draft_images {
+  id          Int           @id @default(autoincrement())
+  draft_id    Int
+  image_id    Int
+  is_featured Int           @default(0)
+  created_at  String        @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  draft       drafts        @relation(fields: [draft_id], references: [id])
+  image       image_library @relation(fields: [image_id], references: [id])
+}
+
+model seo_strategies {
+  id                        Int     @id @default(autoincrement())
+  period                    String?
+  summary                   String?
+  keyword_priorities        String? // JSON
+  content_recommendations   String? // JSON
+  technical_recommendations String? // JSON
+  competitor_notes          String?
+  data_snapshot             String? // JSON
+  status                    String  @default("pending_review")
+  created_at                String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  decided_at                String?
+  report_json               String? // JSON
+}
+
+model writing_skills {
+  id                    Int     @id @default(autoincrement())
+  skill_content         String
+  research_summary      String?
+  sources               String? // JSON
+  own_performance_notes String?
+  status                String  @default("active")
+  created_at            String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+model technical_crawls {
+  id                    Int     @id @default(autoincrement())
+  filename              String?
+  total_urls            Int?
+  broken_count          Int?
+  missing_title_count   Int?
+  duplicate_title_count Int?
+  missing_meta_count    Int?
+  thin_content_count    Int?
+  problem_urls          String? // JSON
+  created_at            String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+model assistant_conversations {
+  id         Int     @id @default(autoincrement())
+  title      String?
+  messages   String  @default("[]") // JSON, append-only Anthropic history
+  pending    String? // JSON
+  status     String  @default("idle")
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  updated_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+model site_changes {
+  id              Int     @id @default(autoincrement())
+  conversation_id Int?
+  tool            String
+  summary         String?
+  target_type     String?
+  target_id       String?
+  undo            String? // JSON
+  status          String  @default("applied")
+  created_at      String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  undone_at       String?
+}
+
+model paa_questions {
+  id           Int     @id @default(autoincrement())
+  question_key String  @unique
+  question     String
+  keyword      String?
+  markets      String?
+  times_seen   Int     @default(1)
+  first_seen   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  last_seen    String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+// New: replaces secrets/zoho-tokens.json and secrets/gbp-tokens.json (Vercel has no writable disk).
+// provider = 'zoho' | 'gbp'; data = the exact JSON object that used to be written to the file.
+model oauth_tokens {
+  provider   String @id
+  data       String
+  updated_at String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
