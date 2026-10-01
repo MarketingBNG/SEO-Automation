@@ -251,6 +251,12 @@ async function sendMessage({ conversationId, text, imageIds = [] }, emit, signal
   let conv = conversationId ? await loadConversation(conversationId) : null;
   if (conversationId && !conv) throw new Error('Conversation not found');
   if (conv && conv.status === 'running') throw new Error('The assistant is still working on the previous message. Stop it first.');
+  if (conv) {
+    // Claim the conversation atomically so two quick sends cannot both run.
+    const claim = await prisma.assistant_conversations.updateMany({ where: { id: conv.id, status: { not: 'running' } }, data: { status: 'running' } });
+    if (claim.count !== 1) throw new Error('The assistant is still working on the previous message. Stop it first.');
+    conv.status = 'running';
+  }
   if (!conv) conv = await createConversation((text || 'New conversation').slice(0, 70));
   emit({ type: 'conversation', id: conv.id, title: conv.title });
 
@@ -282,6 +288,10 @@ async function decide({ conversationId, decisions }, emit, signal) {
   const conv = await loadConversation(conversationId);
   if (!conv) throw new Error('Conversation not found');
   if (conv.status !== 'awaiting_approval' || !conv.pending) throw new Error('Nothing is waiting for approval in this conversation.');
+
+  // Claim the pending batch atomically so a double-click on Approve cannot run the writes twice.
+  const claim = await prisma.assistant_conversations.updateMany({ where: { id: conv.id, status: 'awaiting_approval' }, data: { status: 'running' } });
+  if (claim.count !== 1) throw new Error('Nothing is waiting for approval in this conversation.');
 
   const { readResults, actions } = conv.pending;
   conv.pending = null;

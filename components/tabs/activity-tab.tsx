@@ -12,9 +12,14 @@ export default function ActivityTab() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch('/api/activity/list');
-    setEvents(await res.json());
-    setLoading(false);
+    try {
+      const j = await fetch('/api/activity/list').then((r) => r.json());
+      setEvents(Array.isArray(j) ? j : []);
+    } catch {
+      setEvents([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

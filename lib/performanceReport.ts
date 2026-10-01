@@ -304,7 +304,7 @@ async function gatherPerformance(days = 28) {
       kpi('Visits from AI assistants', aiNow, aiBefore, { note: 'ChatGPT, Gemini, Claude, Perplexity, Copilot (GA4)' }),
       kpi('Conversions from AI visits', aiConvNow, aiConvBefore),
       kpi('Brand-name searches (clicks)', brandNow, brandBefore, { note: 'People who search for USAIndiaCFO after seeing it mentioned' }),
-      kpi('Posts updated in the last 90 days', stats?.fresh90 ?? 0, stats?.fresh90 ?? 0, { note: stats ? `${stats.fresh90Pct}% of posts. AI answers favour recently updated pages` : 'WordPress not reachable' }),
+      kpi('Posts updated in the last 90 days', stats?.fresh90 ?? 0, stats?.fresh90 ?? 0, { note: stats ? `${stats.fresh90Pct ?? 0}% of posts. AI answers favour recently updated pages` : 'WordPress not reachable' }),
       kpi('AI Overviews that cite us', overview?.citingUs ?? 0, overview?.citingUs ?? 0, { note: overview ? `of ${overview.withAiOverview} with an AI Overview, ${overview.checked} keywords checked ${String(overview.checkedAt).slice(0, 10)}` : 'Generate a strategy to run this check' }),
     ],
     series: {

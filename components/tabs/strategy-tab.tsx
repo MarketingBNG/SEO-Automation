@@ -577,7 +577,7 @@ export default function StrategyTab({ active: isVisible = true }: { active?: boo
 
   const load = useCallback(async () => {
     const [list, dueInfo] = await Promise.all([
-      fetch('/api/strategy').then((r) => r.json()),
+      fetch('/api/strategy').then((r) => (r.ok ? r.json() : [])).catch(() => []),
       fetchDueInfo(),
     ]);
     setStrategies(Array.isArray(list) ? list : []);

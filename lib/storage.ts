@@ -1,5 +1,16 @@
 import path from 'path';
+import { promises as fs } from 'fs';
 import { put, get, del } from '@vercel/blob';
+
+// Self-hosted (Coolify/Docker): when BLOB_READ_WRITE_TOKEN is not set, files live on local disk under
+// UPLOADS_DIR (default ./uploads). Mount that folder as a persistent volume so files survive redeploys.
+const blobEnabled = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+const DISK_ROOT = () => path.resolve(process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads'));
+function diskPath(key: string): string | null {
+  const root = DISK_ROOT();
+  const p = path.resolve(root, key);
+  return p.startsWith(root + path.sep) ? p : null;
+}
 
 // Replaces the local uploads/ folder (Vercel has no persistent disk). Files are private blobs under
 // the same relative keys the old folder used: 'photo.jpg' (featured images) and
@@ -32,6 +43,13 @@ export function toKey(stored: string | null | undefined): string | null {
 }
 
 export async function saveFile(key: string, data: Buffer | Uint8Array, contentType?: string): Promise<string> {
+  if (!blobEnabled()) {
+    const p = diskPath(key);
+    if (!p) throw new Error('Invalid file key');
+    await fs.mkdir(path.dirname(p), { recursive: true });
+    await fs.writeFile(p, Buffer.from(data));
+    return key;
+  }
   await put(PREFIX + key, Buffer.from(data), {
     access: 'private',
     contentType: contentType || mimeFor(key),
@@ -44,9 +62,23 @@ export async function saveFile(key: string, data: Buffer | Uint8Array, contentTy
 export async function readFile(stored: string | null | undefined): Promise<Buffer | null> {
   const key = toKey(stored);
   if (!key) return null;
-  const res = await get(PREFIX + key, { access: 'private' });
-  if (!res || !res.stream) return null;
-  return Buffer.from(await new Response(res.stream).arrayBuffer());
+  if (!blobEnabled()) {
+    const p = diskPath(key);
+    if (!p) return null;
+    try {
+      return await fs.readFile(p);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const res = await get(PREFIX + key, { access: 'private' });
+    if (!res || !res.stream) return null;
+    return Buffer.from(await new Response(res.stream).arrayBuffer());
+  } catch {
+    // A missing blob is "not found", not a server error.
+    return null;
+  }
 }
 
 export async function fileExists(stored: string | null | undefined): Promise<boolean> {
@@ -56,6 +88,11 @@ export async function fileExists(stored: string | null | undefined): Promise<boo
 export async function deleteFile(stored: string | null | undefined): Promise<void> {
   const key = toKey(stored);
   if (!key) return;
+  if (!blobEnabled()) {
+    const p = diskPath(key);
+    if (p) await fs.unlink(p).catch(() => {});
+    return;
+  }
   try {
     await del(PREFIX + key);
   } catch {

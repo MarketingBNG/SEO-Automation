@@ -26,8 +26,8 @@ export default function KeywordsTab() {
   const [addingKeywords, setAddingKeywords] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetch('/api/keywords/list');
-    setKeywords(await res.json());
+    const j = await fetch('/api/keywords/list').then((r) => r.json()).catch(() => null);
+    setKeywords(Array.isArray(j) ? j : []);
   }, []);
 
   useEffect(() => {

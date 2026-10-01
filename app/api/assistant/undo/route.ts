@@ -17,9 +17,12 @@ export async function POST(req: NextRequest) {
   if (change.status === 'undone') return NextResponse.json({ error: 'This change was already undone' }, { status: 400 });
   if (!change.undo) return NextResponse.json({ error: 'This change cannot be undone automatically' }, { status: 400 });
 
+  // Claim first so two clicks cannot undo the same change twice.
+  const claim = await prisma.site_changes.updateMany({ where: { id: change.id, status: { not: 'undone' } }, data: { status: 'undone', undone_at: sqlNow() } });
+  if (claim.count !== 1) return NextResponse.json({ error: 'This change was already undone' }, { status: 400 });
+
   try {
     const message = await undoChange(JSON.parse(change.undo), { force: Boolean(force) });
-    await prisma.site_changes.update({ where: { id: change.id }, data: { status: 'undone', undone_at: sqlNow() } });
     await activity.log('assistant.site_change_undone', {
       entityType: change.target_type || 'site',
       entityId: Number(change.target_id) || null,
@@ -28,6 +31,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ ok: true, message }, { status: 200 });
   } catch (err: any) {
+    await prisma.site_changes.update({ where: { id: change.id }, data: { status: change.status, undone_at: change.undone_at } }).catch(() => {});
     return NextResponse.json({ error: err.message, code: err.code || null }, { status: err.code === 'CHANGED_SINCE' ? 409 : 500 });
   }
 }

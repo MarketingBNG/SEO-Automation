@@ -31,7 +31,11 @@ export async function POST(req: NextRequest) {
   if (keywordId) {
     const n = Number(keywordId);
     keyword = Number.isSafeInteger(n) ? await prisma.keywords.findUnique({ where: { id: n } }) : null;
-    if (keyword) await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'generating' } });
+    if (keyword) {
+      // Atomic claim: a keyword already being generated (another tab, double-click) is not started twice.
+      const r = await prisma.keywords.updateMany({ where: { id: keyword.id, status: { not: 'generating' } }, data: { status: 'generating' } });
+      if (r.count !== 1) return NextResponse.json({ error: 'This keyword is already being generated' }, { status: 409 });
+    }
   } else {
     keyword = await claimNextPending();
   }

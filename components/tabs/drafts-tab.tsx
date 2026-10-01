@@ -23,8 +23,8 @@ export default function DraftsTab() {
   const [analyticsPost, setAnalyticsPost] = useState<any>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch('/api/drafts/list');
-    setDrafts(await res.json());
+    const j = await fetch('/api/drafts/list').then((r) => r.json()).catch(() => null);
+    setDrafts(Array.isArray(j) ? j : []);
   }, []);
 
   useEffect(() => {
@@ -126,7 +126,11 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   // the Title / Meta / Content boxes, so marking a fact or uploading a creative never drops edits.
   const loadDraft = useCallback(async (resetFields = true) => {
     const res = await fetch(`/api/drafts/${draftId}`);
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.error) {
+      setMessage(json.error || 'Draft not found');
+      return;
+    }
     setDraft(json);
     if (resetFields) {
       setTitle(json.title || '');

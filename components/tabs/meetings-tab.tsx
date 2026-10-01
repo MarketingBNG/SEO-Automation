@@ -21,8 +21,8 @@ export default function MeetingsTab() {
   const [insights, setInsights] = useState<any[]>([]);
 
   const loadInsights = useCallback(async () => {
-    const res = await fetch('/api/client-insights');
-    setInsights(await res.json());
+    const j = await fetch('/api/client-insights').then((r) => r.json()).catch(() => null);
+    setInsights(Array.isArray(j) ? j : []);
   }, []);
 
   useEffect(() => {

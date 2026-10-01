@@ -274,8 +274,8 @@ export default function AuditTab() {
   const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetch('/api/audit');
-    setAudits(await res.json());
+    const j = await fetch('/api/audit').then((r) => r.json()).catch(() => null);
+    setAudits(Array.isArray(j) ? j : []);
   }, []);
 
   async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {

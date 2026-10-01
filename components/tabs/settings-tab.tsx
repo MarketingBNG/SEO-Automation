@@ -87,8 +87,12 @@ function YoastFieldsCard() {
 
   async function check() {
     setState({ checking: true });
-    const res = await fetch('/api/wordpress/yoast-status');
-    setState(await res.json());
+    try {
+      const res = await fetch('/api/wordpress/yoast-status');
+      setState(await res.json());
+    } catch (e: any) {
+      setState({ error: e.message });
+    }
   }
 
   useEffect(() => {

@@ -17,7 +17,10 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+  // Behind Coolify's HTTPS proxy NextAuth sets the __Secure- cookie; tell getToken to look for it.
+  const secureCookie =
+    (process.env.NEXTAUTH_URL || '').startsWith('https://') || req.headers.get('x-forwarded-proto') === 'https';
+  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET, secureCookie });
   if (token) return NextResponse.next();
 
   if (pathname.startsWith('/api/')) {
@@ -30,5 +33,6 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\.(?:png|jpg|jpeg|svg|ico|webp)$).*)'],
+  // Static image files are public, but /api/... (e.g. /api/uploads/x.png) always needs sign-in.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|(?!api/).*\.(?:png|jpg|jpeg|svg|ico|webp)$).*)'],
 };

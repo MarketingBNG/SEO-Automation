@@ -3,11 +3,12 @@ import { exchangeCodeForTokens } from '@/lib/gbpAuth';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { escapeHtml } from '../../_lib/http';
+import { stateIsValid, clearStateCookie } from '../../_lib/oauthState';
 
 export const runtime = 'nodejs';
 
 const html = (body: string, status: number) =>
-  new Response(body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  new Response(body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': clearStateCookie } });
 
 // Old handler accepted any method.
 async function handler(req: NextRequest) {
@@ -20,6 +21,10 @@ async function handler(req: NextRequest) {
 
   if (!code) {
     return html('Missing authorization code.', 400);
+  }
+
+  if (!stateIsValid(req)) {
+    return html('<h2>Connection failed</h2><p>The sign-in link expired or was not started from this dashboard. Go back to Settings and click Connect again.</p>', 400);
   }
 
   try {
