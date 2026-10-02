@@ -3,7 +3,7 @@ import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
-import { parseStrategyRow } from '@/lib/strategyPlanner';
+import { parseStrategyRow, pickBrief } from '@/lib/strategyPlanner';
 import { methodNotAllowed, toId } from '../../_lib/http';
 
 export const runtime = 'nodejs';
@@ -46,11 +46,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if ((status ?? null) !== null) data.decided_at = sqlNow();
   if (Object.keys(data).length) await prisma.seo_strategies.update({ where: { id: nid }, data });
 
+  // Approving a strategy queues its new-article picks into the blog pipeline automatically, each with
+  // its brief. Drafts are still only written when someone clicks "Generate next blog draft", and every
+  // draft still needs review in Drafts & Review before it is published.
+  let queued = 0;
+  if (status === 'approved' && existing.report_json) {
+    const fresh: any = await prisma.seo_strategies.findUnique({ where: { id: nid } });
+    const report = JSON.parse(fresh.report_json);
+    for (const pick of report.picks || []) {
+      if (pick.action !== 'new' || !pick.keyword || pick.status?.keywordId) continue;
+      const found: any[] = await prisma.$queryRaw`SELECT id FROM keywords WHERE lower(keyword) = lower(${pick.keyword}) AND status IN ('pending', 'generating', 'drafted') LIMIT 1`;
+      const keywordId = found[0]
+        ? Number(found[0].id)
+        : (
+            await prisma.keywords.create({
+              data: { batch_name: `Strategy ${existing.period}`, keyword: pick.keyword, notes: await pickBrief(pick, existing.period), status: 'pending' },
+            })
+          ).id;
+      pick.status = { ...pick.status, keywordId };
+      queued++;
+    }
+    if (queued) await prisma.seo_strategies.update({ where: { id: nid }, data: { report_json: JSON.stringify(report) } });
+  }
+
   if (status) {
     await activity.log(`strategy.${status}`, {
       entityType: 'seo_strategy',
       entityId: Number(id),
-      details: existing.period,
+      details: queued ? `${existing.period}; ${queued} new article(s) queued in Keywords` : existing.period,
       actor: await getActor(),
     });
   }
