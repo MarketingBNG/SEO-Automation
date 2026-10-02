@@ -80,4 +80,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   return NextResponse.json(parseStrategyRow(await prisma.seo_strategies.findUnique({ where: { id: nid } })), { status: 200 });
 }
-export { methodNotAllowed as GET, methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as DELETE };
+// Deletes a strategy (any status, including approved) so a fresh one can be generated for the month.
+// Keywords it queued that have not been written yet are removed too; drafts already written are kept.
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const nid = toId(id);
+  const existing: any = await prisma.seo_strategies.findUnique({ where: { id: nid } });
+  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (existing.status === 'generating') return NextResponse.json({ error: 'This strategy is still being generated.' }, { status: 409 });
+
+  const report = existing.report_json ? JSON.parse(existing.report_json) : {};
+  const keywordIds = [...(report.picks || []), ...(report.quickEdits || []), ...(report.nextInLine || [])]
+    .map((p: any) => p?.status?.keywordId)
+    .filter((k: any) => Number.isInteger(k));
+  const removed = keywordIds.length
+    ? await prisma.keywords.deleteMany({ where: { id: { in: keywordIds }, status: 'pending' } })
+    : { count: 0 };
+  await prisma.seo_strategies.delete({ where: { id: nid } });
+
+  await activity.log('strategy.deleted', {
+    entityType: 'seo_strategy',
+    entityId: nid,
+    details: `${existing.period} (${existing.status}); ${removed.count} unwritten keyword(s) removed`,
+    actor: await getActor(),
+  });
+  return NextResponse.json({ ok: true, removedKeywords: removed.count }, { status: 200 });
+}
+export { methodNotAllowed as GET, methodNotAllowed as POST, methodNotAllowed as PUT };

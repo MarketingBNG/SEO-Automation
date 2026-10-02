@@ -714,6 +714,24 @@ export default function StrategyTab({ active: isVisible = true }: { active?: boo
     }
   }
 
+  async function deleteStrategy() {
+    if (!window.confirm(`Delete the ${editing.period} strategy${editing.status === 'approved' ? ' (currently approved)' : ''}? Keywords it added that are not written yet will be removed too. Drafts already written are kept.`)) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/strategy/${editing.id}`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      setEditing(null);
+      setMessage(`Strategy deleted${json.removedKeywords ? `, ${json.removedKeywords} unwritten keyword(s) removed` : ''}. You can generate a new one now.`);
+      await load();
+      fetchDueInfo().then((info) => info && setDue(info));
+    } catch (err: any) {
+      setMessage('Error: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function updateListField(field: string, index: number, value: string) {
     setEditing((prev: any) => {
       const next = [...prev[field]];
@@ -892,6 +910,9 @@ export default function StrategyTab({ active: isVisible = true }: { active?: boo
                   </Button>
                 </>
               )}
+              <Button variant="outline" className="text-red-600 dark:text-red-400" onClick={deleteStrategy} disabled={saving}>
+                Delete strategy
+              </Button>
             </div>
 
             {Object.keys(editing.data_snapshot || {}).some((k) => k.endsWith('Error')) && (
