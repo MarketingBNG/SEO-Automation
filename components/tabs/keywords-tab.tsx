@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { DataTable, NativeSelect, TD, TD_MUTED } from '@/components/shared/content-ui';
+import { StrategyPlanCard } from '@/components/shared/strategy-plan-card';
 
 export default function KeywordsTab() {
   const [keywords, setKeywords] = useState<any[]>([]);
@@ -156,6 +157,8 @@ export default function KeywordsTab() {
 
   return (
     <div className="space-y-4">
+      <StrategyPlanCard onQueued={load} />
+
       <Card>
         <CardHeader>
           <CardTitle>Keyword research (SE Ranking)</CardTitle>
@@ -268,7 +271,7 @@ export default function KeywordsTab() {
             ))}
             {keywords.length === 0 && (
               <tr>
-                <td colSpan={4} className={TD_MUTED}>No keywords yet. Upload a file above.</td>
+                <td colSpan={4} className={TD_MUTED}>No keywords yet. Add them from the strategy plan or keyword research above.</td>
               </tr>
             )}
           </DataTable>
