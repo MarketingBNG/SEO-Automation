@@ -6,8 +6,31 @@ function getApiKey() {
   return key;
 }
 
+// SE Ranking allows 1 request per second per key. Every call goes through this queue so requests are
+// spaced out (even when several run at once), and a 429 is retried once after a short wait.
+const MIN_GAP_MS = 1100;
+let queue: Promise<unknown> = Promise.resolve();
+let lastAt = 0;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function throttledFetch(url: string, init: any = {}): Promise<Response> {
+  const run = async () => {
+    for (let attempt = 0; ; attempt++) {
+      const wait = lastAt + MIN_GAP_MS - Date.now();
+      if (wait > 0) await sleep(wait);
+      lastAt = Date.now();
+      const res = await fetch(url, init);
+      if (res.status !== 429 || attempt >= 2) return res;
+      await sleep(1500 * (attempt + 1));
+    }
+  };
+  const p = queue.then(run, run);
+  queue = p.catch(() => {});
+  return p;
+}
+
 async function get(path, { signal }: any = {}) {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await throttledFetch(`${BASE_URL}${path}`, {
     headers: { Authorization: `Token ${getApiKey()}` },
     signal,
   });
@@ -70,7 +93,7 @@ async function researchKeywords(type, seed, { source = 'us', limit = 30 }: any =
   url.searchParams.set('keyword', seed);
   url.searchParams.set('limit', String(limit));
 
-  const res = await fetch(url.toString(), {
+  const res = await throttledFetch(url.toString(), {
     headers: { Authorization: `Token ${getApiKey()}` },
   });
   const json = await res.json();
