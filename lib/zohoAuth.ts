@@ -9,6 +9,8 @@ const SCOPES = [
   'ZohoCRM.modules.contacts.READ',
   'ZohoCRM.modules.deals.READ',
   'ZohoCRM.settings.ALL',
+  // The connection test reads /crm/v2/org.
+  'ZohoCRM.org.READ',
 ].join(',');
 
 function getConfig() {
