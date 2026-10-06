@@ -27,7 +27,7 @@ async function main() {
   const { validatePlan } = await import('../lib/strategy/core');
   const { runDaily } = await import('../lib/strategy/autopilot');
 
-  for (const t of ['blog_schedule', 'backlink_tasks', 'strategy_edits', 'strategy_changes', 'strategy_keywords', 'client_insights', 'ai_usage', 'technical_crawls', 'seo_strategies', 'facts', 'drafts', 'keywords', 'activity_log']) {
+  for (const t of ['technical_fix_tasks', 'blog_schedule', 'backlink_tasks', 'strategy_edits', 'strategy_changes', 'strategy_keywords', 'client_insights', 'ai_usage', 'technical_crawls', 'seo_strategies', 'facts', 'drafts', 'keywords', 'activity_log']) {
     await prisma.$executeRawUnsafe(`DELETE FROM "${t}"`);
   }
   await prisma.settings.upsert({ where: { key: 'focus_services' }, create: { key: 'focus_services', value: 'US tax;India entity setup' }, update: { value: 'US tax;India entity setup' } });
@@ -110,6 +110,9 @@ async function main() {
   assert.equal(view.approved_version, 5);
   assert.equal(await prisma.blog_schedule.count(), 4);
   assert.equal(await prisma.backlink_tasks.count(), 1);
+  const fixes = await prisma.technical_fix_tasks.findMany();
+  assert.ok(fixes.length >= 1 && fixes.every((f) => f.status === 'planned'), 'ticked technical fixes are queued on approval');
+  console.log(`PASS approval queued ${fixes.length} technical fix(es) for automatic apply`);
   assert.equal(await prisma.strategy_keywords.count(), 4);
   await assert.rejects(service.editSection(row.id, 'targets', plan.targets, 'Reviewer A'), /Say why/);
   view = await service.logStrategyChange(row.id, { what: 'Swap blog 2', why: 'New IRS notice' }, 'Reviewer B');

@@ -12,7 +12,7 @@ import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
 // Strategy section (v2): one monthly SEO / AEO / GEO strategy in 11 fixed sections, one approval,
 // then the month runs automatically. All UI text avoids em dashes by design.
 
-type Col = { key: string; label: string; edit?: 'text' | 'number' | 'tags'; render?: (row: any) => ReactNode };
+type Col = { key: string; label: string; edit?: 'text' | 'number' | 'tags' | 'check'; render?: (row: any) => ReactNode };
 
 const CHANNELS = ['SEO', 'AEO', 'GEO'];
 
@@ -51,6 +51,11 @@ function Section({ title, description, children }: { title: ReactNode; descripti
   );
 }
 
+// Mirrors lib/strategy/fixer.ts fixKind: what the automatic fixer will do with each issue.
+const fixKindOf = (issue: string) =>
+  /^Broken link to /i.test(issue || '') ? 'broken_link' : /\b4\d\d status code/i.test(issue || '') ? 'redirect' : /missing title|duplicate title/i.test(issue || '') ? 'title' : /meta description/i.test(issue || '') ? 'meta' : /thin content/i.test(issue || '') ? 'thin' : 'manual';
+const FIX_LABEL: Record<string, string> = { broken_link: 'Yes', redirect: 'Yes (Redirection plugin)', title: 'Yes', meta: 'Yes', thin: 'Yes (adds FAQ)', manual: 'Needs a developer' };
+
 // A table that becomes editable in Edit mode. Cells with `edit` get an input.
 function EditTable({ rows: rowsIn, cols, editing, onChange, empty }: { rows: any[]; cols: Col[]; editing: boolean; onChange: (rows: any[]) => void; empty?: string }) {
   const rows = rowsIn || [];
@@ -66,7 +71,9 @@ function EditTable({ rows: rowsIn, cols, editing, onChange, empty }: { rows: any
         <tr key={i}>
           {cols.map((c) => (
             <td key={c.key} className={TD}>
-              {editing && c.edit === 'tags' ? (
+              {editing && c.edit === 'check' ? (
+                <input type="checkbox" checked={r[c.key] !== false} onChange={(e) => set(i, c.key, e.target.checked)} />
+              ) : editing && c.edit === 'tags' ? (
                 <span className="flex gap-2">
                   {CHANNELS.map((ch) => (
                     <label key={ch} className="flex items-center gap-1 text-xs">
@@ -436,8 +443,8 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
       </Section>
 
       {/* 8 */}
-      <Section title="8. Technical and refresh plan" description={p.technical.crawl ? `From the Screaming Frog crawl uploaded ${fmtDate(p.technical.crawl.uploadedAt)} by ${p.technical.crawl.uploadedBy || 'unknown'}.` : 'DATA MISSING: Screaming Frog crawl. Upload one to fill this section.'}>
-        <EditTable rows={p.technical.fixes} editing={editing} onChange={(v) => upd('technical', { ...p.technical, fixes: v })} cols={[{ key: 'url', label: 'URL', edit: 'text' }, { key: 'issue', label: 'Issue', edit: 'text' }, { key: 'fix', label: 'Fix', edit: 'text' }, { key: 'tags', label: 'Tag', edit: 'tags' }]} empty="No crawl fixes." />
+      <Section title="8. Technical and refresh plan" description={`${p.technical.crawl ? `From the Screaming Frog crawl uploaded ${fmtDate(p.technical.crawl.uploadedAt)} by ${p.technical.crawl.uploadedBy || 'unknown'}.` : 'DATA MISSING: Screaming Frog crawl. Upload one to fill this section.'} Every ticked fix is applied automatically through WordPress after approval, a few per run, with the old value saved for undo. To skip a fix, click Edit and untick it.`}>
+        <EditTable rows={p.technical.fixes} editing={editing} onChange={(v) => upd('technical', { ...p.technical, fixes: v })} cols={[{ key: 'apply', label: 'Auto fix', edit: 'check', render: (r: any) => (r.apply === false ? 'Skipped' : FIX_LABEL[fixKindOf(r.issue)]) }, { key: 'url', label: 'URL', edit: 'text' }, { key: 'issue', label: 'Issue', edit: 'text' }, { key: 'fix', label: 'Fix', edit: 'text' }, { key: 'tags', label: 'Tag', edit: 'tags' }]} empty="No crawl fixes." />
         <div className="text-sm font-semibold">Refresh triggers</div>
         <EditTable rows={p.technical.refreshes} editing={editing} onChange={(v) => upd('technical', { ...p.technical, refreshes: v })} cols={[{ key: 'page', label: 'Page or keyword', edit: 'text' }, { key: 'trigger', label: 'Trigger' }, { key: 'source', label: 'Source' }, { key: 'tags', label: 'Tag', edit: 'tags' }]} empty="No page hit a refresh trigger." />
       </Section>
