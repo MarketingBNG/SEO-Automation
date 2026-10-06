@@ -233,6 +233,15 @@ async function main() {
   assert.ok(stopped.start_date && stopped.end_date, '30-day window saved');
   console.log('PASS pause holds, resume continues, stop cancels; window', stopped.start_date, 'to', stopped.end_date);
 
+  // A run the server lost (restart) is marked interrupted instead of hanging at its last percent.
+  const { markInterrupted } = await import('../lib/strategy/jobs');
+  const orphan = await prisma.seo_strategies.create({ data: { period: 'November 2026', status: 'generating', progress_stage: 'Reading SE Ranking backlinks', progress_percent: 13 } });
+  await markInterrupted();
+  const o = await prisma.seo_strategies.findUnique({ where: { id: orphan.id } });
+  assert.equal(o!.status, 'failed');
+  assert.ok(o!.error!.includes('server restarted'));
+  console.log('PASS stuck run from before a restart is marked interrupted');
+
   await prisma.$disconnect();
   console.log('ALL E2E CHECKS PASSED');
 }

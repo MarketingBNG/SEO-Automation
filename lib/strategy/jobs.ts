@@ -23,8 +23,10 @@ export function progressWriter(write: (stage: string, percent: number) => Promis
 }
 
 const ACTIVE = ['generating', 'paused', 'stopping'];
-// Runs alive in this server process, so Stop can abort them immediately.
-const running = new Map<number, AbortController>();
+// Runs alive in this server process, so Stop can abort them immediately. Kept on globalThis so
+// every route (each may load its own copy of this module) sees the same list.
+const g = globalThis as unknown as { __strategyRuns?: Map<number, AbortController> };
+const running = (g.__strategyRuns ||= new Map<number, AbortController>());
 
 const stopError = () => Object.assign(new Error('Stopped by user'), { name: 'AbortError' });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -71,6 +73,22 @@ export async function startStrategyJob({ window = strategyWindow(), actor = 'sys
   });
   run(row.id, window, actor);
   return { id: row.id, alreadyRunning: false };
+}
+
+// A 'generating' row that no run in this server is working on was cut off by a restart or
+// redeploy: mark it failed so the page says so and a new one can be started.
+export async function markInterrupted() {
+  const rows = await prisma.seo_strategies.findMany({ where: { status: { in: ['generating', 'stopping'] } }, select: { id: true, status: true } });
+  for (const r of rows) {
+    if (running.has(r.id)) continue;
+    await prisma.seo_strategies.update({
+      where: { id: r.id },
+      data:
+        r.status === 'stopping'
+          ? { status: 'stopped', progress_stage: 'Stopped' }
+          : { status: 'failed', progress_stage: 'Interrupted', error: 'This run was interrupted because the server restarted (for example a redeploy). Click Generate to start a new one.' },
+    });
+  }
 }
 
 // Pause, resume or stop a generating strategy.

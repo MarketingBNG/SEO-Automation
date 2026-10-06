@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { markInterrupted } from '@/lib/strategy/jobs';
 import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
@@ -7,6 +8,7 @@ export const runtime = 'nodejs';
 // Everything running right now, with live progress: strategy generation and blog writing.
 // Polled by the progress bar in the dashboard header.
 export async function GET() {
+  await markInterrupted();
   const [strategies, blogs] = await Promise.all([
     prisma.seo_strategies.findMany({ where: { status: { in: ['generating', 'paused', 'stopping'] } }, select: { id: true, period: true, status: true, progress_stage: true, progress_percent: true } }),
     prisma.keywords.findMany({ where: { status: 'generating' }, select: { id: true, keyword: true, progress_stage: true, progress_percent: true } }),
