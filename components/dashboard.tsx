@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
   Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, KeyRound,
-  LogOut, MessageSquareQuote, RefreshCcw, Search, Settings, Sparkles, Users,
+  LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, Sparkles, Users,
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
@@ -59,6 +59,8 @@ export default function Dashboard() {
   const initial = params.get('tab');
   const [tab, setTabState] = useState<TabKey>(isTab(initial) ? initial : 'assistant');
   const [askText, setAskText] = useState('');
+  // Bumped by the Refresh button: the open tab is mounted again, so it loads fresh data.
+  const [reloadKey, setReloadKey] = useState(0);
   const [assistantSeed, setAssistantSeed] = useState<{ text: string; nonce: number } | null>(null);
   // The strategy tab mounts on first visit and then stays mounted, so a running generation keeps
   // its progress and Stop button when you look at another tab.
@@ -144,16 +146,29 @@ export default function Dashboard() {
               />
             </div>
           </form>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            aria-label="Refresh this page"
+            title="Load the latest data on this page"
+            onClick={() => (tab === 'assistant' ? window.location.reload() : setReloadKey((k) => k + 1))}
+          >
+            <RefreshCw className="size-4" />
+            <span className="hidden md:inline">Refresh</span>
+          </Button>
           <ThemeToggle />
         </header>
         {/* Strategy and blog progress, visible from every tab. */}
-        <JobProgress onOpen={(kind) => setTab(kind === 'strategy' ? 'strategy' : kind === 'settings' ? 'settings' : 'keywords')} />
+        <JobProgress key={`jobs-${reloadKey}`} onOpen={(kind) => setTab(kind === 'strategy' ? 'strategy' : kind === 'settings' ? 'settings' : 'keywords')} />
 
         <main className="min-w-0 flex-1 p-3 sm:p-6">
           {/* Kept mounted (just hidden) so a running conversation keeps streaming while you look at other tabs. */}
           <div className={tab === 'assistant' ? 'block' : 'hidden'}>
             <AssistantTab seed={assistantSeed} />
           </div>
+          {/* Everything except the Assistant reloads when Refresh is pressed. */}
+          <div key={`tabs-${reloadKey}`} className="contents">
           {tab === 'keywords' && <KeywordsTab />}
           {tab === 'drafts' && <DraftsTab />}
           {tab === 'audit' && <AuditTab />}
@@ -170,6 +185,7 @@ export default function Dashboard() {
           {tab === 'meetings' && <MeetingsTab />}
           {tab === 'activity' && <ActivityTab />}
           {tab === 'settings' && <SettingsTab />}
+          </div>
         </main>
       </SidebarInset>
     </SidebarProvider>

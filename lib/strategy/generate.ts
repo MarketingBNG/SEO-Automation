@@ -122,6 +122,24 @@ export function calendarSlots(window: any, days: string[], timeIst: string, coun
 }
 
 // Turns the AI's choices plus real data into the stored 11-section plan.
+// What runs automatically after approval (Section 7). Kept here so an update can refresh it.
+export const AUTOMATION = [
+  { platform: 'Claude API', what: 'Writes each blog with deep research, then fact-checks and corrects it against official sources until two checks in a row are clean', when: '2 days before each slot, again when review opens and after any edit' },
+  { platform: 'Dashboard', what: 'Opens the 24-hour review window and notifies reviewers', when: '24 hours before each publish slot' },
+  { platform: 'Website CMS (WordPress)', what: 'Publishes the reviewed or auto-approved blog with FAQ schema', when: 'At each publish slot' },
+  { platform: 'Bing IndexNow', what: 'Submits each new or updated URL', when: 'Right after publishing' },
+  { platform: 'Google Search Console', what: 'Sitemap resubmitted so Google recrawls the new URL', when: 'Right after publishing' },
+  { platform: 'SE Ranking', what: 'Adds the main keyword to rank tracking; daily rank check with 5+ drop alert', when: 'After publishing; daily' },
+  { platform: 'Website CMS (WordPress)', what: 'Adds internal links from 2 to 3 older related posts', when: 'Right after publishing' },
+  { platform: 'Surfer', what: 'Content score check (75+ required)', when: 'Before each publish' },
+  { platform: 'SERPHouse', what: 'Featured snippet, PAA and AI Overview checks', when: 'Weekly plan vs actual' },
+  { platform: 'SE Ranking AI Search and AI Results Tracker', what: 'ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode mentions and links', when: 'Each strategy run and weekly plan vs actual' },
+  { platform: 'Screaming Frog', what: 'Crawl upload parsed into Section 8 fixes', when: 'On each upload (required before approval)' },
+  { platform: 'Website CMS (WordPress)', what: 'Applies the ticked Section 8 fixes (titles, meta descriptions, broken links, 301 redirects, FAQs for thin pages), saving the old value for undo', when: 'A few per run after approval' },
+  { platform: 'Smartlead', what: 'Each backlink target is added as a lead to the outreach campaign with a personalised opening line; Smartlead sends the emails and follow-ups', when: 'Daily, up to 5 leads, from each task send date' },
+  { platform: 'SE Ranking', what: 'Competitors found from Google results for our keywords; backlink gap built from them; new links verified', when: 'Each strategy run or update; daily link check' },
+];
+
 export async function buildPlan(ai, inputs, period, window = windowOf(period)) {
   ai = scrub(ai);
   const rankBy = new Map((inputs.rankings || []).map((r) => [keywordKey(r.keyword), r]));
@@ -248,19 +266,7 @@ export async function buildPlan(ai, inputs, period, window = windowOf(period)) {
     },
     aeoGeo: { items: (ai.aeoGeo?.items || []).map((x) => ({ ...x, tags: TAGS(x.tags) })) },
     backlinks,
-    automation: [
-      { platform: 'Claude API', what: 'Writes each blog with deep research, then fact-checks and corrects it against official sources until two checks in a row are clean', when: '2 days before each slot, again when review opens and after any edit' },
-      { platform: 'Dashboard', what: 'Opens the 24-hour review window and notifies reviewers', when: '24 hours before each publish slot' },
-      { platform: 'Website CMS (WordPress)', what: 'Publishes the reviewed or auto-approved blog with FAQ schema', when: 'At each publish slot' },
-      { platform: 'Bing IndexNow', what: 'Submits each new or updated URL', when: 'Right after publishing' },
-      { platform: 'Google Search Console', what: 'Sitemap resubmitted so Google recrawls the new URL', when: 'Right after publishing' },
-      { platform: 'SE Ranking', what: 'Adds the main keyword to rank tracking; daily rank check with 5+ drop alert', when: 'After publishing; daily' },
-      { platform: 'Website CMS (WordPress)', what: 'Adds internal links from 2 to 3 older related posts', when: 'Right after publishing' },
-      { platform: 'Surfer', what: 'Content score check (75+ required)', when: 'Before each publish' },
-      { platform: 'SERPHouse', what: 'Featured snippet, PAA and AI Overview checks', when: 'Weekly plan vs actual' },
-      { platform: 'SE Ranking AI Search and AI Results Tracker', what: 'ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode mentions and links', when: 'Each strategy run and weekly plan vs actual' },
-      { platform: 'Screaming Frog', what: 'Crawl upload parsed into Section 8 fixes', when: 'On each upload (required before approval)' },
-    ],
+    automation: AUTOMATION,
     technical: {
       crawl: crawl ? { uploadedAt: crawl.uploadedAt, uploadedBy: crawl.uploadedBy, totalUrls: crawl.totalUrls } : null,
       fixes: [...(crawl ? technicalFixesFromCrawl(crawl) : []), ...(ai.technical?.fixes || []).map((f) => ({ ...f, tags: TAGS(f.tags), fromAi: true }))],
