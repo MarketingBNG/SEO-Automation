@@ -196,12 +196,15 @@ source, still list it and leave source name/URL as "NONE - could not verify".>
 // batch: true sends the turn through the Message Batches API instead (50% cheaper, but it can take
 // minutes to hours to come back, and refusal fallbacks are not allowed there). Only for unattended
 // jobs nobody is waiting on.
-async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other' }: any = {}) {
+// maxParts: how many times a long turn that the API paused (pause_turn, common with many web
+// searches) is continued before giving up.
+async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40 }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
   const assistantMessages: any[] = [];
 
-  for (let part = 0; part < 6; part++) {
+  let lastStop = '';
+  for (let part = 0; part < maxParts; part++) {
     // Refuses to start when AI work is paused for low credits (see lib/aiCredits.ts).
     await assertCredits();
     if (batch) {
@@ -221,7 +224,8 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
       const message = { role: 'assistant', content: response.content };
       assistantMessages.push(message);
       conversation.push(message);
-      if (response.stop_reason !== 'pause_turn') break;
+      lastStop = response.stop_reason;
+    if (response.stop_reason !== 'pause_turn') break;
       continue;
     }
 
@@ -248,6 +252,7 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
     const message = { role: 'assistant', content: response.content };
     assistantMessages.push(message);
     conversation.push(message);
+    lastStop = response.stop_reason;
     if (response.stop_reason !== 'pause_turn') break;
   }
 
@@ -256,7 +261,8 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
     .filter((b) => b.type === 'text')
     .map((b) => b.text)
     .join('\n');
-  return { text, assistantMessages };
+  // stopReason 'pause_turn' here means the turn was still unfinished after maxParts continuations.
+  return { text, assistantMessages, stopReason: lastStop };
 }
 
 const BATCH_POLL_MS = 30_000;
