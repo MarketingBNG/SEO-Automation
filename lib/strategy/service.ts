@@ -8,7 +8,7 @@ import { sqlNow } from '../time';
 import { saveFile } from '../storage';
 import { parseScreamingFrogCsv } from '../technicalAudit';
 import { validatePlan, approvalBlockers, keywordKey, EDITABLE_SECTIONS, crawlIsFresh, priorityScore } from './core';
-import { technicalFixesFromCrawl } from './generate';
+import { technicalFixesFromCrawl, calendarSlots } from './generate';
 import * as settings from '../settings';
 
 export async function latestCrawl() {
@@ -64,23 +64,80 @@ function rescore(plan) {
   }
 }
 
-export async function editSection(id: number, section: string, value: any, reviewer: string) {
+// Edit any editable section, before or after approval. Every save goes to the audit log and is
+// re-validated. After approval the edit needs a reason, is also logged as a "Strategy change", and
+// the blog calendar and backlink tasks are updated to match (published blogs are never touched).
+export async function editSection(id: number, section: string, value: any, reviewer: string, why?: string) {
   if (!EDITABLE_SECTIONS.includes(section)) throw Object.assign(new Error(`Section "${section}" cannot be edited.`), { status: 400 });
   const row = await prisma.seo_strategies.findUnique({ where: { id } });
   if (!row?.plan_json) throw Object.assign(new Error('Not found'), { status: 404 });
-  if (row.status === 'approved') throw Object.assign(new Error('This strategy is approved. Use "Strategy change" for mid-month changes.'), { status: 409 });
+  const approved = row.status === 'approved';
+  if (approved && !String(why || '').trim()) throw Object.assign(new Error('This strategy is approved. Say why you are changing it.'), { status: 400 });
   const plan = JSON.parse(row.plan_json);
   const oldValue = plan[section];
   plan[section] = value;
   if (section === 'keywords') rescore(plan);
+  if (section === 'blogPlan') fillPublishDates(plan);
   const validation = await revalidate(plan);
   const version = (row.version || 1) + 1;
-  await prisma.$transaction([
-    prisma.seo_strategies.update({ where: { id }, data: { plan_json: JSON.stringify(plan), validation: JSON.stringify(validation), version } }),
-    prisma.strategy_edits.create({ data: { strategy_id: id, reviewer, section, old_value: JSON.stringify(oldValue ?? null), new_value: JSON.stringify(value ?? null), version } }),
-  ]);
-  await activity.log('strategy.edited', { entityType: 'seo_strategy', entityId: id, details: `Section ${section}, version ${version}`, actor: reviewer });
+  await prisma.$transaction(async (tx) => {
+    await tx.seo_strategies.update({ where: { id }, data: { plan_json: JSON.stringify(plan), validation: JSON.stringify(validation), version } });
+    await tx.strategy_edits.create({ data: { strategy_id: id, reviewer, section, old_value: JSON.stringify(oldValue ?? null), new_value: JSON.stringify(value ?? null), version } });
+    if (approved) {
+      await tx.strategy_changes.create({ data: { strategy_id: id, what: `Edited section "${section}" (version ${version})`, why: String(why).trim(), approved_by: reviewer } });
+      if (section === 'blogPlan') await syncCalendar(tx, id, row.period, plan.blogPlan?.calendar || []);
+      if (section === 'backlinks') await syncBacklinks(tx, id, plan.backlinks || []);
+    }
+  });
+  await activity.log(approved ? 'strategy.changed' : 'strategy.edited', { entityType: 'seo_strategy', entityId: id, details: `Section ${section}, version ${version}${approved ? `: ${why}` : ''}`, actor: reviewer });
   return strategyView(await prisma.seo_strategies.findUnique({ where: { id } }));
+}
+
+// A blog row added in Edit Strategy gets the next free posting slot of the month.
+function fillPublishDates(plan) {
+  const cal = plan.blogPlan?.calendar || [];
+  const taken = new Set(cal.map((b) => b.publishDate).filter(Boolean));
+  const days = plan.blogPlan?.postingDays?.length ? plan.blogPlan.postingDays : ['Tue', 'Thu'];
+  const time = String(plan.blogPlan?.postingTime || '10:00').slice(0, 5);
+  const free = calendarSlots(plan.period, days, time, 31).filter((t) => !taken.has(t));
+  for (const b of cal) {
+    if (b.publishDate) continue;
+    const slot = free.shift();
+    if (!slot) break;
+    b.publishDate = slot;
+    b.reviewDeadline = slot;
+    b.reviewOpens = new Date(Date.parse(slot.replace(' ', 'T') + 'Z') - 24 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+    b.status = b.status || 'planned';
+  }
+  cal.sort((a, b) => String(a.publishDate).localeCompare(String(b.publishDate)));
+}
+
+// Approved strategy calendar edit: blogs not yet drafted are replaced by the edited calendar;
+// blogs already drafted, in review or published stay as they are.
+async function syncCalendar(tx, id, period, calendar) {
+  const started = await tx.blog_schedule.findMany({ where: { strategy_id: id, NOT: { status: 'planned', draft_id: null } } });
+  const keep = new Set(started.map((r) => keywordKey(r.main_keyword)));
+  await tx.blog_schedule.deleteMany({ where: { strategy_id: id, status: 'planned', draft_id: null } });
+  for (const b of calendar) {
+    if (!b.mainKeyword || !b.publishDate || keep.has(keywordKey(b.mainKeyword))) continue;
+    await tx.strategy_keywords.upsert({
+      where: { keyword_key: keywordKey(b.mainKeyword) },
+      create: { keyword_key: keywordKey(b.mainKeyword), keyword: b.mainKeyword, period, strategy_id: id },
+      update: {},
+    });
+    await tx.blog_schedule.create({
+      data: { strategy_id: id, publish_at: b.publishDate, title: b.title, main_keyword: b.mainKeyword, cluster: b.cluster || null, tags: JSON.stringify(b.tags || []), refresh_url: b.refreshUrl || null },
+    });
+  }
+}
+
+async function syncBacklinks(tx, id, backlinks) {
+  await tx.backlink_tasks.deleteMany({ where: { strategy_id: id, status: 'planned' } });
+  const done = new Set((await tx.backlink_tasks.findMany({ where: { strategy_id: id } })).map((t) => `${t.target_site}|${t.method}`));
+  for (const l of backlinks) {
+    if (done.has(`${l.targetSite}|${l.method}`)) continue;
+    await tx.backlink_tasks.create({ data: { strategy_id: id, target_site: l.targetSite, method: l.method, our_page: l.ourPage || '', send_date: l.sendDate || '', tags: JSON.stringify(l.tags || []) } });
+  }
 }
 
 // ONE approval approves everything: keywords are reserved, the blog calendar, backlink tasks and

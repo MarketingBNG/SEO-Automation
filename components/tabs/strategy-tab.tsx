@@ -52,10 +52,15 @@ function Section({ title, description, children }: { title: ReactNode; descripti
 }
 
 // A table that becomes editable in Edit mode. Cells with `edit` get an input.
-function EditTable({ rows, cols, editing, onChange, empty }: { rows: any[]; cols: Col[]; editing: boolean; onChange: (rows: any[]) => void; empty?: string }) {
-  if (!rows?.length && !editing) return <p className="text-sm text-muted-foreground">{empty || 'Nothing planned.'}</p>;
+function EditTable({ rows: rowsIn, cols, editing, onChange, empty }: { rows: any[]; cols: Col[]; editing: boolean; onChange: (rows: any[]) => void; empty?: string }) {
+  const rows = rowsIn || [];
+  if (!rows.length && !editing) return <p className="text-sm text-muted-foreground">{empty || 'Nothing planned.'}</p>;
   const set = (i: number, key: string, v: any) => onChange(rows.map((r, j) => (j === i ? { ...r, [key]: v } : r)));
   return (
+    <>
+    {editing && (
+      <Button size="sm" variant="outline" onClick={() => onChange([...rows, { tags: [] }])}>Add row</Button>
+    )}
     <DataTable head={[...cols.map((c) => c.label), ...(editing ? [''] : [])]}>
       {rows.map((r, i) => (
         <tr key={i}>
@@ -98,6 +103,7 @@ function EditTable({ rows, cols, editing, onChange, empty }: { rows: any[]; cols
         </tr>
       ))}
     </DataTable>
+    </>
   );
 }
 
@@ -110,6 +116,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [change, setChange] = useState({ what: '', why: '' });
+  const [editWhy, setEditWhy] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const approved = s.status === 'approved';
   const p = editing ? draft : plan;
@@ -140,11 +147,12 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
     let latest = null;
     for (const section of ['summary', 'included', 'keywords', 'blogPlan', 'aeoGeo', 'backlinks', 'technical', 'targets']) {
       if (JSON.stringify(draft[section]) === JSON.stringify(plan[section])) continue;
-      latest = await call('save', `/api/strategy/${s.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ section, value: draft[section] }) });
+      latest = await call('save', `/api/strategy/${s.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ section, value: draft[section], why: editWhy }) });
       if (!latest) return;
     }
     if (latest) onChanged(latest);
     setEditing(false);
+    setEditWhy('');
   }
 
   async function upload(file: File) {
@@ -381,10 +389,11 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
           <Button variant="outline" disabled={!!busy} onClick={() => fileRef.current?.click()}>
             {busy === 'upload' && <Loader2 className="animate-spin" />}Upload Screaming Frog file
           </Button>
-          {!approved && !editing && <Button variant="outline" disabled={!!busy} onClick={() => setEditing(true)}>Edit Strategy</Button>}
+          {!editing && <Button variant="outline" disabled={!!busy} onClick={() => setEditing(true)}>Edit Strategy</Button>}
           {editing && (
             <>
-              <Button disabled={!!busy} onClick={saveEdits}>{busy === 'save' && <Loader2 className="animate-spin" />}Save edits</Button>
+              {approved && <Input className="h-8 w-72" placeholder="Why are you changing the approved strategy?" value={editWhy} onChange={(e) => setEditWhy(e.target.value)} />}
+              <Button disabled={!!busy || (approved && !editWhy.trim())} onClick={saveEdits}>{busy === 'save' && <Loader2 className="animate-spin" />}Save edits</Button>
               <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
             </>
           )}
@@ -485,7 +494,7 @@ function MonthRunning() {
 export default function StrategyTab({ active = true }: { active?: boolean }) {
   const [list, setList] = useState<any[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
-  const [gen, setGen] = useState<{ stage: string; percent: number } | null>(null);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -498,33 +507,28 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
     if (active) load();
   }, [active, load]);
 
+  // While a strategy is generating in the background, refresh every 3 seconds for its progress.
+  const generating = list.find((s) => s.status === 'generating');
+  useEffect(() => {
+    if (!active || !generating) return;
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+  }, [active, generating, load]);
+
+  // Starts generation on the server and returns at once; nothing depends on this request staying open.
   async function generate() {
     setError(null);
-    setGen({ stage: 'Starting', percent: 1 });
+    setStarting(true);
     try {
       const res = await fetch('/api/strategy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const reader = res.body!.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop() || '';
-        for (const l of lines) {
-          if (!l.trim()) continue;
-          const m = JSON.parse(l);
-          if (m.status === 'error') setError(m.error);
-          else if (m.status === 'done') setOpenId(m.id);
-          else setGen({ stage: m.stage, percent: m.percent });
-        }
-      }
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      setOpenId(json.id);
+      await load();
     } catch (e: any) {
       setError(e.message);
     } finally {
-      setGen(null);
-      load();
+      setStarting(false);
     }
   }
 
@@ -538,12 +542,34 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
             {list.map((s) => <option key={s.id} value={s.id}>{s.period} ({s.status.replace('_', ' ')}, v{s.version})</option>)}
           </select>
         )}
-        <Button variant="outline" disabled={!!gen} onClick={generate}>{gen && <Loader2 className="animate-spin" />}Generate next month now</Button>
+        <Button variant="outline" disabled={starting || !!generating} onClick={generate}>
+          {(starting || generating) && <Loader2 className="animate-spin" />}
+          {generating ? 'Generating...' : 'Generate next month now'}
+        </Button>
       </div>
-      <p className="text-xs text-muted-foreground">Generated automatically on the 1st of every month for the next month. Uses only real dashboard numbers.</p>
-      {gen && <div className="rounded-lg border p-2 text-sm">{gen.stage} ({gen.percent}%)</div>}
+      <p className="text-xs text-muted-foreground">Generated automatically on the 1st of every month for the next month. Uses only real dashboard numbers. Generation runs on the server, so you can leave this page; progress also shows at the top of every tab.</p>
+      {generating && (
+        <div className="rounded-lg border p-3 text-sm">
+          <div className="flex items-center gap-2">
+            <Loader2 className="size-4 animate-spin" />
+            <span className="font-medium">Generating the {generating.period} strategy</span>
+            <span className="text-muted-foreground">{generating.progress?.stage}</span>
+            <span className="ml-auto tabular-nums">{generating.progress?.percent ?? 0}%</span>
+          </div>
+          <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary transition-all duration-700" style={{ width: `${Math.max(2, generating.progress?.percent ?? 0)}%` }} />
+          </div>
+        </div>
+      )}
+      {current?.status === 'failed' && (
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm">
+          <div className="font-semibold">Generating the {current.period} strategy failed</div>
+          <div>{current.error}</div>
+          <div className="mt-1 text-muted-foreground">Fix the cause if it names a missing setting or key, then click Generate again.</div>
+        </div>
+      )}
       {error && <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-2 text-sm">{error}</div>}
-      {current ? (
+      {current?.plan ? (
         <StrategyView key={current.id} s={current} onChanged={(v) => setList((l) => l.map((x) => (x.id === v.id ? v : x)))} />
       ) : (
         <>

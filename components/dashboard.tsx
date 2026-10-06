@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { JobProgress } from '@/components/shared/job-progress';
 
 import AssistantTab from '@/components/tabs/assistant-tab';
 import KeywordsTab from '@/components/tabs/keywords-tab';
@@ -145,6 +146,8 @@ export default function Dashboard() {
           </form>
           <ThemeToggle />
         </header>
+        {/* Strategy and blog progress, visible from every tab. */}
+        <JobProgress onOpen={(kind) => setTab(kind === 'strategy' ? 'strategy' : 'keywords')} />
 
         <main className="min-w-0 flex-1 p-3 sm:p-6">
           {/* Kept mounted (just hidden) so a running conversation keeps streaming while you look at other tabs. */}

@@ -474,7 +474,8 @@ export function BlogTable({ onOpen }: { onOpen: (row: any) => void }) {
               {d.rows.slice(0, show).map((r: any) => (
                 <tr key={r.url} className="hover:bg-muted/30">
                   <td className={td}>
-                    <a href={r.url} target="_blank" rel="noreferrer" className="font-medium hover:underline">{r.title}</a>
+                    <button type="button" onClick={() => onOpen(r)} className="text-left font-medium hover:underline">{r.title}</button>
+                    <a href={r.url} target="_blank" rel="noreferrer" className="ml-1 text-xs text-muted-foreground hover:underline">open page</a>
                     <div className="text-xs text-muted-foreground">updated {r.modified}</div>
                   </td>
                   <td className={cn(td, 'tabular-nums')}>{fmt(r.clicks)}</td>
@@ -484,7 +485,7 @@ export function BlogTable({ onOpen }: { onOpen: (row: any) => void }) {
                   <td className={cn(tdMuted, 'tabular-nums')}>{fmt(r.impressions)}</td>
                   <td className={tdMuted}>{r.position ?? '-'}</td>
                   <td className={tdMuted}>{r.topKeywords.map((k: any) => `${k.query} (#${k.position})`).join(', ') || '-'}{r.keywordCount > 3 ? ` +${r.keywordCount - 3} more` : ''}</td>
-                  <td className={td}><Button variant="outline" size="sm" onClick={() => onOpen(r)}><BarChart3 />Analytics</Button></td>
+                  <td className={td}><Button type="button" variant="outline" size="sm" onClick={() => onOpen(r)}><BarChart3 />Analytics</Button></td>
                 </tr>
               ))}
             </DataTable>

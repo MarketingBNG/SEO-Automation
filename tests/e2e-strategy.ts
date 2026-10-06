@@ -111,10 +111,20 @@ async function main() {
   assert.equal(await prisma.blog_schedule.count(), 4);
   assert.equal(await prisma.backlink_tasks.count(), 1);
   assert.equal(await prisma.strategy_keywords.count(), 4);
-  await assert.rejects(service.editSection(row.id, 'targets', plan.targets, 'Reviewer A'), /Strategy change/);
+  await assert.rejects(service.editSection(row.id, 'targets', plan.targets, 'Reviewer A'), /Say why/);
   view = await service.logStrategyChange(row.id, { what: 'Swap blog 2', why: 'New IRS notice' }, 'Reviewer B');
   assert.equal(view.changes[0].approved_by, 'Reviewer B');
   console.log('PASS one approval schedules everything; mid-month change logged');
+
+  // Edit after approval: needs a reason, is logged as a change, and new calendar rows get a slot.
+  await assert.rejects(service.editSection(row.id, 'targets', plan.targets, 'Reviewer A'), /Say why/);
+  const cal2 = [...plan.blogPlan.calendar, { title: 'Extra guide', mainKeyword: 'extra keyword', tags: ['AEO'], focusService: 'US tax' }];
+  view = await service.editSection(row.id, 'blogPlan', { ...plan.blogPlan, calendar: cal2 }, 'Reviewer B', 'Client asked for one more blog');
+  assert.equal(view.changes[0].why, 'Client asked for one more blog');
+  const extra = view.plan.blogPlan.calendar.find((b: any) => b.mainKeyword === 'extra keyword');
+  assert.ok(extra.publishDate, 'new row got a publish slot');
+  assert.equal(await prisma.blog_schedule.count({ where: { strategy_id: row.id } }), 5);
+  console.log('PASS edit after approval: reason required, change logged, calendar synced (new slot', extra.publishDate + ')');
 
   // Fact-check stub (the real one calls Claude with web search): fixes the wrong deadline, or fails.
   let verifyCalls = 0;
@@ -172,6 +182,19 @@ async function main() {
   assert.equal(r!.status, 'held');
   assert.ok(JSON.parse(r!.hold_reasons!).some((x: string) => x.startsWith('Fact check could not confirm')));
   console.log('PASS unverifiable blog held, not published');
+
+  // Background generation: returns at once; a failure is saved with a readable error, not lost.
+  const { startStrategyJob } = await import('../lib/strategy/jobs');
+  const job = await startStrategyJob({ period: 'January 2027', actor: 'Test' });
+  let st: any = await prisma.seo_strategies.findUnique({ where: { id: job.id } });
+  assert.equal(st.status, 'generating');
+  for (let i = 0; i < 120 && st.status === 'generating'; i++) {
+    await new Promise((res) => setTimeout(res, 1000));
+    st = await prisma.seo_strategies.findUnique({ where: { id: job.id } });
+  }
+  assert.equal(st.status, 'failed');
+  assert.ok(st.error && st.error.length > 0);
+  console.log('PASS background generation reports progress and a readable failure:', st.progress_stage, '|', st.error.slice(0, 90));
 
   await prisma.$disconnect();
   console.log('ALL E2E CHECKS PASSED');

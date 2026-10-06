@@ -7,6 +7,7 @@ import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/componen
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SafeHtml, safeHref } from '@/components/shared/article';
 import { BlogAnalytics, BlogTable, KeywordPanel } from '@/components/shared/blog-insights';
 import { StatusBadge } from '@/components/shared/status-badge';
@@ -81,22 +82,15 @@ export default function DraftsTab() {
       )}
 
       <BlogTable onOpen={(r) => setAnalyticsPost(r)} />
-      {analyticsPost && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{analyticsPost.title}</CardTitle>
-            <CardAction>
-              <Button variant="outline" size="sm" onClick={() => setAnalyticsPost(null)}>
-                <X />
-                Close
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            <BlogAnalytics key={analyticsPost.url} url={analyticsPost.url} title="" />
-          </CardContent>
-        </Card>
-      )}
+      {/* Per-blog analytics opens in a dialog on top of the page, so the click always shows it. */}
+      <Dialog open={!!analyticsPost} onOpenChange={(open) => !open && setAnalyticsPost(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>{analyticsPost?.title}</DialogTitle>
+          </DialogHeader>
+          {analyticsPost && <BlogAnalytics key={analyticsPost.url} url={analyticsPost.url} title="" />}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
