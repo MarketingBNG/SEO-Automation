@@ -9,6 +9,7 @@ import { saveFile } from '../storage';
 import { parseScreamingFrogCsv } from '../technicalAudit';
 import { validatePlan, approvalBlockers, keywordKey, EDITABLE_SECTIONS, crawlIsFresh, priorityScore } from './core';
 import { technicalFixesFromCrawl, calendarSlots } from './generate';
+import { fixKind } from './fixer';
 import * as settings from '../settings';
 
 export async function latestCrawl() {
@@ -184,6 +185,11 @@ export async function approveStrategy(id: number, approver: string) {
       await tx.backlink_tasks.create({
         data: { strategy_id: id, target_site: l.targetSite, method: l.method, our_page: l.ourPage || '', send_date: l.sendDate || '', tags: JSON.stringify(l.tags || []) },
       });
+    }
+    // Ticked technical fixes (all are ticked unless the reviewer unticked them) run automatically.
+    for (const f of plan.technical?.fixes || []) {
+      if (f.apply === false || !f.url || !f.issue) continue;
+      await tx.technical_fix_tasks.create({ data: { strategy_id: id, url: f.url, issue: f.issue, fix: f.fix || '', kind: fixKind(f.issue) } });
     }
   });
   await activity.log('strategy.approved', {
