@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { strategyView } from '@/lib/strategy/service';
-import { startStrategyJob } from '@/lib/strategy/jobs';
+import { startStrategyJob, markInterrupted } from '@/lib/strategy/jobs';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../_lib/http';
 
@@ -12,6 +12,7 @@ import { methodNotAllowed } from '../_lib/http';
 export const runtime = 'nodejs';
 
 export async function GET() {
+  await markInterrupted();
   const rows = await prisma.seo_strategies.findMany({
     where: { OR: [{ plan_json: { not: null } }, { status: { in: ['generating', 'paused', 'stopping', 'stopped', 'failed'] } }] },
     orderBy: { id: 'desc' },

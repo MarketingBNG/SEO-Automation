@@ -19,7 +19,10 @@ function throttledFetch(url: string, init: any = {}): Promise<Response> {
       const wait = lastAt + MIN_GAP_MS - Date.now();
       if (wait > 0) await sleep(wait);
       lastAt = Date.now();
-      const res = await fetch(url, init);
+      // Every SE Ranking call gives up after 60 seconds, so a call that never answers cannot hang
+      // the strategy (a caller's own abort signal still applies).
+      const timeout = AbortSignal.timeout(60000);
+      const res = await fetch(url, { ...init, signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout });
       if (res.status !== 429 || attempt >= 2) return res;
       await sleep(1500 * (attempt + 1));
     }
@@ -115,7 +118,7 @@ async function getReferringDomainsCount(domain: string) {
   return n;
 }
 
-async function listReferringDomains(domain: string, limit = 500) {
+async function listReferringDomains(domain: string, limit = 300) {
   const json: any = await get(`/backlinks/refdomains?target=${encodeURIComponent(domain)}&mode=domain&limit=${limit}`);
   const rows = json?.refdomains || json?.data || json || [];
   return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.refdomain || r.domain || '').toLowerCase()).filter(Boolean);
@@ -125,7 +128,7 @@ async function listReferringDomains(domain: string, limit = 500) {
 async function getBacklinkGap(ourDomain: string, competitors: string[], limit = 40) {
   const ours = new Set(await listReferringDomains(ourDomain));
   const counts = new Map<string, string[]>();
-  for (const c of competitors) {
+  for (const c of competitors.slice(0, 5)) {
     for (const d of await listReferringDomains(c)) {
       if (ours.has(d)) continue;
       counts.set(d, [...(counts.get(d) || []), c]);

@@ -15,16 +15,28 @@ import { metric, keywordKey, CRAWL_MAX_AGE_DAYS } from './core';
 
 const SITE_HOST = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '');
 
+// Gives up on a step that takes too long, so one slow or silent tool can never stall the strategy.
+// The step's number then shows as DATA MISSING with the reason.
+export function limit(promise, minutes, label) {
+  let t;
+  const timer = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${label} did not answer within ${minutes} minute(s)`)), minutes * 60000);
+  });
+  return Promise.race([promise, timer]).finally(() => clearTimeout(t));
+}
+
 const kpiOf = (block, label) => (block?.kpis || []).find((k) => k.label === label) || null;
 
 // SERP features we hold for the priority keywords, from live SERPHouse checks (US and India).
 export async function serpFeatureCounts(keywords: string[]) {
   const host = SITE_HOST();
   const rows: any[] = [];
-  for (const q of keywords) {
-    for (const loc of ['United States', 'India']) {
+  const pairs = keywords.flatMap((q) => ['United States', 'India'].map((loc) => ({ q, loc })));
+  // Four live searches at a time, each limited to 90 seconds.
+  for (let i = 0; i < pairs.length; i += 4) {
+    await Promise.all(pairs.slice(i, i + 4).map(async ({ q, loc }) => {
       try {
-        const json = await liveSearch({ q, loc, timeoutMs: 120000 });
+        const json = await liveSearch({ q, loc, timeoutMs: 90000 });
         const r = json.results?.results || {};
         const fs = r.featured_snippet || r.answer_box || r.featured_snippets?.[0] || null;
         const fsLink = String(fs?.link || fs?.url || '');
@@ -41,7 +53,7 @@ export async function serpFeatureCounts(keywords: string[]) {
       } catch (e: any) {
         rows.push({ keyword: q, market: loc, error: e.message });
       }
-    }
+    }));
   }
   const ok = rows.filter((r) => !r.error);
   return {
@@ -80,7 +92,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   await onStep?.('Reading last month\'s report', 0.05);
   let perf: any = null;
   try {
-    perf = await cachedPerformance(28);
+    perf = await limit(cachedPerformance(28), 5, 'Month-end report');
   } catch (e: any) {
     out.missing.push(`month-end report (${e.message})`);
   }
@@ -109,9 +121,9 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   let rankings: any[] = [];
   let rankDate = today;
   try {
-    const sites = await listSites();
+    const sites = await limit(listSites(), 2, 'SE Ranking projects');
     if (sites.length) {
-      rankings = await getSiteRankings(sites[0].id);
+      rankings = await limit(getSiteRankings(sites[0].id), 3, 'SE Ranking positions');
       rankDate = rankings.find((r) => r.date)?.date || today;
     }
   } catch (e: any) {
@@ -126,7 +138,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   await onStep?.('Reading SE Ranking backlinks', 0.25);
   let refDomains = null;
   try {
-    refDomains = await getReferringDomainsCount(SITE_HOST());
+    refDomains = await limit(getReferringDomainsCount(SITE_HOST()), 2, 'SE Ranking referring domains');
   } catch (e: any) {
     out.missing.push(`referring domains (${e.message})`);
   }
@@ -137,7 +149,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   out.backlinkGap = [];
   if (competitors.length) {
     try {
-      out.backlinkGap = await getBacklinkGap(SITE_HOST(), competitors, 40);
+      out.backlinkGap = await limit(getBacklinkGap(SITE_HOST(), competitors, 40), 6, 'SE Ranking backlink gap');
     } catch (e: any) {
       out.missing.push(`backlink gap (${e.message})`);
     }
@@ -152,7 +164,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
     .sort((a, b) => (b.volume || 0) - (a.volume || 0))
     .slice(0, 15)
     .map((r) => r.keyword);
-  const serp = priority.length ? await serpFeatureCounts(priority) : null;
+  const serp = priority.length ? await limit(serpFeatureCounts(priority), 12, 'SERPHouse checks').catch((e) => (out.missing.push(e.message), null)) : null;
   out.serpFeatures = serp;
   const serpRange = `live SERP check on ${today}, ${serp?.checked || 0} keyword-market pairs`;
 
@@ -160,7 +172,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   await onStep?.('Reading SE Ranking AI visibility (ChatGPT, Perplexity, Gemini, AI Overviews)', 0.4);
   let ai: any = null;
   try {
-    ai = await gatherAiVisibility(SITE_HOST(), perf ? { from: perf.ranges.current.startDate, to: perf.ranges.current.endDate } : {});
+    ai = await limit(gatherAiVisibility(SITE_HOST(), perf ? { from: perf.ranges.current.startDate, to: perf.ranges.current.endDate } : {}), 8, 'SE Ranking AI visibility');
     for (const e of ai.errors) out.missing.push(e);
   } catch (e: any) {
     out.missing.push(`SE Ranking AI visibility (${e.message})`);
@@ -176,7 +188,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   let leads = null;
   try {
     if (await hasStoredTokens()) {
-      const z = await getLeadSourceBreakdown();
+      const z = await limit(getLeadSourceBreakdown(), 2, 'Zoho CRM');
       leads = z.bySource.filter((s) => /organic|seo|google|website|blog|search/i.test(s.source)).reduce((s, r) => s + r.total, 0);
     }
   } catch (e: any) {
@@ -238,7 +250,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   // Console, GA4, SERPHouse, WordPress, PageSpeed and Clarity.
   await onStep?.('Running the full site analysis', 0.45);
   try {
-    out.snapshot = await gatherSnapshot({ onStep: (l, f) => onStep?.(l, 0.45 + 0.4 * f) });
+    out.snapshot = await limit(gatherSnapshot({ onStep: (l, f) => onStep?.(l, 0.45 + 0.4 * f) }), 20, 'Site analysis');
   } catch (e: any) {
     out.missing.push(`site analysis (${e.message})`);
   }
