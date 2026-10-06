@@ -34,6 +34,11 @@ export async function strategyProgress(strategyId: number) {
   };
   const links = s.status === 'approved' ? await prisma.backlink_tasks.findMany({ where: { strategy_id: strategyId }, orderBy: { send_date: 'asc' } }) : [];
   const backlinks = { total: links.length || (plan.backlinks?.length || 0), done: links.filter((l) => l.status === 'done').length, tasks: links };
+  // Technical fixes queued on approval: applied, needing a person, failed, still waiting.
+  const fixRows = s.status === 'approved' ? await prisma.technical_fix_tasks.findMany({ where: { strategy_id: strategyId }, select: { status: true, applied_at: true } }) : [];
+  const fixCount = (st) => fixRows.filter((f) => f.status === st).length;
+  const lastFix = fixRows.map((f) => f.applied_at).filter(Boolean).sort().pop() || null;
+  const fixes = { total: fixRows.length, applied: fixCount('applied'), manual: fixCount('manual'), failed: fixCount('failed'), planned: fixCount('planned'), lastRun: lastFix };
   const units = blogs.total + backlinks.total;
   const percent = units ? Math.round(((blogs.published + backlinks.done) / units) * 100) : 0;
   const start = plan.startDate ? Date.parse(`${plan.startDate}T00:00:00Z`) : null;
@@ -74,6 +79,7 @@ export async function strategyProgress(strategyId: number) {
     window: { start: plan.startDate || null, end: plan.endDate || null, daysUsed },
     blogs,
     backlinks,
+    fixes,
     percent,
     cost: { estimate, lines, spentSinceApproval, basis: lines.every((l) => l.measured) ? 'measured' : lines.some((l) => l.measured) ? 'mixed' : 'default' },
   };
