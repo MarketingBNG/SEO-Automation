@@ -33,7 +33,7 @@ node -e "fetch('http://localhost:'+(process.env.PORT||3000)+'/api/cron/daily',{h
 
 | Path | Schedule (UTC) | What it does |
 |---|---|---|
-| `/api/cron/daily` | `*/15 * * * *` (every 15 min) | Blog drafts, 24-hour review window, auto-approve and publish, Facts Register gate; rank check once a day |
+| `/api/cron/daily` | `*/15 * * * *` (every 15 min) | Blog drafts, 24-hour review window, auto-approve and publish after the automatic fact check; rank check once a day |
 | `/api/cron/weekly` | `0 5 * * 1` (Mondays) | Plan vs actual check |
 | `/api/strategy/auto-check` | `30 3 1 * *` (1st of month) | Generates next month's strategy |
 | `/api/skill/auto-check` | `0 3 * * *` | Refreshes the writing skill when it is 15+ days old |
@@ -63,8 +63,8 @@ One strategy per month, one approval, then the month runs automatically.
   validation errors (tags on every item, growth targets, 40% priority for a falling channel, intent
   mix, focus services, no repeated keywords, safe backlink methods).
 - **Every 15 minutes** (`/api/cron/daily`): drafts blogs 48h ahead, opens the 24-hour
-  review window, publishes reviewed or auto-approved blogs behind the Facts Register and writing
-  rule gates, then IndexNow, sitemap resubmit, SE Ranking tracking and internal links; once a day,
+  review window, publishes reviewed or auto-approved blogs only after the automatic fact check
+  (check, correct, re-check until two clean passes; up to `FACT_CHECK_ROUNDS`, default 50) and writing rules, then IndexNow, sitemap resubmit, SE Ranking tracking and internal links; once a day,
   a rank check with a 5+ position drop alert.
 - **Weekly** (`/api/cron/weekly`, Mondays): plan vs actual.
 - **AI visibility (GEO and AEO):** pulled from SE Ranking with the existing `SERANKING_API_KEY`: AI Search
@@ -77,4 +77,4 @@ One strategy per month, one approval, then the month runs automatically.
 New environment variables: `INDEXNOW_KEY` (and the key file at `https://<site>/<key>.txt`, or
 `INDEXNOW_KEY_LOCATION`), `REVIEW_NOTIFY_EMAILS` + `RESEND_API_KEY` (+ optional
 `NOTIFY_FROM_EMAIL`) and/or `SLACK_WEBHOOK_URL`, optional `SITEMAP_URL`, `STRATEGY_MODEL`,
-`FACT_CHECK_MODEL`, `STRATEGY_MAX_SEARCHES`, `WRITER_MAX_SEARCHES`.
+`FACT_CHECK_MODEL`, `FACT_CHECK_ROUNDS`, `STRATEGY_MAX_SEARCHES`, `WRITER_MAX_SEARCHES`.

@@ -27,7 +27,7 @@ async function main() {
   const { validatePlan } = await import('../lib/strategy/core');
   const { runDaily } = await import('../lib/strategy/autopilot');
 
-  for (const t of ['blog_schedule', 'backlink_tasks', 'strategy_edits', 'strategy_changes', 'strategy_keywords', 'verified_facts', 'technical_crawls', 'seo_strategies', 'facts', 'drafts', 'keywords', 'activity_log']) {
+  for (const t of ['blog_schedule', 'backlink_tasks', 'strategy_edits', 'strategy_changes', 'strategy_keywords', 'technical_crawls', 'seo_strategies', 'facts', 'drafts', 'keywords', 'activity_log']) {
     await prisma.$executeRawUnsafe(`DELETE FROM "${t}"`);
   }
   await prisma.settings.upsert({ where: { key: 'focus_services' }, create: { key: 'focus_services', value: 'US tax;India entity setup' }, update: { value: 'US tax;India entity setup' } });
@@ -116,33 +116,36 @@ async function main() {
   assert.equal(view.changes[0].approved_by, 'Reviewer B');
   console.log('PASS one approval schedules everything; mid-month change logged');
 
-  // Review window: give the first blog a draft containing an unverified tax figure.
+  // Fact-check stub (the real one calls Claude with web search): fixes the wrong deadline, or fails.
+  let verifyCalls = 0;
+  const fixingVerify = async (d: any) => {
+    verifyCalls++;
+    return { ok: true, rounds: 3, draft: { ...d, content: d.content.replace('April 30', 'April 15') }, log: [] };
+  };
+  const failingVerify = async (d: any) => ({ ok: false, rounds: 50, draft: d, log: [] });
+
+  // Review window: the first blog's draft states a wrong deadline (April 30).
   const first = (await prisma.blog_schedule.findMany({ orderBy: { publish_at: 'asc' } }))[0];
   const kw = await prisma.keywords.create({ data: { keyword: first.main_keyword, status: 'drafted' } });
   const words = (n: number) => Array.from({ length: n }, () => 'word').join(' ');
-  const html = `<h2>When is the FBAR due?</h2><p>The FBAR filing deadline is April 15 with an automatic extension. ${words(38)}</p><p><a href="/a">a</a> <a href="/b">b</a> <a href="https://usaindiacfo.com/c">c</a> <a href="https://www.fincen.gov/fbar">FinCEN</a></p><h2>Frequently Asked Questions</h2><h3>Who files?</h3><p>${words(45)}</p>`;
+  const html = `<h2>When is the FBAR due?</h2><p>The FBAR filing deadline is April 30 with an automatic extension. ${words(38)}</p><p><a href="/a">a</a> <a href="/b">b</a> <a href="https://usaindiacfo.com/c">c</a> <a href="https://www.fincen.gov/fbar">FinCEN</a></p><h2>Frequently Asked Questions</h2><h3>Who files?</h3><p>${words(45)}</p>`;
   const draft = await prisma.drafts.create({ data: { keyword_id: kw.id, title: 'FBAR deadline 2026 guide', meta_description: 'When the FBAR is due.', content_html: html, status: 'pending_review' } });
   await prisma.blog_schedule.update({ where: { id: first.id }, data: { draft_id: draft.id } });
 
-  let s = await runDaily(new Date('2026-11-02T04:35:00Z'));
+  let s = await runDaily(new Date('2026-11-02T04:35:00Z'), { verify: fixingVerify });
   let r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
   assert.equal(r!.status, 'in_review');
-  console.log('PASS blog enters review 24 hours before its slot', s.opened);
+  assert.ok((await prisma.drafts.findUnique({ where: { id: draft.id } }))!.content_html!.includes('April 15'));
+  assert.equal(JSON.parse(r!.fact_check!).ok, true);
+  console.log('PASS blog fact-checked and corrected before review opens (April 30 -> April 15)', s.opened);
 
-  s = await runDaily(new Date('2026-11-03T04:30:00Z'));
-  r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
-  assert.equal(r!.status, 'held');
-  const reasons = JSON.parse(r!.hold_reasons!);
-  assert.ok(reasons.some((x: string) => x.startsWith('Facts Register') && x.includes('April 15')), reasons.join(' | '));
-  console.log('PASS Facts Register gate held the blog and flagged the sentence:', reasons[0]);
-
-  await prisma.verified_facts.create({ data: { value: 'April 15', claim: 'FBAR due date', source_url: 'https://www.fincen.gov/fbar', verified_by: 'Reviewer A' } });
-  s = await runDaily(new Date('2026-11-03T05:30:00Z'));
+  s = await runDaily(new Date('2026-11-03T04:30:00Z'), { verify: fixingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
   assert.equal(r!.status, 'published', JSON.stringify({ s, reasons: r!.hold_reasons }));
   assert.equal(r!.approval_mode, 'auto');
+  assert.equal(verifyCalls, 1); // unchanged draft is not re-checked
   const log = JSON.parse(r!.post_publish_log!);
-  console.log('PASS unreviewed blog auto-approved and published once the fact was added. After-publish:', Object.fromEntries(Object.entries(log).map(([k, v]: any) => [k, v.ok ? 'ok' : v.error])));
+  console.log('PASS unreviewed, fact-checked blog auto-approved and published. After-publish:', Object.fromEntries(Object.entries(log).map(([k, v]: any) => [k, v.ok ? 'ok' : v.error])));
   assert.ok(calls.some((c) => c.startsWith('POST https://usaindiacfo.com/wp-json/wp/v2/posts')));
   assert.equal(log.internalLinks.ok, true);
   assert.deepEqual(log.internalLinks.result, ['https://usaindiacfo.com/old-post/']);
@@ -150,14 +153,25 @@ async function main() {
   // Reviewed path: the second blog is marked reviewed inside its window, so the reviewed version publishes.
   const second = (await prisma.blog_schedule.findMany({ orderBy: { publish_at: 'asc' } }))[1];
   const kw2 = await prisma.keywords.create({ data: { keyword: second.main_keyword, status: 'drafted' } });
-  const html2 = html.replace('The FBAR filing deadline is April 15 with an automatic extension.', 'Reviewed version of the answer for this question here.');
+  const html2 = html.replace('The FBAR filing deadline is April 30 with an automatic extension.', 'Reviewed version of the answer for this question here.');
   const d2 = await prisma.drafts.create({ data: { keyword_id: kw2.id, title: 'Reviewed guide title', meta_description: 'Reviewed meta.', content_html: html2, status: 'pending_review' } });
   await prisma.blog_schedule.update({ where: { id: second.id }, data: { draft_id: d2.id, status: 'in_review', review_started: '2026-11-04 04:30:00', reviewed_by: 'Reviewer A', reviewed_at: '2026-11-04 12:00:00' } });
-  await runDaily(new Date(Date.parse(second.publish_at.replace(' ', 'T') + 'Z')));
+  await runDaily(new Date(Date.parse(second.publish_at.replace(' ', 'T') + 'Z')), { verify: fixingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: second.id } });
   assert.equal(r!.status, 'published');
   assert.equal(r!.approval_mode, 'reviewed');
   console.log('PASS reviewed-within-24h blog published as the reviewed version');
+
+  // A blog whose claims cannot all be verified is held, never published.
+  const third = (await prisma.blog_schedule.findMany({ orderBy: { publish_at: 'asc' } }))[2];
+  const kw3 = await prisma.keywords.create({ data: { keyword: third.main_keyword, status: 'drafted' } });
+  const d3 = await prisma.drafts.create({ data: { keyword_id: kw3.id, title: 'Unverifiable guide', meta_description: 'Meta.', content_html: html, status: 'pending_review' } });
+  await prisma.blog_schedule.update({ where: { id: third.id }, data: { draft_id: d3.id, status: 'in_review' } });
+  await runDaily(new Date(Date.parse(third.publish_at.replace(' ', 'T') + 'Z')), { verify: failingVerify });
+  r = await prisma.blog_schedule.findUnique({ where: { id: third.id } });
+  assert.equal(r!.status, 'held');
+  assert.ok(JSON.parse(r!.hold_reasons!).some((x: string) => x.startsWith('Fact check could not confirm')));
+  console.log('PASS unverifiable blog held, not published');
 
   await prisma.$disconnect();
   console.log('ALL E2E CHECKS PASSED');

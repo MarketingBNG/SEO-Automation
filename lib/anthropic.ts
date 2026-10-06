@@ -325,7 +325,7 @@ const FACT_CHECK_MODEL = () => process.env.FACT_CHECK_MODEL || MODEL;
 
 // Re-verifies every hard claim in a draft (numbers, rates, thresholds, deadlines, sections, forms,
 // "new" rules) against primary sources with web search, independently of the writer.
-async function factCheckDraft(result, signal) {
+async function factCheckDraft(result, signal, { mustCheck = [] }: any = {}) {
   const system = `You are a senior US-India tax fact checker. You did not write this article. Find every hard
 claim in it (a number, rate, threshold, deadline, statute or section, form number, or "new" rule) and
 verify each one against a primary source (irs.gov, treasury.gov, fincen.gov, incometax.gov.in,
@@ -334,9 +334,9 @@ today, ${new Date().toISOString().slice(0, 10)}. Use web search for every claim;
 verdict is "correct" only when a primary source confirms it as currently applicable. Otherwise
 "incorrect" (give the correction) or "unverifiable". Return ONLY JSON between ===JSON=== and ===END===:
 {"checks":[{"claim":"exact sentence or phrase","verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}]}`;
-  const user = `Title: ${result.title}\nMeta: ${result.meta}\n\nArticle HTML:\n${result.content}\n\nWriter's Facts Register:\n${result.facts
+  const user = `Title: ${result.title}\nMeta: ${result.meta}\n\nArticle HTML:\n${result.content}\n\nWriter's Facts Register:\n${(result.facts || [])
     .map((f) => `${f.fact_id} | ${f.claim} | ${f.source_url}`)
-    .join('\n')}`;
+    .join('\n')}${mustCheck.length ? `\n\nThese sentences state figures, rates or deadlines. Each one MUST appear in "checks" (quote it as "claim"):\n${mustCheck.map((x) => `- ${x}`).join('\n')}` : ''}`;
   const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 60, effort: 'max', model: FACT_CHECK_MODEL() });
   const m = text.match(/===JSON===([\s\S]*?)===END===/);
   try {
@@ -346,6 +346,59 @@ verdict is "correct" only when a primary source confirms it as currently applica
     // An unreadable check never lets a draft through as checked.
     return { checks: [{ claim: 'Fact check output could not be read', verdict: 'unverifiable', correction: '', source_url: '' }], model: FACT_CHECK_MODEL() };
   }
+}
+
+const FACT_CHECK_ROUNDS = () => Math.max(2, Number(process.env.FACT_CHECK_ROUNDS) || 50);
+
+// Fixes the claims a fact check flagged: corrects each one from its primary source, or removes it
+// (or rewrites the sentence without the figure) when no primary source confirms it.
+async function correctClaims(draft, bad, signal) {
+  const system = `You correct a US-India tax article. Change ONLY the flagged claims below. For each one: if a
+correction and primary source are given, use the corrected fact and link the source; if it is
+unverifiable, remove the claim or rewrite the sentence without the unverified figure. Keep everything
+else exactly as it is (structure, headings, links, FAQ, tone). Never add a new number, rate or deadline.
+No em dashes. Return ONLY: ===TITLE===<title>===META===<meta description>===CONTENT===<full HTML>===END===`;
+  const user = `Flagged claims:\n${bad
+    .map((c) => `- "${c.claim}" (${c.verdict})${c.correction ? ` Correct: ${c.correction}` : ''}${c.source_url ? ` Source: ${c.source_url}` : ''}`)
+    .join('\n')}\n\nTitle: ${draft.title}\nMeta: ${draft.meta}\n\nHTML:\n${draft.content}`;
+  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 20, effort: 'max', model: FACT_CHECK_MODEL() });
+  const get = (a, b) => {
+    const i = text.indexOf(a);
+    if (i < 0) return '';
+    const j = text.indexOf(b, i + a.length);
+    return text.slice(i + a.length, j < 0 ? undefined : j).trim();
+  };
+  const content = get('===CONTENT===', '===END===');
+  if (!content) throw new Error('Correction pass returned no article');
+  return { title: get('===TITLE===', '===META===') || draft.title, meta: get('===META===', '===CONTENT===') || draft.meta, content };
+}
+
+// Fact-checks a draft against primary sources over and over, correcting it between rounds, until two
+// independent checks in a row find nothing wrong (and every figure sentence was checked). Gives up
+// after FACT_CHECK_ROUNDS (default 50) rounds; the caller then holds the blog instead of publishing.
+// `check` and `correct` are injectable for tests.
+async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], check = factCheckDraft, correct = correctClaims, maxRounds = FACT_CHECK_ROUNDS() }: any = {}) {
+  let current = { title: draft.title, meta: draft.meta, content: draft.content };
+  let clean = 0;
+  const log = [];
+  for (let round = 1; round <= maxRounds; round++) {
+    const mustCheck = mustCheckOf(current.content);
+    const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck });
+    const bad = result.checks.filter((c) => c.verdict !== 'correct');
+    // A figure sentence the checker skipped counts as unverified.
+    const checked = result.checks.map((c) => String(c.claim || '').toLowerCase());
+    const skipped = mustCheck.filter((sent) => !checked.some((c) => c && (sent.toLowerCase().includes(c) || c.includes(sent.toLowerCase().slice(0, 60)))));
+    log.push({ round, claims: result.checks.length, wrong: bad.length, skipped: skipped.length });
+    if (!bad.length && !skipped.length) {
+      clean++;
+      if (clean >= 2) return { ok: true, rounds: round, draft: current, log };
+      continue;
+    }
+    clean = 0;
+    if (!bad.length) continue; // only skipped sentences: check again, they must be covered
+    current = await correct(current, bad, signal);
+  }
+  return { ok: false, rounds: maxRounds, draft: current, log };
 }
 
 // Runs the full "select+research -> draft+optimize -> validate+package" pipeline for one
@@ -802,4 +855,4 @@ writer follows, not a report about the research.>
   return { skillContent, researchSummary, sources, ownPerformanceNote };
 }
 
-export { researchAndWriteBlog, generateDailyDigest, auditBlog, rewriteBlog, generateContentSkill, callClaude };
+export { researchAndWriteBlog, generateDailyDigest, auditBlog, rewriteBlog, generateContentSkill, callClaude, factCheckDraft, verifyAndCorrect };

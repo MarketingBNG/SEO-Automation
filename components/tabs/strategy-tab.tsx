@@ -429,15 +429,12 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
   );
 }
 
-// The approved month's live blog calendar and the Verified Facts Register.
+// The approved month's live blog calendar, with each blog's automatic fact-check result.
 function MonthRunning() {
   const [data, setData] = useState<any>(null);
-  const [facts, setFacts] = useState<any[]>([]);
-  const [f, setF] = useState({ value: '', claim: '', source_url: '' });
   const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(async () => {
     setData(await fetch('/api/strategy/schedule').then((r) => r.json()).catch(() => null));
-    setFacts(await fetch('/api/facts/register').then((r) => r.json()).catch(() => []));
   }, []);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -449,46 +446,37 @@ function MonthRunning() {
     setMsg(res.ok ? 'Marked as reviewed. The reviewed version publishes at its slot.' : 'Could not mark as reviewed.');
     load();
   }
-  async function addFact() {
-    const res = await fetch('/api/facts/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) });
-    const j = await res.json().catch(() => ({}));
-    setMsg(res.ok ? 'Fact added. Held blogs that needed it publish on the next scheduler run.' : j.error);
-    if (res.ok) setF({ value: '', claim: '', source_url: '' });
-    load();
-  }
 
+  const factCheck = (r: any) => {
+    const fc = r.fact_check;
+    if (!fc) return <span className="text-muted-foreground">Not checked yet</span>;
+    return fc.ok ? (
+      <span>Verified ({fc.rounds} rounds{fc.corrected ? ', corrections applied' : ''})</span>
+    ) : (
+      <span className="font-medium text-red-600 dark:text-red-400">Could not verify every claim ({fc.rounds} rounds). Held.</span>
+    );
+  };
+
+  if (!data?.rows?.length) return null;
   return (
     <div className="space-y-4">
       {msg && <div className="rounded-lg border p-2 text-sm">{msg}</div>}
-      {data?.rows?.length > 0 && (
-        <Section title="This month's blogs" description="Blogs enter review 24 hours before their slot. Unreviewed blogs are auto-approved and published on schedule. Blogs with an unverified tax figure, rate or deadline are held.">
-          <DataTable head={['Slot', 'Title', 'Status', 'Held because', '']}>
-            {data.rows.map((r: any) => (
-              <tr key={r.id}>
-                <td className={TD_MUTED}>{fmtDate(r.publish_at)}</td>
-                <td className={TD}>{r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}</td>
-                <td className={TD}>{r.status}{r.approval_mode ? ` (${r.approval_mode === 'auto' ? 'auto-approved' : `reviewed by ${r.reviewed_by || 'reviewer'}`})` : ''}</td>
-                <td className={TD}>{r.hold_reasons?.length ? <ul className="ml-4 list-disc text-xs">{r.hold_reasons.map((h: string, i: number) => <li key={i}>{h}</li>)}</ul> : ''}</td>
-                <td className={TD}>{r.status === 'in_review' && !r.reviewed_at && <Button size="sm" variant="outline" onClick={() => markReviewed(r.id)}>Mark reviewed</Button>}</td>
-              </tr>
-            ))}
-          </DataTable>
-        </Section>
-      )}
-      <Section title="Verified Facts Register" description="Tax figures, rates and deadlines blogs may state. Each needs an official source.">
-        <div className="grid gap-2 sm:grid-cols-4">
-          <Input placeholder='Figure as written, e.g. "30%"' value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} />
-          <Input placeholder="What it is" value={f.claim} onChange={(e) => setF({ ...f, claim: e.target.value })} />
-          <Input placeholder="Official source URL" value={f.source_url} onChange={(e) => setF({ ...f, source_url: e.target.value })} />
-          <Button onClick={addFact}>Add verified fact</Button>
-        </div>
-        {facts.length > 0 && (
-          <DataTable head={['Figure', 'Claim', 'Source', 'Verified by']}>
-            {facts.map((x) => (
-              <tr key={x.id}><td className={TD}>{x.value}</td><td className={TD}>{x.claim}</td><td className={TD_MUTED}><a className="underline" href={x.source_url} target="_blank" rel="noreferrer">source</a></td><td className={TD_MUTED}>{x.verified_by}</td></tr>
-            ))}
-          </DataTable>
-        )}
+      <Section
+        title="This month's blogs"
+        description="Every blog is fact-checked against official sources automatically: wrong claims are corrected and the blog is checked again until two checks in a row are clean. Blogs enter review 24 hours before their slot; unreviewed blogs are auto-approved and published on schedule. A blog that cannot be fully verified is never published."
+      >
+        <DataTable head={['Slot', 'Title', 'Fact check', 'Status', 'Held because', '']}>
+          {data.rows.map((r: any) => (
+            <tr key={r.id}>
+              <td className={TD_MUTED}>{fmtDate(r.publish_at)}</td>
+              <td className={TD}>{r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}</td>
+              <td className={TD}>{factCheck(r)}</td>
+              <td className={TD}>{r.status}{r.approval_mode ? ` (${r.approval_mode === 'auto' ? 'auto-approved' : `reviewed by ${r.reviewed_by || 'reviewer'}`})` : ''}</td>
+              <td className={TD}>{r.hold_reasons?.length ? <ul className="ml-4 list-disc text-xs">{r.hold_reasons.map((h: string, i: number) => <li key={i}>{h}</li>)}</ul> : ''}</td>
+              <td className={TD}>{r.status === 'in_review' && !r.reviewed_at && <Button size="sm" variant="outline" onClick={() => markReviewed(r.id)}>Mark reviewed</Button>}</td>
+            </tr>
+          ))}
+        </DataTable>
       </Section>
     </div>
   );
