@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { markInterrupted } from '@/lib/strategy/jobs';
+import * as settings from '@/lib/settings';
 import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
@@ -13,7 +14,10 @@ export async function GET() {
     prisma.seo_strategies.findMany({ where: { status: { in: ['generating', 'paused', 'stopping'] } }, select: { id: true, period: true, status: true, progress_stage: true, progress_percent: true } }),
     prisma.keywords.findMany({ where: { status: 'generating' }, select: { id: true, keyword: true, progress_stage: true, progress_percent: true } }),
   ]);
+  const aiPaused = (await settings.get('ai_paused')) === '1';
   return NextResponse.json({
+    aiPaused,
+    aiPausedReason: aiPaused ? await settings.get('ai_paused_reason') : null,
     jobs: [
       ...strategies.map((s) => ({ kind: 'strategy', id: s.id, label: `Strategy for ${s.period}`, stage: s.status === 'paused' ? 'Paused' : s.status === 'stopping' ? 'Stopping' : s.progress_stage || 'Starting', paused: s.status === 'paused', percent: s.progress_percent ?? 0 })),
       ...blogs.map((k) => ({ kind: 'blog', id: k.id, label: `Blog: ${k.keyword}`, stage: k.progress_stage || 'Starting', percent: k.progress_percent ?? 0 })),

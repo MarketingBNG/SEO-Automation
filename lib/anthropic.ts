@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as settings from './settings';
 import prisma from './prisma';
 import { rethrowFriendly } from './apiErrors';
+import { assertCredits, recordUsage, onApiError } from './aiCredits';
 import { validateDraft, markUsedQuestions } from './validation';
 import { getWriterPlaybook, getAuditGates } from './playbook';
 import { gatherBrief, formatBrief, aiOverviewSummary } from './researchBrief';
@@ -195,12 +196,14 @@ source, still list it and leave source name/URL as "NONE - could not verify".>
 // batch: true sends the turn through the Message Batches API instead (50% cheaper, but it can take
 // minutes to hours to come back, and refusal fallbacks are not allowed there). Only for unattended
 // jobs nobody is waiting on.
-async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL }: any = {}) {
+async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other' }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
   const assistantMessages: any[] = [];
 
   for (let part = 0; part < 6; part++) {
+    // Refuses to start when AI work is paused for low credits (see lib/aiCredits.ts).
+    await assertCredits();
     if (batch) {
       const response = await runBatchTurn(client, {
         model,
@@ -209,7 +212,11 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
         system: systemPrompt,
         tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxUses }],
         messages: conversation,
-      }, signal);
+      }, signal).catch(async (err: any) => {
+        await onApiError(err);
+        throw err;
+      });
+      await recordUsage({ model, usage: response.usage, feature, batch: true });
       if (response.stop_reason === 'refusal') throw new Error('The AI declined this request.');
       const message = { role: 'assistant', content: response.content };
       assistantMessages.push(message);
@@ -231,7 +238,11 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
       },
       { signal }
     );
-    const response = await stream.finalMessage().catch((err: any) => rethrowFriendly(err, signal));
+    const response = await stream.finalMessage().catch(async (err: any) => {
+      await onApiError(err);
+      return rethrowFriendly(err, signal);
+    });
+    await recordUsage({ model: response.model || model, usage: response.usage, feature });
     if (response.stop_reason === 'refusal') throw new Error('The AI declined this request.');
 
     const message = { role: 'assistant', content: response.content };
@@ -337,7 +348,7 @@ verdict is "correct" only when a primary source confirms it as currently applica
   const user = `Title: ${result.title}\nMeta: ${result.meta}\n\nArticle HTML:\n${result.content}\n\nWriter's Facts Register:\n${(result.facts || [])
     .map((f) => `${f.fact_id} | ${f.claim} | ${f.source_url}`)
     .join('\n')}${mustCheck.length ? `\n\nThese sentences state figures, rates or deadlines. Each one MUST appear in "checks" (quote it as "claim"):\n${mustCheck.map((x) => `- ${x}`).join('\n')}` : ''}`;
-  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 60, effort: 'max', model: FACT_CHECK_MODEL() });
+  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 60, effort: 'max', model: FACT_CHECK_MODEL(), feature: 'fact-check' });
   const m = text.match(/===JSON===([\s\S]*?)===END===/);
   try {
     const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
@@ -361,7 +372,7 @@ No em dashes. Return ONLY: ===TITLE===<title>===META===<meta description>===CONT
   const user = `Flagged claims:\n${bad
     .map((c) => `- "${c.claim}" (${c.verdict})${c.correction ? ` Correct: ${c.correction}` : ''}${c.source_url ? ` Source: ${c.source_url}` : ''}`)
     .join('\n')}\n\nTitle: ${draft.title}\nMeta: ${draft.meta}\n\nHTML:\n${draft.content}`;
-  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 20, effort: 'max', model: FACT_CHECK_MODEL() });
+  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 20, effort: 'max', model: FACT_CHECK_MODEL(), feature: 'fact-check' });
   const get = (a, b) => {
     const i = text.indexOf(a);
     if (i < 0) return '';
@@ -435,7 +446,7 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
       attempt === 0 ? 'Researching sources & writing the draft…' : `Repairing draft, attempt ${attempt}…`,
       18 + attempt * 22
     );
-    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages, signal, { maxUses: WRITER_SEARCHES(), effort: 'max' });
+    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages, signal, { maxUses: WRITER_SEARCHES(), effort: 'max', feature: 'blog' });
 
     onProgress?.('Validating draft & fact-checking claims…', 30 + attempt * 22);
     result = parseBlogResponse(rawText);
@@ -615,7 +626,7 @@ If the piece has no checkable hard claims, leave this section empty.>
     ? `Audit the blog post at this URL: ${sourceUrl}\n\nHere is the raw fetched page content (it includes navigation/header/footer noise - identify and audit only the actual article body):\n\n${content.slice(0, 20000)}`
     : `Audit this blog post${title ? ` titled "${title}"` : ''}:\n\n${content.slice(0, 20000)}`;
 
-  const { text } = await callClaude(systemPrompt, [{ role: 'user', content: userPrompt }], undefined, { maxUses: 8 });
+  const { text } = await callClaude(systemPrompt, [{ role: 'user', content: userPrompt }], undefined, { maxUses: 8, feature: 'audit' });
 
   const get = (start, end) => {
     const startIdx = text.indexOf(start);
@@ -714,7 +725,7 @@ ${content.slice(0, 20000)}`;
   let validation: any;
 
   while (attempt <= MAX_REPAIR_ATTEMPTS) {
-    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages);
+    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages, undefined, { feature: 'audit' });
     result = parseBlogResponse(rawText);
     validation = await validateDraft({ title: result.title, meta: result.meta, content: result.content, facts: result.facts, paaQuestions });
 
@@ -824,7 +835,7 @@ writer follows, not a report about the research.>
     systemPrompt,
     [{ role: 'user', content: "Research and produce this cycle's content-writing skill update." }],
     undefined,
-    { maxUses: 10, batch }
+    { maxUses: 10, batch, feature: 'training' }
   );
 
   const get = (start, end) => {

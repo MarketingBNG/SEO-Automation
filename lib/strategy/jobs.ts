@@ -10,6 +10,7 @@ import prisma from '../prisma';
 import * as activity from '../activity';
 import { generateStrategy } from './generate';
 import { strategyWindow, type StrategyWindow } from './core';
+import { assertCredits } from '../aiCredits';
 
 // Writes progress at most every 2 seconds (and always for 100%).
 export function progressWriter(write: (stage: string, percent: number) => Promise<unknown>) {
@@ -51,6 +52,11 @@ function run(id: number, window: StrategyWindow, actor: string) {
   // Detached on purpose: the self-hosted server keeps running it after the request returns.
   void generateStrategy({ window, actor, rowId: id, onProgress, signal: controller.signal, checkpoint: () => checkpointFor(id, controller) })
     .catch(async (err: any) => {
+      // Credits ran low: keep the run paused (not failed) so Resume starts it again after a top-up.
+      if (err?.name === 'CreditPausedError' || /out of credit|credit balance is too low/i.test(err?.message || '')) {
+        await prisma.seo_strategies.update({ where: { id }, data: { status: 'paused', progress_stage: 'Paused: AI credits low. Add credits, update the balance in Settings, then Resume.' } }).catch(() => {});
+        return;
+      }
       const stopped = controller.signal.aborted || err?.name === 'AbortError' || err?.name === 'APIUserAbortError' || /stopped by user/i.test(err?.message || '');
       if (stopped) {
         await prisma.seo_strategies.update({ where: { id }, data: { status: 'stopped', progress_stage: 'Stopped' } }).catch(() => {});
@@ -98,6 +104,7 @@ export async function controlStrategyJob(id: number, action: 'pause' | 'resume' 
   if (action === 'pause') {
     await prisma.seo_strategies.update({ where: { id }, data: { status: 'paused' } });
   } else if (action === 'resume') {
+    await assertCredits(); // throws a clear message while AI work is paused for credits
     await prisma.seo_strategies.update({ where: { id }, data: { status: 'generating' } });
     // The server lost this run (restart): start it again from the beginning.
     if (!running.has(id)) {

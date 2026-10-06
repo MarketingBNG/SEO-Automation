@@ -1,3 +1,4 @@
+import { assertCredits, recordUsage, onApiError } from '../aiCredits';
 import Anthropic from '@anthropic-ai/sdk';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
@@ -134,6 +135,7 @@ async function runLoop(conv, emit, signal) {
   try {
     let jsonRetries = 0;
     for (let step = 0; step < MAX_STEPS; step++) {
+      await assertCredits();
       const stream = client.beta.messages.stream(
         {
           model: MODEL,
@@ -163,7 +165,9 @@ async function runLoop(conv, emit, signal) {
       try {
         message = await stream.finalMessage();
         jsonRetries = 0;
+        await recordUsage({ model: message.model || MODEL, usage: message.usage, feature: 'assistant' });
       } catch (err: any) {
+        await onApiError(err);
         if (signal.aborted || err instanceof Anthropic.APIError || jsonRetries++ >= 2) throw err;
         emit({ type: 'notice', text: 'Retrying a step that came back malformed…' });
         continue;

@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { AiCreditsCard } from '@/components/shared/ai-credits-card';
 import {
   BarChart3, Building2, ClipboardCopy, ExternalLink, Gauge, Globe, Loader2, MousePointerClick, PlugZap,
   RefreshCw, Search, Spline, Upload, Wand2,
@@ -529,6 +530,7 @@ export default function SettingsTab() {
 
   return (
     <div className="grid gap-10">
+      <AiCreditsCard />
       <Section title="Publishing" description="Where drafts go live and how their SEO fields are written.">
         <ConnCard
           icon={Globe}

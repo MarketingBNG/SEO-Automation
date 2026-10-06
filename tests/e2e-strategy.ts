@@ -27,7 +27,7 @@ async function main() {
   const { validatePlan } = await import('../lib/strategy/core');
   const { runDaily } = await import('../lib/strategy/autopilot');
 
-  for (const t of ['blog_schedule', 'backlink_tasks', 'strategy_edits', 'strategy_changes', 'strategy_keywords', 'client_insights', 'technical_crawls', 'seo_strategies', 'facts', 'drafts', 'keywords', 'activity_log']) {
+  for (const t of ['blog_schedule', 'backlink_tasks', 'strategy_edits', 'strategy_changes', 'strategy_keywords', 'client_insights', 'ai_usage', 'technical_crawls', 'seo_strategies', 'facts', 'drafts', 'keywords', 'activity_log']) {
     await prisma.$executeRawUnsafe(`DELETE FROM "${t}"`);
   }
   await prisma.settings.upsert({ where: { key: 'focus_services' }, create: { key: 'focus_services', value: 'US tax;India entity setup' }, update: { value: 'US tax;India entity setup' } });
@@ -241,6 +241,24 @@ async function main() {
   assert.equal(o!.status, 'failed');
   assert.ok(o!.error!.includes('server restarted'));
   console.log('PASS stuck run from before a restart is marked interrupted');
+
+  // AI credits: spend is counted, and crossing the pause level pauses AI work and a running strategy.
+  const credits = await import('../lib/aiCredits');
+  await prisma.ai_usage.deleteMany({});
+  await credits.setBalance(10, 'Test', 5);
+  const gen = await prisma.seo_strategies.create({ data: { period: 'x', status: 'generating' } });
+  await credits.recordUsage({ model: 'claude-opus-5-5', usage: { input_tokens: 1000000, output_tokens: 100000 }, feature: 'strategy' }); // $6
+  let cs = await credits.creditStatus();
+  assert.equal(Math.round(cs.remaining! * 100) / 100, 4);
+  assert.equal(cs.paused, true);
+  assert.equal((await prisma.seo_strategies.findUnique({ where: { id: gen.id } }))!.status, 'paused');
+  await assert.rejects(credits.assertCredits(), /AI work is paused/);
+  await credits.setBalance(50, 'Test');
+  cs = await credits.creditStatus();
+  assert.equal(cs.paused, false);
+  assert.equal(cs.remaining, 50);
+  await credits.assertCredits();
+  console.log('PASS credits: $6 spent of $10 paused AI work and the strategy at $4 left; new balance resumes');
 
   await prisma.$disconnect();
   console.log('ALL E2E CHECKS PASSED');
