@@ -51,6 +51,9 @@ DATA RULES (strict):
   businessValue is 0-5 (5 = query names a paid service the firm sells).
 - Backlinks: only these methods, spelled exactly: ${SAFE_BACKLINK_METHODS.join('; ')}. Use the
   SE Ranking backlink gap list for outreach targets. Never paid links, link farms, comment spam or PBNs.
+  targetSite MUST be one real website domain (for example "examplecpa.com"), never a description,
+  a list, a platform name with notes, or "DATA MISSING". One row per site. Outreach is sent
+  automatically to that domain. If you have no real domains for a method, leave that method out.
 - No em dashes anywhere.
 
 Return ONLY JSON between ===JSON=== and ===END=== with this shape:

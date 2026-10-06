@@ -12,6 +12,7 @@
 import prisma from '../prisma';
 import * as activity from '../activity';
 import { sqlNow } from '../time';
+import { parseJson } from './generate';
 import { callClaude } from '../anthropic';
 import { listReferringDomains } from '../seranking';
 import { smartleadConfigured, leadExists, addLead } from '../smartlead';
@@ -92,10 +93,29 @@ Mention something specific and true about their site or content (check it with a
   return text.trim().replace(/^["']|["']$/g, '').replace(/—/g, ',');
 }
 
+
+// A task whose target is a description ("Pages linking to outdated ITIN guides") instead of a website.
+export const isRealSite = (site: string) => !/\s/.test(String(site || '').trim()) && /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(domainOf(site));
+
+// Turns a described target into real websites with a web search (a few cents per task).
+async function findSites(task: any) {
+  const { text } = await callClaude(
+    `You find real websites for a safe link-building task for ${HOST()} (cross-border CFO, tax and compliance for US and India businesses).
+Task method: ${task.method}. Use web search. Return up to 3 real, currently live sites that match the description and could reasonably link to our page.
+Never news giants, government sites, forums, social networks, paid-link or guest-post-for-sale sites. Never invent a domain.
+Return ONLY ===JSON===[{"domain":"example.com","why":"one line"}]===END===`,
+    [{ role: 'user', content: `Description: ${task.target_site}\nOur page: ${task.our_page}` }],
+    undefined,
+    { maxUses: 6, effort: 'medium', feature: 'outreach' }
+  );
+  const rows = parseJson(text);
+  return (Array.isArray(rows) ? rows : []).map((r) => domainOf(r.domain)).filter((d) => isRealSite(d) && !d.endsWith(HOST()));
+}
+
 const pageUrl = (p: string) => (p?.startsWith('http') ? p : `${SITE()}${p?.startsWith('/') ? '' : '/'}${p || ''}`);
 
 // One pass: link check, then new leads for Smartlead within the daily cap. `line` is injectable for tests.
-export async function runOutreach(now = new Date(), { checkLinks = true, line: writeLine = openingLine }: any = {}) {
+export async function runOutreach(now = new Date(), { checkLinks = true, line: writeLine = openingLine, find = findSites }: any = {}) {
   const out = { pushed: 0, duplicates: 0, verified: 0, noContact: 0, manual: 0, skipped: '' };
   const today = now.toISOString().slice(0, 10);
   const strategies = await prisma.seo_strategies.findMany({ where: { status: 'approved' }, select: { id: true } });
@@ -107,6 +127,35 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
     await prisma.backlink_tasks.update({ where: { id: t.id }, data: internal ? { status: 'done', note: 'Done automatically with each published blog.' } : { status: 'manual', note: 'Directory sign-up needs a person (forms and captchas).' } });
     t.status = internal ? 'done' : 'manual';
     if (!internal) out.manual++;
+  }
+
+  // Described targets become real websites (at most 3 tasks a day, to keep AI cost low).
+  let resolveBudget = smartleadConfigured() ? 3 : 0;
+  for (const t of tasks.filter((x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && !isRealSite(x.target_site))) {
+    if (/data missing/i.test(t.target_site)) {
+      await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'skipped', note: 'Placeholder, not a real target. Use "Update with latest changes" to add real backlink-gap sites.' } });
+      t.status = 'skipped';
+      continue;
+    }
+    if (resolveBudget-- <= 0) break;
+    try {
+      const sites = await find(t);
+      if (!sites.length) {
+        await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'no_contact', note: `No real site found for: ${t.target_site}` } });
+        t.status = 'no_contact';
+        continue;
+      }
+      const [first, ...more] = sites;
+      await prisma.backlink_tasks.update({ where: { id: t.id }, data: { target_site: first, note: `Found for: ${t.target_site}` } });
+      for (const d of more) {
+        const extra = await prisma.backlink_tasks.create({ data: { strategy_id: t.strategy_id, target_site: d, method: t.method, our_page: t.our_page, send_date: t.send_date, tags: t.tags, note: `Found for: ${t.target_site}` } });
+        tasks.push(extra);
+      }
+      await activity.log('backlink.targets_found', { entityType: 'backlink_task', entityId: t.id, details: `${t.target_site} -> ${sites.join(', ')}` });
+      t.target_site = first;
+    } catch (e: any) {
+      await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: String(e.message || e).slice(0, 300) });
+    }
   }
 
   // Link check: a target that now appears among our referring domains is done.
@@ -129,7 +178,7 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
   const pushedToday = await prisma.backlink_tasks.count({ where: { sent_at: { startsWith: today } } });
   let budget = Math.max(0, DAILY_LIMIT() - pushedToday);
 
-  for (const t of tasks.filter((x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && (!x.send_date || x.send_date.slice(0, 10) <= today))) {
+  for (const t of tasks.filter((x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && isRealSite(x.target_site) && (!x.send_date || x.send_date.slice(0, 10) <= today))) {
     if (budget <= 0) break;
     try {
       const contact = await findContact(t.target_site);
