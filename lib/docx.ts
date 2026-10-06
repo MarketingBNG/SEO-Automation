@@ -21,7 +21,30 @@ export async function fixDrawingIds(docx: Buffer): Promise<Buffer> {
     n += 1;
     return `<wp:docPr id="${n}"${between}<pic:cNvPr id="${n}"`;
   });
-  if (fixed === xml) return docx;
-  zip.file('word/document.xml', fixed);
+  const out = fixTablePropsOrder(moveSectPrToEnd(fixed));
+  if (out === xml) return docx;
+  zip.file('word/document.xml', out);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+// Word requires the page settings (<w:sectPr>) to be the LAST child of <w:body>; html-to-docx writes
+// it first, which Word refuses to open.
+export function moveSectPrToEnd(xml: string): string {
+  const m = xml.match(/<w:body>(\s*)(<w:sectPr>[\s\S]*?<\/w:sectPr>)/);
+  if (!m) return xml;
+  return xml.replace(m[0], '<w:body>' + m[1]).replace('</w:body>', `${m[2]}</w:body>`);
+}
+
+// Word also checks the order of table settings; html-to-docx writes them out of schema order.
+const TBL_ORDER = ['tblStyle', 'tblpPr', 'tblOverlap', 'bidiVisual', 'tblStyleRowBandSize', 'tblStyleColBandSize', 'tblW', 'jc', 'tblCellSpacing', 'tblInd', 'tblBorders', 'shd', 'tblLayout', 'tblCellMar', 'tblLook'];
+export function fixTablePropsOrder(xml: string): string {
+  return xml.replace(/<w:tblPr>([\s\S]*?)<\/w:tblPr>/g, (_m, inner) => {
+    const parts: { name: string; xml: string }[] = [];
+    const re = /<w:(\w+)\b[^>]*?(?:\/>|>[\s\S]*?<\/w:\1>)/g;
+    let t;
+    while ((t = re.exec(inner))) parts.push({ name: t[1], xml: t[0] });
+    const rank = (n: string) => (TBL_ORDER.indexOf(n) < 0 ? 99 : TBL_ORDER.indexOf(n));
+    parts.sort((a, b) => rank(a.name) - rank(b.name));
+    return `<w:tblPr>${parts.map((x) => x.xml).join('')}</w:tblPr>`;
+  });
 }

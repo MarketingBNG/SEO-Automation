@@ -24,3 +24,11 @@ test('report with several charts has unique picture ids and valid XML', async ()
   assert.equal(ids.length, 4);
   assert.equal(new Set(ids).size, 4, `picture ids must be unique, got ${ids.join(',')}`);
 });
+
+test('page settings are moved to the end of the body and table settings are in Word order', async () => {
+  const { moveSectPrToEnd, fixTablePropsOrder } = await import('../lib/docx');
+  const body = moveSectPrToEnd('<w:body>\n<w:sectPr><w:pgSz/></w:sectPr><w:p/></w:body>');
+  assert.match(body, /<w:p\/><w:sectPr><w:pgSz\/><\/w:sectPr><\/w:body>$/);
+  const tbl = fixTablePropsOrder('<w:tblPr><w:tblBorders><w:top/></w:tblBorders><w:tblCellSpacing w:w="0"/><w:jc w:val="center"/></w:tblPr>');
+  assert.equal(tbl, '<w:tblPr><w:jc w:val="center"/><w:tblCellSpacing w:w="0"/><w:tblBorders><w:top/></w:tblBorders></w:tblPr>');
+});
