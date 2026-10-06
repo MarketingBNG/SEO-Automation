@@ -11,6 +11,7 @@ import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { wpRequest, refreshYoast } from '../wordpress';
 import { callClaude } from '../anthropic';
+import { notify } from '../notify';
 
 export function fixKind(issue: string): string {
   if (/^Broken link to /i.test(issue)) return 'broken_link';
@@ -85,17 +86,41 @@ async function closestLivePage(url: string) {
   return (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '') + '/';
 }
 
+// Installs and activates the free Redirection plugin through the WordPress REST API (needs an
+// administrator's application password). Returns true, or the reason it could not.
+export async function ensureRedirectionPlugin(): Promise<true | string> {
+  try {
+    const { json } = await wpRequest('GET', '/wp/v2/plugins', { query: { search: 'redirection' } });
+    const found = (json || []).find((p) => String(p.plugin || '').startsWith('redirection/'));
+    if (found?.status === 'active') return true;
+    if (found) await wpRequest('POST', `/wp/v2/plugins/${found.plugin.replace(/\.php$/, '')}`, { body: { status: 'active' } });
+    else await wpRequest('POST', '/wp/v2/plugins', { body: { slug: 'redirection', status: 'active' } });
+    await activity.log('wordpress.plugin_installed', { details: 'Redirection plugin installed and activated for 301 redirects' });
+    return true;
+  } catch (e: any) {
+    return `could not install the Redirection plugin automatically (${String(e.message || e).slice(0, 200)}). The WordPress user needs the Administrator role, or install it once by hand.`;
+  }
+}
+
 export async function applyFix(task: any): Promise<{ status: 'applied' | 'manual' | 'failed'; result: string }> {
   const kind = task.kind;
   if (kind === 'manual') return { status: 'manual', result: 'Needs a developer (speed, theme, server or code). The dashboard does not change these.' };
 
   if (kind === 'redirect') {
     const to = await closestLivePage(task.url);
-    const res = await wpRequest('POST', '/redirection/v1/redirect', {
-      body: { url: pathOf(task.url), action_data: { url: to }, action_type: 'url', action_code: 301, match_type: 'url', group_id: 1 },
-    }).catch(() => null);
+    const create = () =>
+      wpRequest('POST', '/redirection/v1/redirect', {
+        body: { url: pathOf(task.url), action_data: { url: to }, action_type: 'url', action_code: 301, match_type: 'url', group_id: 1 },
+      }).catch(() => null);
+    let res = await create();
+    // The plugin is missing or inactive: install and activate it once, then try again.
+    if (!res?.json || typeof res.json !== 'object') {
+      const installed = await ensureRedirectionPlugin();
+      if (installed !== true) return { status: 'manual', result: `Redirect not created: ${installed}` };
+      res = await create();
+    }
     const json = res?.json;
-    if (!json || typeof json !== 'object') return { status: 'manual', result: 'Redirect not created: install and activate the free "Redirection" plugin in WordPress, then this fix runs again.' };
+    if (!json || typeof json !== 'object') return { status: 'manual', result: 'Redirect not created: the Redirection plugin is active but did not accept the redirect. Open Tools > Redirection once in WordPress to finish its setup.' };
     await saveUndo(`301 ${task.url} -> ${to}`, 'redirect', json?.items?.[0]?.id || 0, { redirectFrom: pathOf(task.url) });
     return { status: 'applied', result: `301 redirect to ${to}` };
   }
@@ -138,6 +163,7 @@ export async function applyFix(task: any): Promise<{ status: 'applied' | 'manual
 // Runs a few planned fixes per scheduler run, so the site is never changed in one big burst.
 export async function runFixes({ max = 5 } = {}) {
   const out = { applied: 0, manual: 0, failed: 0 };
+  const done: string[] = [];
   const tasks = await prisma.technical_fix_tasks.findMany({ where: { status: 'planned' }, orderBy: { id: 'asc' }, take: max });
   for (const t of tasks) {
     let r;
@@ -149,6 +175,9 @@ export async function runFixes({ max = 5 } = {}) {
     await prisma.technical_fix_tasks.update({ where: { id: t.id }, data: { status: r.status, result: r.result, applied_at: sqlNow() } });
     await activity.log(`technical_fix.${r.status}`, { entityType: 'technical_fix', entityId: t.id, details: `${t.url}: ${t.issue}. ${r.result}` });
     out[r.status]++;
+    done.push(`${r.status === 'applied' ? 'Done' : r.status === 'manual' ? 'Needs a person' : 'Failed'}: ${t.url} (${t.issue}). ${r.result}`);
   }
+  // Send the results so nobody has to open the Activity Log to check the live site.
+  if (done.length) await notify(`Technical fixes: ${out.applied} applied, ${out.manual} need a person, ${out.failed} failed`, done.join('\n')).catch(() => {});
   return out;
 }
