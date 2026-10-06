@@ -374,3 +374,19 @@ model plan_checks {
   result      String // JSON
   created_at  String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }
+
+// Cost of every Claude call, from the token usage the API returns (see lib/aiCredits.ts).
+model ai_usage {
+  id                 Int    @id @default(autoincrement())
+  feature            String // strategy | blog | fact-check | reports | meetings | assistant | other
+  model              String
+  input_tokens       Int    @default(0)
+  output_tokens      Int    @default(0)
+  cache_read_tokens  Int    @default(0)
+  cache_write_tokens Int    @default(0)
+  web_searches       Int    @default(0)
+  cost_usd           Float  @default(0)
+  created_at         String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([created_at])
+}

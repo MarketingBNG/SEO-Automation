@@ -307,7 +307,7 @@ export async function generateStrategy({ window = strategyWindow(), actor = 'Mon
     } : 'DATA MISSING: site analysis',
   };
   const messages = [{ role: 'user', content: `Build the strategy for the 30 days from ${window.start} to ${window.end} (${period}). Targets are for these 30 days. Data (JSON):\n${JSON.stringify(payload).slice(0, 180000)}` }];
-  const opts = { maxUses: STRATEGY_SEARCHES(), effort: 'max', model: STRATEGY_MODEL() };
+  const opts = { maxUses: STRATEGY_SEARCHES(), effort: 'max', model: STRATEGY_MODEL(), feature: 'strategy' };
   const { text, assistantMessages } = await callClaude(systemPrompt(siteUrl), messages, signal, opts);
   let ai;
   try {

@@ -46,7 +46,7 @@ city-level location of a person, our prices, fees, quotes, discounts, timelines 
 and any number specific to this client's deal. Keep general subject matter (for example "registering
 a company in Ontario, Canada", "Canadian corporate tax for a non-resident founder"). Do not add facts.
 No em dashes. Return ONLY: ===TITLE===<short generic theme title, no names>===NOTES===<bullet list>===END===`;
-  const { text } = await callClaude(system, [{ role: 'user', content: `Title: ${title}\n\nNotes:\n${overview}` }], undefined, { maxUses: 1, effort: 'high' });
+  const { text } = await callClaude(system, [{ role: 'user', content: `Title: ${title}\n\nNotes:\n${overview}` }], undefined, { maxUses: 1, effort: 'high', feature: 'meetings' });
   const get = (a, b) => {
     const i = text.indexOf(a);
     if (i < 0) return '';

@@ -147,7 +147,7 @@ export default function Dashboard() {
           <ThemeToggle />
         </header>
         {/* Strategy and blog progress, visible from every tab. */}
-        <JobProgress onOpen={(kind) => setTab(kind === 'strategy' ? 'strategy' : 'keywords')} />
+        <JobProgress onOpen={(kind) => setTab(kind === 'strategy' ? 'strategy' : kind === 'settings' ? 'settings' : 'keywords')} />
 
         <main className="min-w-0 flex-1 p-3 sm:p-6">
           {/* Kept mounted (just hidden) so a running conversation keeps streaming while you look at other tabs. */}

@@ -47,7 +47,7 @@ cannot show why something changed, say so plainly (for example "the data does no
 Respect the data notes (for example impressions not comparable across a reporting change). Name pages
 and KPIs exactly as given. No em dashes, no hype, no headings, no bullet points.`;
   const user = `Report data (JSON):\n${JSON.stringify(slice(perf, view)).slice(0, 60000)}\n\nBlogs published or updated since ${perf.ranges.previous.startDate}:\n${published.map((p) => `- ${p.title} (${p.wp_post_url}) ${p.updated_at}`).join('\n') || 'none recorded'}`;
-  const { text } = await callClaude(system, [{ role: 'user', content: user }], undefined, { maxUses: 1, effort: 'high' });
+  const { text } = await callClaude(system, [{ role: 'user', content: user }], undefined, { maxUses: 1, effort: 'high', feature: 'reports' });
   const paragraph = text.replace(/—/g, ', ').replace(/\s+\n/g, '\n').trim();
   const out = { basis, view, days, text: paragraph, writtenAt: new Date().toISOString() };
   await settings.set(key, JSON.stringify(out));
