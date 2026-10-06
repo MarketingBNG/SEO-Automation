@@ -16,6 +16,7 @@ import { progressWriter } from './jobs';
 import { gatherAiVisibility } from '../aiVisibility';
 import { syncMeetings } from '../clientInsights';
 import { runFixes } from './fixer';
+import { runOutreach } from './outreach';
 import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh } from './core';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
@@ -261,6 +262,11 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
   }
   // Technical fixes ticked in the approved strategy: a few per run.
   summary.fixes = await runFixes().catch((e) => ({ error: e.message }));
+  // Backlink outreach (leads pushed to Smartlead) and link check, once per day.
+  if ((await settings.get('last_outreach_run')) !== today) {
+    summary.outreach = await runOutreach(now).catch((e) => ({ error: e.message }));
+    if (!summary.outreach?.error) await settings.set('last_outreach_run', today);
+  }
   // Fireflies meetings: pull new ones and auto-review them, once per day.
   if (process.env.FIREFLIES_API_KEY && (await settings.get('last_meeting_sync')) !== today) {
     summary.meetings = await syncMeetings().catch((e) => ({ error: e.message }));
