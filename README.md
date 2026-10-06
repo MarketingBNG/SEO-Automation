@@ -33,7 +33,7 @@ node -e "fetch('http://localhost:'+(process.env.PORT||3000)+'/api/cron/daily',{h
 
 | Path | Schedule (UTC) | What it does |
 |---|---|---|
-| `/api/cron/daily` | `*/15 * * * *` (every 15 min) | Blog drafts, 24-hour review window, auto-approve and publish after the automatic fact check; rank check once a day |
+| `/api/cron/daily` | `*/15 * * * *` (every 15 min) | Blog drafts, 24-hour review window, auto-approve and publish after the automatic fact check; once a day: rank check and Fireflies meeting sync (meetings are cleaned of names, prices and contact details, then auto-approved) |
 | `/api/cron/weekly` | `0 5 * * 1` (Mondays) | Plan vs actual check |
 | `/api/strategy/auto-check` | `30 3 1 * *` (1st of month) | Generates next month's strategy |
 | `/api/skill/auto-check` | `0 3 * * *` | Refreshes the writing skill when it is 15+ days old |

@@ -14,6 +14,7 @@ import { notify } from '../notify';
 import * as settings from '../settings';
 import { progressWriter } from './jobs';
 import { gatherAiVisibility } from '../aiVisibility';
+import { syncMeetings } from '../clientInsights';
 import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh } from './core';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
@@ -256,6 +257,11 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
   if ((await settings.get('last_rank_check')) !== today) {
     summary.rankAlerts = await dailyRankCheck(now).catch((e) => ({ error: e.message }));
     if (!summary.rankAlerts?.error) await settings.set('last_rank_check', today);
+  }
+  // Fireflies meetings: pull new ones and auto-review them, once per day.
+  if (process.env.FIREFLIES_API_KEY && (await settings.get('last_meeting_sync')) !== today) {
+    summary.meetings = await syncMeetings().catch((e) => ({ error: e.message }));
+    if (!summary.meetings?.error) await settings.set('last_meeting_sync', today);
   }
   return summary;
 }
