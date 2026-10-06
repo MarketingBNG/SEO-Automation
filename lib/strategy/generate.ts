@@ -7,7 +7,7 @@ import * as settings from '../settings';
 import { callClaude } from '../anthropic';
 import { gatherStrategyInputs, keywordData } from './inputs';
 import {
-  CORE_OBJECTIVE, SAFEGUARDS, SAFE_BACKLINK_METHODS, CHANNELS, priorityScore, validatePlan, keywordKey, nextPeriod, periodStart, metric,
+  CORE_OBJECTIVE, SAFEGUARDS, SAFE_BACKLINK_METHODS, CHANNELS, priorityScore, validatePlan, keywordKey, metric, strategyWindow, windowOf,
 } from './core';
 
 // The strongest model available, at maximum effort, for strategy research. Override in Vercel.
@@ -84,23 +84,28 @@ function scrub(o) {
   return noDash(o);
 }
 
-// Publish slots for the month: the given weekdays at the given IST time, in UTC text.
-export function calendarSlots(period: string, days: string[], timeIst: string, count: number) {
-  const start = periodStart(period);
+// Publish slots inside the strategy window: the given weekdays at the given IST time, in UTC text.
+// Slots earlier than `notBefore` (default: 48 hours from now, so a blog can be drafted, fact-checked
+// and reviewed first) are skipped.
+export function calendarSlots(window: any, days: string[], timeIst: string, count: number, notBefore = new Date(Date.now() + 48 * 3600000)) {
+  const w = typeof window === 'string' || !window?.start ? windowOf(window) : window;
+  const start = new Date(`${w.start}T00:00:00Z`);
+  const end = new Date(`${w.end}T00:00:00Z`);
   const [h, m] = String(timeIst || '10:00').split(':').map(Number);
   const wanted = new Set(days.map((d) => d.slice(0, 3).toLowerCase()));
   const out: string[] = [];
-  for (let d = new Date(start); d.getUTCMonth() === start.getUTCMonth() && out.length < count; d.setUTCDate(d.getUTCDate() + 1)) {
+  for (let d = new Date(start); d <= end && out.length < count; d.setUTCDate(d.getUTCDate() + 1)) {
     const name = d.toLocaleString('en-US', { weekday: 'short', timeZone: 'UTC' }).toLowerCase();
     if (!wanted.has(name)) continue;
     const utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h, m) - 330 * 60000); // IST is UTC+5:30
+    if (utc < notBefore) continue;
     out.push(utc.toISOString().slice(0, 19).replace('T', ' '));
   }
   return out;
 }
 
 // Turns the AI's choices plus real data into the stored 11-section plan.
-export async function buildPlan(ai, inputs, period) {
+export async function buildPlan(ai, inputs, period, window = windowOf(period)) {
   ai = scrub(ai);
   const rankBy = new Map((inputs.rankings || []).map((r) => [keywordKey(r.keyword), r]));
 
@@ -140,7 +145,7 @@ export async function buildPlan(ai, inputs, period) {
     .filter(Boolean);
   const time = (await settings.get('posting_time_ist')) || '10:00';
   const cal = ai.blogPlan?.calendar || [];
-  const slots = calendarSlots(period, days, time, cal.length);
+  const slots = calendarSlots(window, days, time, cal.length);
   const calendar = cal.slice(0, slots.length).map((b, i) => ({
     publishDate: slots[i],
     title: b.title,
@@ -155,7 +160,7 @@ export async function buildPlan(ai, inputs, period) {
   }));
 
   // Backlink send dates spread across weekdays of the month.
-  const sendSlots = calendarSlots(period, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], '11:00', 40);
+  const sendSlots = calendarSlots(window, ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], '11:00', 40, new Date(0));
   const backlinks = (ai.backlinks || []).map((b, i) => ({
     targetSite: b.targetSite,
     method: b.method,
@@ -201,6 +206,8 @@ export async function buildPlan(ai, inputs, period) {
   return {
     schema: 2,
     period,
+    startDate: window.start,
+    endDate: window.end,
     coreObjective: CORE_OBJECTIVE,
     lastMonthTrend: inputs.lastMonthTrend,
     trendSources: inputs.trendSources,
@@ -266,12 +273,22 @@ export function technicalFixesFromCrawl(crawl) {
 }
 
 // rowId: an existing 'generating' row (background job) to fill in instead of creating a new one.
-export async function generateStrategy({ period = nextPeriod(), actor = 'Monthly auto-run', onProgress, signal, rowId }: any = {}) {
+// window: the 30 days the strategy covers (default: starting today).
+// checkpoint: awaited between steps; it pauses (waits) or stops (throws) the run when asked.
+export async function generateStrategy({ window = strategyWindow(), actor = 'Monthly auto-run', onProgress, signal, rowId, checkpoint = async () => {} }: any = {}) {
+  const period = window.label;
   const siteUrl = process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com';
+  await checkpoint();
   onProgress?.('Collecting real data from every connected tool', 3);
-  const inputs = await gatherStrategyInputs({ onStep: (l, f) => onProgress?.(l, Math.round(3 + 40 * f)) });
+  const inputs = await gatherStrategyInputs({
+    onStep: async (l, f) => {
+      onProgress?.(l, Math.round(3 + 40 * f));
+      await checkpoint();
+    },
+  });
 
-  onProgress?.('Deep research and writing the strategy', 45);
+  await checkpoint();
+  onProgress?.('Deep research and writing the strategy (the longest step, several minutes)', 45);
   const { snapshot, rankings, ...rest } = inputs;
   const payload = {
     period,
@@ -289,7 +306,7 @@ export async function generateStrategy({ period = nextPeriod(), actor = 'Monthly
       candidates: snapshot.analysis.candidates,
     } : 'DATA MISSING: site analysis',
   };
-  const messages = [{ role: 'user', content: `Build the ${period} strategy from this data (JSON):\n${JSON.stringify(payload).slice(0, 180000)}` }];
+  const messages = [{ role: 'user', content: `Build the strategy for the 30 days from ${window.start} to ${window.end} (${period}). Targets are for these 30 days. Data (JSON):\n${JSON.stringify(payload).slice(0, 180000)}` }];
   const opts = { maxUses: STRATEGY_SEARCHES(), effort: 'max', model: STRATEGY_MODEL() };
   const { text, assistantMessages } = await callClaude(systemPrompt(siteUrl), messages, signal, opts);
   let ai;
@@ -300,8 +317,9 @@ export async function generateStrategy({ period = nextPeriod(), actor = 'Monthly
     ai = parseJson(retry.text);
   }
 
+  await checkpoint();
   onProgress?.('Filling numbers from data and validating', 85);
-  const plan = await buildPlan(ai, inputs, period);
+  const plan = await buildPlan(ai, inputs, period, window);
   const used = new Set((await prisma.strategy_keywords.findMany({ select: { keyword_key: true } })).map((k) => k.keyword_key));
   const validation = validatePlan(plan, { usedKeywords: used, focusServices: inputs.focusServices });
 
@@ -309,6 +327,8 @@ export async function generateStrategy({ period = nextPeriod(), actor = 'Monthly
   await prisma.seo_strategies.updateMany({ where: { period, status: { in: ['pending_review'] }, ...(rowId ? { id: { not: rowId } } : {}) }, data: { status: 'superseded' } });
   const data = {
     period,
+    start_date: window.start,
+    end_date: window.end,
     summary: plan.summary.focus,
     plan_json: JSON.stringify(plan),
     validation: JSON.stringify(validation),

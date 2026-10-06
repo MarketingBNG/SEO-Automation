@@ -196,7 +196,7 @@ async function main() {
 
   // Background generation: returns at once; a failure is saved with a readable error, not lost.
   const { startStrategyJob } = await import('../lib/strategy/jobs');
-  const job = await startStrategyJob({ period: 'January 2027', actor: 'Test' });
+  const job = await startStrategyJob({ actor: 'Test' });
   let st: any = await prisma.seo_strategies.findUnique({ where: { id: job.id } });
   assert.equal(st.status, 'generating');
   for (let i = 0; i < 120 && st.status === 'generating'; i++) {
@@ -206,6 +206,32 @@ async function main() {
   assert.equal(st.status, 'failed');
   assert.ok(st.error && st.error.length > 0);
   console.log('PASS background generation reports progress and a readable failure:', st.progress_stage, '|', st.error.slice(0, 90));
+
+  // Pause holds the run, Resume continues it, Stop cancels it.
+  const { controlStrategyJob } = await import('../lib/strategy/jobs');
+  const waitFor = async (id: number, want: (s: string) => boolean, secs = 120) => {
+    let r: any;
+    for (let i = 0; i < secs; i++) {
+      r = await prisma.seo_strategies.findUnique({ where: { id } });
+      if (want(r.status)) return r;
+      await new Promise((res) => setTimeout(res, 1000));
+    }
+    return r;
+  };
+  const j2 = await startStrategyJob({ actor: 'Test' });
+  await controlStrategyJob(j2.id, 'pause', 'Test');
+  await new Promise((res) => setTimeout(res, 6000));
+  assert.equal((await prisma.seo_strategies.findUnique({ where: { id: j2.id } }))!.status, 'paused');
+  await controlStrategyJob(j2.id, 'resume', 'Test');
+  const resumed = await waitFor(j2.id, (x) => x !== 'generating');
+  assert.equal(resumed.status, 'failed'); // ran on after resume, then failed for lack of an API key
+  const j3 = await startStrategyJob({ actor: 'Test' });
+  await controlStrategyJob(j3.id, 'pause', 'Test');
+  await controlStrategyJob(j3.id, 'stop', 'Test');
+  const stopped = await waitFor(j3.id, (x) => x === 'stopped', 30);
+  assert.equal(stopped.status, 'stopped');
+  assert.ok(stopped.start_date && stopped.end_date, '30-day window saved');
+  console.log('PASS pause holds, resume continues, stop cancels; window', stopped.start_date, 'to', stopped.end_date);
 
   await prisma.$disconnect();
   console.log('ALL E2E CHECKS PASSED');

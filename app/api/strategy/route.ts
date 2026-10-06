@@ -1,19 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { strategyView } from '@/lib/strategy/service';
 import { startStrategyJob } from '@/lib/strategy/jobs';
-import { nextPeriod } from '@/lib/strategy/core';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../_lib/http';
 
 // Strategy v2. GET lists strategies (newest first): finished ones in the 11-section view, plus any
 // that are generating (with live progress) or failed (with the error).
-// POST starts a generation in the background and returns at once; the page polls GET for progress.
+// POST starts a generation for the 30 days from today, in the background, and returns at once;
+// the page polls GET for progress.
 export const runtime = 'nodejs';
 
 export async function GET() {
   const rows = await prisma.seo_strategies.findMany({
-    where: { OR: [{ plan_json: { not: null } }, { status: { in: ['generating', 'failed'] } }] },
+    where: { OR: [{ plan_json: { not: null } }, { status: { in: ['generating', 'paused', 'stopping', 'stopped', 'failed'] } }] },
     orderBy: { id: 'desc' },
     take: 12,
   });
@@ -25,10 +25,9 @@ export async function GET() {
   return NextResponse.json(views);
 }
 
-export async function POST(req: NextRequest) {
-  const body: any = await req.json().catch(() => ({}));
-  try {
-    const job = await startStrategyJob({ period: body?.period || nextPeriod(), actor: await getActor() });
+export async function POST() {
+    try {
+    const job = await startStrategyJob({ actor: await getActor() });
     return NextResponse.json(job, { status: 202 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -193,6 +193,9 @@ model seo_strategies {
   progress_stage            String?
   progress_percent          Int?
   error                     String?
+  // The 30 days the strategy covers (YYYY-MM-DD, India time).
+  start_date                String?
+  end_date                  String?
 }
 
 model writing_skills {
