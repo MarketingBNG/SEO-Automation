@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { researchAndWriteBlog } from '@/lib/anthropic';
 import * as activity from '@/lib/activity';
+import { progressWriter } from '@/lib/strategy/jobs';
 import { methodNotAllowed } from '../_lib/http';
 
 // Streams newline-delimited JSON progress events over the same connection instead of a single
@@ -64,11 +65,18 @@ export async function POST(req: NextRequest) {
 
       (async () => {
         send({ stage: 'Starting…', percent: 2 });
+        // Also saved on the keyword row, so the header progress bar shows it on every tab.
+        const saveProgress = progressWriter((stage, percent) =>
+          prisma.keywords.update({ where: { id: keyword.id }, data: { progress_stage: stage, progress_percent: percent } })
+        );
 
         try {
           const result: any = await researchAndWriteBlog(keyword.keyword, keyword.notes, {
             signal: controller.signal,
-            onProgress: (stage: any, percent: any) => send({ stage, percent }),
+            onProgress: (stage: any, percent: any) => {
+              send({ stage, percent });
+              saveProgress(stage, percent);
+            },
           });
 
           const draft = await prisma.drafts.create({
@@ -106,7 +114,7 @@ export async function POST(req: NextRequest) {
             });
           }
 
-          await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'drafted' } });
+          await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'drafted', progress_stage: null, progress_percent: null } });
 
           await activity.log('draft.generated', {
             entityType: 'draft',
@@ -129,7 +137,7 @@ export async function POST(req: NextRequest) {
           });
         } catch (err: any) {
           if (controller.signal.aborted || err.name === 'AbortError' || err.name === 'APIUserAbortError') {
-            await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'pending' } }).catch((e) => console.error(e));
+            await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'pending', progress_stage: null, progress_percent: null } }).catch((e) => console.error(e));
             await activity.log('draft.generation_stopped', {
               entityType: 'keyword',
               entityId: keyword.id,
@@ -138,7 +146,7 @@ export async function POST(req: NextRequest) {
             send({ status: 'stopped', stage: 'Stopped by user' });
           } else {
             console.error(err);
-            await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'failed', error: err.message } }).catch((e) => console.error(e));
+            await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'failed', error: err.message, progress_stage: null, progress_percent: null } }).catch((e) => console.error(e));
             await activity.log('draft.generation_failed', {
               entityType: 'keyword',
               entityId: keyword.id,

@@ -226,6 +226,54 @@ function GeoView({ p, split }: { p: any; split: number }) {
   );
 }
 
+// The paragraph at the end of each report: what improved and why, which block, what did not and
+// why, and what is causing problems. Written by Claude from the report's own numbers.
+function WhyItChanged({ view, days }: { view: string; days: number }) {
+  const [d, setD] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const load = useCallback(
+    async (fresh = false) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/performance/explain?view=${view}&days=${days}${fresh ? '&fresh=1' : ''}`);
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.error || `Request failed (${res.status})`);
+        setD(j);
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [view, days]
+  );
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [load]);
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-2">
+        <div className="space-y-1">
+          <CardTitle>Why it changed</CardTitle>
+          <CardDescription>What improved and why, which block drove it, what did not improve, and what is causing problems. Based only on the numbers in this report.</CardDescription>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => load(true)} disabled={loading}>
+          {loading ? <Loader2 className="animate-spin" /> : <RefreshCcw />}
+          Rewrite
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {loading && !d && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Reading the report and writing the explanation…</p>}
+        {error && <p className="text-sm text-destructive">Error: {error}</p>}
+        {d && <p className="text-sm leading-relaxed whitespace-pre-wrap">{d.text}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function PerformanceTab({ view, onOpen }: { view: string; onOpen?: (v: string) => void }) {
   const [days, setDays] = useState(28);
   const [data, setData] = useState<any>(null);
@@ -382,6 +430,8 @@ export default function PerformanceTab({ view, onOpen }: { view: string; onOpen?
           </CardContent>
         </Card>
       )}
+
+      {p && <WhyItChanged key={`${view}-${days}`} view={view} days={days} />}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { getTermsForKeyword } from '../surfer';
 import { submitIndexNow, resubmitSitemap } from '../indexing';
 import { notify } from '../notify';
 import * as settings from '../settings';
+import { progressWriter } from './jobs';
 import { gatherAiVisibility } from '../aiVisibility';
 import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh } from './core';
 
@@ -27,7 +28,16 @@ async function writeDraft(row) {
   const kw = await prisma.keywords.create({
     data: { batch_name: `Strategy #${row.strategy_id}`, keyword: row.main_keyword, notes: `Planned title: ${row.title}. Channels: ${JSON.parse(row.tags).join(', ')}.${row.refresh_url ? ` Refresh of ${row.refresh_url}.` : ''}`, status: 'generating' },
   });
-  const result = await researchAndWriteBlog(row.main_keyword, kw.notes);
+  const onProgress = progressWriter((stage, percent) => prisma.keywords.update({ where: { id: kw.id }, data: { progress_stage: stage, progress_percent: percent } }));
+  let result;
+  try {
+    result = await researchAndWriteBlog(row.main_keyword, kw.notes, { onProgress });
+  } catch (err: any) {
+    // Never leave the keyword stuck as "generating"; the next scheduler run tries again.
+    await prisma.keywords.update({ where: { id: kw.id }, data: { status: 'failed', error: String(err.message || err).slice(0, 1000), progress_stage: null, progress_percent: null } });
+    await update(row.id, { status: 'planned' });
+    throw err;
+  }
   const draft = await prisma.drafts.create({
     data: {
       keyword_id: kw.id,
@@ -49,7 +59,7 @@ async function writeDraft(row) {
   for (const f of result.facts) {
     await prisma.facts.create({ data: { draft_id: draft.id, fact_id: f.fact_id, claim: f.claim, source_name: f.source_name, source_url: f.source_url, jurisdiction: f.jurisdiction, effective_date: f.effective_date } });
   }
-  await prisma.keywords.update({ where: { id: kw.id }, data: { status: 'drafted' } });
+  await prisma.keywords.update({ where: { id: kw.id }, data: { status: 'drafted', progress_stage: null, progress_percent: null } });
   await update(row.id, { keyword_id: kw.id, draft_id: draft.id, status: 'planned' });
   await activity.log('schedule.drafted', { entityType: 'draft', entityId: draft.id, details: `"${result.title}" for ${row.publish_at} UTC` });
   return draft;

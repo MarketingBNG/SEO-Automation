@@ -24,7 +24,7 @@ export async function GET() {
   const kw = stuck.length
     ? await prisma.keywords.updateMany({
         where: { id: { in: stuck.map((k) => k.id) }, status: 'generating' },
-        data: { status: 'pending' },
+        data: { status: 'pending', progress_stage: null, progress_percent: null },
       })
     : { count: 0 };
 
@@ -37,7 +37,15 @@ export async function GET() {
     data: { status: 'idle' },
   });
 
+  // A strategy still 'generating' after 3 hours was cut off by a restart: mark it failed so a new
+  // one can be started.
+  const strategies = await prisma.seo_strategies.updateMany({
+    where: { status: 'generating', created_at: { lt: sqlNowOffset('-180 minutes') } },
+    data: { status: 'failed', error: 'Generation was interrupted (server restart or crash). Start it again.', progress_stage: 'Failed' },
+  });
+
   return NextResponse.json({
+    strategiesFailed: strategies.count,
     keywordsReset: kw.count,
     conversationsAwaitingApproval: awaiting.count,
     conversationsIdle: idle.count,

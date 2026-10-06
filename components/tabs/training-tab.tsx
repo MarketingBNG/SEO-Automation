@@ -44,6 +44,10 @@ export default function TrainingTab() {
   const [showHistory, setShowHistory] = useState(false);
   const [playbook, setPlaybook] = useState('');
   const [showPlaybook, setShowPlaybook] = useState(false);
+  // Manual edit of the active writing skill.
+  const [editingSkill, setEditingSkill] = useState(false);
+  const [skillDraft, setSkillDraft] = useState({ skill_content: '', research_summary: '' });
+  const [savingSkill, setSavingSkill] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setSettingsError(null);
@@ -101,6 +105,22 @@ export default function TrainingTab() {
       setMessage('Error: ' + err.message);
     } finally {
       setSavingSettings(false);
+    }
+  }
+
+  async function saveSkill() {
+    setSavingSkill(true);
+    setSkillError(null);
+    try {
+      const res = await fetch('/api/skill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(skillDraft) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      setEditingSkill(false);
+      await load();
+    } catch (err: any) {
+      setSkillError(err.message);
+    } finally {
+      setSavingSkill(false);
     }
   }
 
@@ -259,16 +279,52 @@ export default function TrainingTab() {
 
           {active && (
             <div className="grid gap-3">
+              <div className="flex flex-wrap gap-2">
+                {!editingSkill ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSkillDraft({ skill_content: active.skill_content || '', research_summary: active.research_summary || '' });
+                      setEditingSkill(true);
+                    }}
+                  >
+                    Edit skill
+                  </Button>
+                ) : (
+                  <>
+                    <Button onClick={saveSkill} disabled={savingSkill}>
+                      {savingSkill ? <Loader2 className="animate-spin" /> : null}
+                      Save as new version
+                    </Button>
+                    <Button variant="ghost" onClick={() => setEditingSkill(false)} disabled={savingSkill}>
+                      Cancel
+                    </Button>
+                  </>
+                )}
+              </div>
+              {editingSkill && (
+                <p className="text-muted-foreground text-sm">
+                  Change, remove or rewrite anything. Saving keeps the old version in the history below, and future drafts use your edited version.
+                </p>
+              )}
               <Field label="Current skill">
-                <div className="bg-muted/40 max-h-[300px] overflow-auto rounded-md border p-3 text-sm whitespace-pre-wrap">
-                  {active.skill_content}
-                </div>
-              </Field>
-              {active.research_summary && (
-                <Field label="What changed this cycle">
-                  <div className="bg-muted/40 max-h-[150px] overflow-auto rounded-md border p-3 text-sm whitespace-pre-wrap">
-                    {active.research_summary}
+                {editingSkill ? (
+                  <Textarea className="min-h-[300px] text-sm" value={skillDraft.skill_content} onChange={(e) => setSkillDraft({ ...skillDraft, skill_content: e.target.value })} />
+                ) : (
+                  <div className="bg-muted/40 max-h-[300px] overflow-auto rounded-md border p-3 text-sm whitespace-pre-wrap">
+                    {active.skill_content}
                   </div>
+                )}
+              </Field>
+              {(active.research_summary || editingSkill) && (
+                <Field label="What changed this cycle">
+                  {editingSkill ? (
+                    <Textarea className="min-h-[150px] text-sm" value={skillDraft.research_summary} onChange={(e) => setSkillDraft({ ...skillDraft, research_summary: e.target.value })} />
+                  ) : (
+                    <div className="bg-muted/40 max-h-[150px] overflow-auto rounded-md border p-3 text-sm whitespace-pre-wrap">
+                      {active.research_summary}
+                    </div>
+                  )}
                 </Field>
               )}
               {active.sources && active.sources.length > 0 && (

@@ -265,7 +265,8 @@ export function technicalFixesFromCrawl(crawl) {
   return fixes.slice(0, 80);
 }
 
-export async function generateStrategy({ period = nextPeriod(), actor = 'Monthly auto-run', onProgress, signal }: any = {}) {
+// rowId: an existing 'generating' row (background job) to fill in instead of creating a new one.
+export async function generateStrategy({ period = nextPeriod(), actor = 'Monthly auto-run', onProgress, signal, rowId }: any = {}) {
   const siteUrl = process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com';
   onProgress?.('Collecting real data from every connected tool', 3);
   const inputs = await gatherStrategyInputs({ onStep: (l, f) => onProgress?.(l, Math.round(3 + 40 * f)) });
@@ -305,18 +306,20 @@ export async function generateStrategy({ period = nextPeriod(), actor = 'Monthly
   const validation = validatePlan(plan, { usedKeywords: used, focusServices: inputs.focusServices });
 
   // Older strategies for the same month that were never approved are replaced by this one.
-  await prisma.seo_strategies.updateMany({ where: { period, status: { in: ['pending_review'] } }, data: { status: 'superseded' } });
-  const row = await prisma.seo_strategies.create({
-    data: {
-      period,
-      summary: plan.summary.focus,
-      plan_json: JSON.stringify(plan),
-      validation: JSON.stringify(validation),
-      data_snapshot: JSON.stringify(snapshot || {}),
-      status: 'pending_review',
-      version: 1,
-    },
-  });
+  await prisma.seo_strategies.updateMany({ where: { period, status: { in: ['pending_review'] }, ...(rowId ? { id: { not: rowId } } : {}) }, data: { status: 'superseded' } });
+  const data = {
+    period,
+    summary: plan.summary.focus,
+    plan_json: JSON.stringify(plan),
+    validation: JSON.stringify(validation),
+    data_snapshot: JSON.stringify(snapshot || {}),
+    status: 'pending_review',
+    version: 1,
+    progress_stage: 'Done',
+    progress_percent: 100,
+    error: null,
+  };
+  const row = rowId ? await prisma.seo_strategies.update({ where: { id: rowId }, data }) : await prisma.seo_strategies.create({ data });
   await activity.log('strategy.generated', { entityType: 'seo_strategy', entityId: row.id, details: `${period}: ${validation.errors.length} validation error(s)`, actor });
   onProgress?.('Done', 100);
   return row.id;

@@ -1,57 +1,37 @@
-import { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { generateStrategy } from '@/lib/strategy/generate';
 import { strategyView } from '@/lib/strategy/service';
+import { startStrategyJob } from '@/lib/strategy/jobs';
 import { nextPeriod } from '@/lib/strategy/core';
-import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../_lib/http';
 
-// Strategy v2. GET lists strategies (newest first) in the 11-section view.
-// POST generates one now (streamed progress); the monthly cron does the same on the 1st.
+// Strategy v2. GET lists strategies (newest first): finished ones in the 11-section view, plus any
+// that are generating (with live progress) or failed (with the error).
+// POST starts a generation in the background and returns at once; the page polls GET for progress.
 export const runtime = 'nodejs';
-// Only applies on Vercel (300 is its plan limit). The self-hosted Coolify server has no time limit.
-export const maxDuration = 300;
 
 export async function GET() {
-  const rows = await prisma.seo_strategies.findMany({ where: { plan_json: { not: null } }, orderBy: { id: 'desc' }, take: 12 });
+  const rows = await prisma.seo_strategies.findMany({
+    where: { OR: [{ plan_json: { not: null } }, { status: { in: ['generating', 'failed'] } }] },
+    orderBy: { id: 'desc' },
+    take: 12,
+  });
   const views: any[] = [];
-  for (const r of rows) views.push(await strategyView(r));
+  for (const r of rows) {
+    if (r.plan_json) views.push(await strategyView(r));
+    else views.push({ id: r.id, period: r.period, status: r.status, version: r.version, created_at: r.created_at, progress: { stage: r.progress_stage, percent: r.progress_percent }, error: r.error });
+  }
   return NextResponse.json(views);
 }
 
 export async function POST(req: NextRequest) {
   const body: any = await req.json().catch(() => ({}));
-  const actor = await getActor();
-  const controller = new AbortController();
-  req.signal.addEventListener('abort', () => controller.abort());
-  const enc = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(ctrl) {
-      const send = (o: any) => {
-        try {
-          ctrl.enqueue(enc.encode(JSON.stringify(o) + '\n'));
-        } catch {}
-      };
-      try {
-        const id = await generateStrategy({
-          period: body?.period || nextPeriod(),
-          actor,
-          signal: controller.signal,
-          onProgress: (stage: string, percent: number) => send({ stage, percent }),
-        });
-        send({ status: 'done', id });
-      } catch (err: any) {
-        await activity.log('strategy.generation_failed', { entityType: 'seo_strategy', details: err.message, actor });
-        send({ status: 'error', error: err.message });
-      } finally {
-        try {
-          ctrl.close();
-        } catch {}
-      }
-    },
-  });
-  return new Response(stream, { headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache, no-transform' } });
+  try {
+    const job = await startStrategyJob({ period: body?.period || nextPeriod(), actor: await getActor() });
+    return NextResponse.json(job, { status: 202 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 }
 export { methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };
