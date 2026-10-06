@@ -27,7 +27,7 @@ async function main() {
   const { validatePlan } = await import('../lib/strategy/core');
   const { runDaily } = await import('../lib/strategy/autopilot');
 
-  for (const t of ['blog_schedule', 'backlink_tasks', 'strategy_edits', 'strategy_changes', 'strategy_keywords', 'technical_crawls', 'seo_strategies', 'facts', 'drafts', 'keywords', 'activity_log']) {
+  for (const t of ['blog_schedule', 'backlink_tasks', 'strategy_edits', 'strategy_changes', 'strategy_keywords', 'client_insights', 'technical_crawls', 'seo_strategies', 'facts', 'drafts', 'keywords', 'activity_log']) {
     await prisma.$executeRawUnsafe(`DELETE FROM "${t}"`);
   }
   await prisma.settings.upsert({ where: { key: 'focus_services' }, create: { key: 'focus_services', value: 'US tax;India entity setup' }, update: { value: 'US tax;India entity setup' } });
@@ -182,6 +182,17 @@ async function main() {
   assert.equal(r!.status, 'held');
   assert.ok(JSON.parse(r!.hold_reasons!).some((x: string) => x.startsWith('Fact check could not confirm')));
   console.log('PASS unverifiable blog held, not published');
+
+  // Meeting insights: cleaned and auto-approved, or held when something identifying is left.
+  const { autoReview } = await import('../lib/clientInsights');
+  const ins = await prisma.client_insights.create({ data: { title: 'Canada incorporation (Amit Agarwal)', overview: 'Pricing starts at USD 1,450. Ontario chosen.', status: 'pending_review' } });
+  const good = await autoReview(ins.id, { cleaner: async () => ({ title: 'Incorporating in Canada', overview: '- Why Ontario is common for non-resident founders.' }) });
+  assert.equal(good!.status, 'approved');
+  assert.ok(!good!.overview!.includes('1,450') && !good!.title!.includes('Amit'));
+  const ins2 = await prisma.client_insights.create({ data: { title: 'Call (Amit Agarwal)', overview: 'x', status: 'pending_review' } });
+  const bad = await autoReview(ins2.id, { cleaner: async () => ({ title: 'Call', overview: 'Amit was quoted USD 900.' }) });
+  assert.equal(bad!.status, 'pending_review');
+  console.log('PASS meeting insights: clean ones auto-approved, unsafe ones held for review');
 
   // Background generation: returns at once; a failure is saved with a readable error, not lost.
   const { startStrategyJob } = await import('../lib/strategy/jobs');

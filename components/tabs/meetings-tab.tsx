@@ -41,13 +41,15 @@ export default function MeetingsTab() {
     }
   }
 
+  // Pulls recent Fireflies meetings and cleans and approves them now (the daily job does the same).
   async function loadTranscripts() {
     setLoadingTranscripts(true);
     try {
-      const res = await fetch('/api/fireflies/transcripts?limit=10');
+      const res = await fetch('/api/client-insights', { method: 'PUT' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setTranscripts(json);
+      setFfStatus(`${json.added} new meeting(s) pulled. ${json.approved} cleaned and approved automatically, ${json.held} waiting for you.`);
+      loadInsights();
     } catch (err: any) {
       setFfStatus('Failed: ' + err.message);
     } finally {
@@ -95,8 +97,10 @@ export default function MeetingsTab() {
         <CardHeader>
           <CardTitle>Fireflies connection</CardTitle>
           <CardDescription>
-            Pulls meeting summaries only, no raw transcript, no participant identities are
-            stored. Nothing reaches the blog writer until you review and approve it below.
+            Pulls meeting summaries only, no raw transcript. New meetings are pulled once a day and
+            cleaned automatically: names, companies, contact details, our prices and deal numbers are
+            removed, then the insight is approved and the blog writer uses it for real client questions
+            and FAQs. If anything identifying might be left, it waits below for you instead.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -106,7 +110,7 @@ export default function MeetingsTab() {
             </Button>
             <Button variant="outline" onClick={loadTranscripts} disabled={loadingTranscripts}>
               {loadingTranscripts && <Loader2 className="animate-spin" />}
-              {loadingTranscripts ? 'Loading…' : 'Load recent meetings'}
+              {loadingTranscripts ? 'Pulling and cleaning… (can take a few minutes)' : 'Pull meetings now'}
             </Button>
           </div>
           {ffStatus && <p className="text-muted-foreground text-sm">{ffStatus}</p>}
@@ -132,9 +136,10 @@ export default function MeetingsTab() {
         <CardHeader>
           <CardTitle>Client insight review</CardTitle>
           <CardDescription>
-            Redact any client-identifying detail from the text below before approving. Only
-            approved items are used (as general themes, never as named client cases) to inform
-            future blog topics and angles.
+            Every meeting is cleaned and approved automatically. Only items marked pending review need
+            you: the automatic check found something that might still identify a client. Approved items
+            are used only as general themes and FAQ questions, never as named client cases. You can still
+            edit any text or reject an approved item.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -156,6 +161,13 @@ export default function MeetingsTab() {
                   if (e.target.value !== i.overview) updateInsightOverview(i.id, e.target.value);
                 }}
               />
+              {i.status === 'approved' && (
+                <div>
+                  <Button variant="outline" size="sm" onClick={() => decideInsight(i.id, 'rejected')}>
+                    <X /> Stop using this
+                  </Button>
+                </div>
+              )}
               {i.status === 'pending_review' && (
                 <div className="flex flex-wrap gap-2">
                   <Button className="bg-emerald-600 text-white hover:bg-emerald-600/85" onClick={() => decideInsight(i.id, 'approved')}>

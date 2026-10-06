@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
+import { autoReview, syncMeetings } from '@/lib/clientInsights';
 import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 export async function GET() {
   const rows = await prisma.client_insights.findMany({ orderBy: { id: 'desc' } });
@@ -33,6 +35,20 @@ export async function POST(req: NextRequest) {
     details: title || '(untitled meeting)',
     actor: await getActor(),
   });
-  return NextResponse.json(row, { status: 200 });
+  // Cleaned and approved automatically when nothing identifying is left; otherwise left for review.
+  const reviewed = await autoReview(row.id).catch((e: any) => {
+    console.error('Auto review failed:', e);
+    return row;
+  });
+  return NextResponse.json(reviewed, { status: 200 });
 }
-export { methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };
+
+// PUT: pull recent Fireflies meetings now and auto-review them (same as the daily job).
+export async function PUT() {
+  try {
+    return NextResponse.json(await syncMeetings());
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+export { methodNotAllowed as PATCH, methodNotAllowed as DELETE };
