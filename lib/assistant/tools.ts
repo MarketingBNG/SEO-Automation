@@ -377,9 +377,9 @@ defineTool({
         period: s.period,
         status: s.status,
         summary: s.summary,
-        keyword_priorities: JSON.parse(s.keyword_priorities || '[]'),
-        content_recommendations: JSON.parse(s.content_recommendations || '[]'),
-        technical_recommendations: JSON.parse(s.technical_recommendations || '[]'),
+        approved_by: s.approved_by,
+        approved_at: s.approved_at,
+        plan: s.plan_json ? JSON.parse(s.plan_json) : null,
         created_at: s.created_at,
       };
     return {

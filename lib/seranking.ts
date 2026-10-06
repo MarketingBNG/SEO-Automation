@@ -103,4 +103,95 @@ async function researchKeywords(type, seed, { source = 'us', limit = 30 }: any =
   return json.keywords || [];
 }
 
-export { getSubscription, listSites, getSiteRankings, researchKeywords };
+// ---------- Backlinks (SE Ranking Data API). Replaces any competitor / backlink research that
+// used to be planned for other tools: SE Ranking is the only backlink source. ----------
+
+// Total referring domains pointing at a domain.
+async function getReferringDomainsCount(domain: string) {
+  const json: any = await get(`/backlinks/summary?target=${encodeURIComponent(domain)}&mode=domain`);
+  const s = Array.isArray(json?.summary) ? json.summary[0] : json?.summary || json;
+  const n = s?.refdomains ?? s?.referring_domains ?? null;
+  if (typeof n !== 'number') throw new Error('SE Ranking returned no referring-domain count');
+  return n;
+}
+
+async function listReferringDomains(domain: string, limit = 500) {
+  const json: any = await get(`/backlinks/refdomains?target=${encodeURIComponent(domain)}&mode=domain&limit=${limit}`);
+  const rows = json?.refdomains || json?.data || json || [];
+  return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.refdomain || r.domain || '').toLowerCase()).filter(Boolean);
+}
+
+// Sites that link to two or more competitors but not to us: the outreach list for the backlink plan.
+async function getBacklinkGap(ourDomain: string, competitors: string[], limit = 40) {
+  const ours = new Set(await listReferringDomains(ourDomain));
+  const counts = new Map<string, string[]>();
+  for (const c of competitors) {
+    for (const d of await listReferringDomains(c)) {
+      if (ours.has(d)) continue;
+      counts.set(d, [...(counts.get(d) || []), c]);
+    }
+  }
+  return [...counts.entries()]
+    .map(([domain, linksTo]) => ({ domain, linksTo }))
+    .sort((a, b) => b.linksTo.length - a.linksTo.length)
+    .slice(0, limit);
+}
+
+// Adds a keyword to rank tracking in the first SE Ranking project (after a blog is published).
+async function addTrackedKeyword(keyword: string) {
+  const sites: any = await listSites();
+  if (!sites?.length) throw new Error('No SE Ranking project found');
+  const res = await throttledFetch(`${BASE_URL}/project-management/sites/${sites[0].id}/keywords`, {
+    method: 'POST',
+    headers: { Authorization: `Token ${getApiKey()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keywords: [{ keyword }] }),
+  });
+  if (!res.ok) throw new Error(`SE Ranking add keyword failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  return true;
+}
+
+// ---------- AI visibility (GEO / AEO). Paths and fields follow SE Ranking's own n8n integration
+// (github.com/seranking/n8n-nodes-seranking). ----------
+
+export const AI_ENGINES = ['chatgpt', 'perplexity', 'gemini', 'ai-overview', 'ai-mode'] as const;
+
+// Data API "AI Search": a domain's presence in one engine's answers, refreshed monthly by SE Ranking.
+// summary.link_presence / average_position / ai_opportunity_traffic each carry current and previous.
+async function getAiSearchOverview(domain: string, engine: string, source = 'us') {
+  const q = new URLSearchParams({ target: domain, engine, source, scope: 'base_domain' });
+  const json: any = await get(`/ai-search/overview/by-engine/time-series?${q}`);
+  const s = json?.summary || {};
+  const num = (v: any) => (typeof v === 'number' ? v : v === undefined || v === null || v === '' ? null : Number(v));
+  return {
+    engine,
+    source,
+    linkPresence: { current: num(s.link_presence?.current), previous: num(s.link_presence?.previous) },
+    averagePosition: { current: num(s.average_position?.current), previous: num(s.average_position?.previous) },
+    aiTraffic: { current: num(s.ai_opportunity_traffic?.current), previous: num(s.ai_opportunity_traffic?.previous) },
+    raw: json,
+  };
+}
+
+// Project API "AI Results Tracker": the prompts tracked in the SE Ranking project.
+async function listAiTrackerEngines(siteId: number) {
+  const json: any = await get(`/project-management/airt/llm?site_id=${siteId}`);
+  return Array.isArray(json) ? json : json?.items || json?.data || [];
+}
+
+async function getAiTrackerStatistics(siteId: number, llmId: number, from?: string, to?: string) {
+  const q = new URLSearchParams({ site_id: String(siteId), llm_id: String(llmId) });
+  if (from) q.set('from', from);
+  if (to) q.set('to', to);
+  return get(`/project-management/airt/llm/statistics?${q}`);
+}
+
+// Per-group time series with mention_presence and link_presence as percentages.
+async function getAiTrackerPresence(siteId: number, llmId: number, dateFrom: string, dateTo: string) {
+  const q = new URLSearchParams({ site_id: String(siteId), llm_id: String(llmId), date_from: dateFrom, date_to: dateTo, mode: 'groups' });
+  return get(`/project-management/airt/prompts/rankings?${q}`);
+}
+
+export {
+  getSubscription, listSites, getSiteRankings, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword,
+  getAiSearchOverview, listAiTrackerEngines, getAiTrackerStatistics, getAiTrackerPresence,
+};

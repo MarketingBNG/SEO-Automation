@@ -1,935 +1,588 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { CalendarRange, Check, Download, Loader2, Square, X } from 'lucide-react';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { safeHref } from '@/components/shared/article';
-import {
-  Banner, Delta, KpiGrid, KpiTile, SectionLabel, SimpleTable, StatusBadge, statusBadgeClass,
-} from '@/components/shared/ui-bits';
+import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
 
-const Muted = ({ children, className = '' }: { children: ReactNode; className?: string }) => (
-  <p className={`text-sm text-muted-foreground ${className}`}>{children}</p>
-);
-const linkCls = 'text-primary underline-offset-4 hover:underline';
+// Strategy section (v2): one monthly SEO / AEO / GEO strategy in 11 fixed sections, one approval,
+// then the month runs automatically. All UI text avoids em dashes by design.
 
-// The month-over-month numbers are computed in code (lib/monthlyMetrics.js), so these are exact.
-export function StrategyMetrics({ mom, title, tilesOnly = false }: { mom: any; title?: string; tilesOnly?: boolean }) {
-  if (!mom) return null;
-  const gsc = mom.searchConsole;
-  const ga = mom.ga4;
-  const rk = mom.rankings;
-  const tiles: any[] = [
-    gsc && { label: 'Google clicks', now: gsc.totals.now.clicks, delta: <Delta value={gsc.totals.change.clicksPct} /> },
-    gsc && { label: 'Impressions', now: gsc.totals.now.impressions.toLocaleString(), delta: <Delta value={gsc.totals.change.impressionsPct} /> },
-    gsc && { label: 'Click-through rate', now: `${gsc.totals.now.ctr}%`, delta: <Delta value={gsc.totals.change.ctrPoints} suffix=" pts" /> },
-    gsc && { label: 'Avg. position', now: gsc.totals.now.position, delta: <Delta value={gsc.totals.change.positionChange} suffix="" invert /> },
-    ga && { label: 'Organic sessions', now: ga.organic.now.sessions, delta: <Delta value={ga.organic.sessionsPct} /> },
-    ga && { label: 'Organic conversions', now: ga.organic.now.conversions, delta: <Delta value={ga.organic.conversionsPct} /> },
-  ].filter(Boolean);
+type Col = { key: string; label: string; edit?: 'text' | 'number' | 'tags'; render?: (row: any) => ReactNode };
 
-  const table = (title: string, rows: any[] | undefined, cols: { key: string; label: string; muted?: boolean }[]) =>
-    rows && rows.length > 0 ? <SimpleTable title={title} rows={rows} cols={cols} /> : null;
+const CHANNELS = ['SEO', 'AEO', 'GEO'];
 
+// A number with its source and date range, or "DATA MISSING: <metric>".
+function M({ m }: { m: any }) {
+  if (!m) return <span className="text-muted-foreground">n/a</span>;
+  if (m.value === null || m.value === undefined) return <span className="font-medium text-red-600 dark:text-red-400">{m.missing || 'DATA MISSING'}</span>;
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title || "This period's numbers"}</CardTitle>
-        {gsc && (
-          <CardDescription>
-            {gsc.ranges.current.startDate} to {gsc.ranges.current.endDate}, compared with {gsc.ranges.previous.startDate} to{' '}
-            {gsc.ranges.previous.endDate}.
-          </CardDescription>
-        )}
-      </CardHeader>
-      <CardContent>
-        <KpiGrid>
-          {tiles.map((t) => (
-            <KpiTile key={t.label} label={t.label} value={t.now}>
-              {t.delta} <span className="text-muted-foreground">vs previous</span>
-            </KpiTile>
-          ))}
-          {rk?.distribution && (
-            <KpiTile label="Tracked keywords in top 10" value={`${rk.distribution.top3 + rk.distribution.top4to10} / ${rk.trackedKeywords}`}>
-              <span className="text-muted-foreground">{rk.distribution.notRanked} not in top 100</span>
-            </KpiTile>
-          )}
-          {mom.contentShipped && (
-            <KpiTile label="Content shipped (30 days)" value={mom.contentShipped.postsPublished}>
-              <span className="text-muted-foreground">
-                published, {mom.contentShipped.postsRefreshed} refreshed, {mom.contentShipped.draftsCreated} drafted
-              </span>
-            </KpiTile>
-          )}
-        </KpiGrid>
-        {/* In the monthly report the diagnosis section replaces these lists with fuller versions. */}
-        {!tilesOnly && (
-          <>
-            {table('Close to page one (positions 8 to 20): the fastest wins', gsc?.strikingDistance?.slice(0, 10), [
-              { key: 'query', label: 'Query' },
-              { key: 'position', label: 'Position', muted: true },
-              { key: 'impressions', label: 'Impressions', muted: true },
-              { key: 'clicks', label: 'Clicks', muted: true },
-            ])}
-            {table('On page one but rarely clicked: rewrite the title and meta description', gsc?.lowCtrOnPageOne?.slice(0, 8), [
-              { key: 'query', label: 'Query' },
-              { key: 'position', label: 'Position', muted: true },
-              { key: 'impressions', label: 'Impressions', muted: true },
-              { key: 'ctr', label: 'CTR %', muted: true },
-            ])}
-            {table('Pages losing the most clicks', gsc?.pageMovers?.losers?.slice(0, 8), [
-              { key: 'key', label: 'Page' },
-              { key: 'clicksBefore', label: 'Before', muted: true },
-              { key: 'clicksNow', label: 'Now', muted: true },
-              { key: 'clickChange', label: 'Change', muted: true },
-            ])}
-          </>
-        )}
-        {table('Search traffic that does not convert: add or fix the call to action', ga?.trafficButNoConversions?.slice(0, 8), [
-          { key: 'page', label: 'Landing page' },
-          { key: 'sessions', label: 'Sessions', muted: true },
-          { key: 'conversions', label: 'Conversions', muted: true },
-        ])}
-        {Object.keys(mom.errors || {}).length > 0 && (
-          <Muted className="mt-2.5">Unavailable: {Object.entries(mom.errors).map(([k, v]) => `${k} (${v})`).join('; ')}</Muted>
-        )}
-      </CardContent>
-    </Card>
+    <span title={`${m.source}, ${m.range}`}>
+      {Number(m.value).toLocaleString()}
+      <span className="block text-[11px] text-muted-foreground">{m.source}, {m.range}</span>
+    </span>
   );
 }
 
-const shortUrl = (u: any) => String(u || '').replace(/^https?:\/\/(www\.)?usaindiacfo\.com/, '') || '/';
-
-// Analysis steps that can fail on their own (analysis.errors is keyed by these names).
-const CHECK_LABELS: Record<string, string> = {
-  searchConsoleBase: 'Search Console data',
-  scoreboard: 'branded and non-branded clicks',
-  decay: 'pages losing clicks',
-  cohorts: 'results of past posts',
-  regulatoryRefresh: 'Income-tax Act 2025 wording check',
-  trackedKeywords: 'SE Ranking tracked keywords',
-  aiVisibility: 'Google AI Overview check',
-  aiReferrals: 'visits from AI assistants (GA4)',
-};
-
-const decayLabel = (type: any) => (type === 'lost' ? 'lost (no longer in Google results)' : String(type || '').replace(/_/g, ' '));
-const BulletList = ({ items }: { items: any[] | undefined }) =>
-  items && items.length ? (
-    <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm">
-      {items.map((x, i) => <li key={i}>{x}</li>)}
-    </ul>
-  ) : (
-    <Muted>None this month.</Muted>
+function Tags({ tags }: { tags: string[] }) {
+  if (!tags?.length) return <Badge variant="destructive">No tag</Badge>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {tags.map((t) => (
+        <Badge key={t} variant="secondary">{t}</Badge>
+      ))}
+    </span>
   );
+}
 
-function Section({ title, description, children }: { title: ReactNode; description?: ReactNode; children?: ReactNode }) {
+function Section({ title, description, children }: { title: ReactNode; description?: ReactNode; children: ReactNode }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         {description && <CardDescription>{description}</CardDescription>}
       </CardHeader>
-      <CardContent>{children}</CardContent>
+      <CardContent className="space-y-3">{children}</CardContent>
     </Card>
   );
 }
 
-// The monthly report in the research's fixed section order. Numbers come from the stored analysis
-// (computed in code); the picks' priority is computed in code from the inputs shown.
-export function StrategyReport({ strategy, onUpdated }: { strategy: any; onUpdated: (json: any) => void }) {
-  const report = strategy.report;
-  const a = strategy.data_snapshot?.analysis || {};
-  const nb = a.scoreboard?.nonBrandedClicks;
-  const ai = a.aiVisibilitySummary;
+// A table that becomes editable in Edit mode. Cells with `edit` get an input.
+function EditTable({ rows, cols, editing, onChange, empty }: { rows: any[]; cols: Col[]; editing: boolean; onChange: (rows: any[]) => void; empty?: string }) {
+  if (!rows?.length && !editing) return <p className="text-sm text-muted-foreground">{empty || 'Nothing planned.'}</p>;
+  const set = (i: number, key: string, v: any) => onChange(rows.map((r, j) => (j === i ? { ...r, [key]: v } : r)));
+  return (
+    <DataTable head={[...cols.map((c) => c.label), ...(editing ? [''] : [])]}>
+      {rows.map((r, i) => (
+        <tr key={i}>
+          {cols.map((c) => (
+            <td key={c.key} className={TD}>
+              {editing && c.edit === 'tags' ? (
+                <span className="flex gap-2">
+                  {CHANNELS.map((ch) => (
+                    <label key={ch} className="flex items-center gap-1 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={(r.tags || []).includes(ch)}
+                        onChange={(e) => set(i, 'tags', e.target.checked ? [...(r.tags || []), ch] : (r.tags || []).filter((t: string) => t !== ch))}
+                      />
+                      {ch}
+                    </label>
+                  ))}
+                </span>
+              ) : editing && c.edit ? (
+                <Input
+                  className="h-7 min-w-24"
+                  type={c.edit === 'number' ? 'number' : 'text'}
+                  value={r[c.key] ?? ''}
+                  onChange={(e) => set(i, c.key, c.edit === 'number' ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value)}
+                />
+              ) : c.render ? (
+                c.render(r)
+              ) : c.key === 'tags' ? (
+                <Tags tags={r.tags} />
+              ) : (
+                String(r[c.key] ?? '')
+              )}
+            </td>
+          ))}
+          {editing && (
+            <td className={TD}>
+              <Button size="sm" variant="ghost" onClick={() => onChange(rows.filter((_, j) => j !== i))}>Remove</Button>
+            </td>
+          )}
+        </tr>
+      ))}
+    </DataTable>
+  );
+}
+
+const fmtDate = (s?: string | null) => (s ? new Date(String(s).replace(' ', 'T') + 'Z').toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : '');
+
+export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => void }) {
+  const plan = s.plan;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<any>(plan);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const canAct = strategy.status === 'approved' || strategy.status === 'pending_review';
+  const [change, setChange] = useState({ what: '', why: '' });
+  const fileRef = useRef<HTMLInputElement>(null);
+  const approved = s.status === 'approved';
+  const p = editing ? draft : plan;
 
-  // A failed step leaves its field empty, so its table must say so rather than "none found".
-  const checkErrors = Object.entries(a.errors || {}).filter(([, v]) => v);
-  const failed = (...steps: string[]) => {
-    const hit = steps.find((s) => a.errors?.[s]);
-    return hit ? `Could not check: ${String(a.errors[hit]).slice(0, 200)}` : null;
-  };
-  const aiRows: any[] = a.aiVisibility || [];
-  const aiFailedCount = aiRows.filter((r) => r.error).length;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!editing) setDraft(plan);
+  }, [plan, editing]);
 
-  async function act(index: any, action: string) {
-    setBusy(`${index}:${action}`);
+  async function call(label: string, url: string, init: RequestInit) {
+    setBusy(label);
     setError(null);
     try {
-      const res = await fetch(`/api/strategy/${strategy.id}/pick`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ index, action }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      onUpdated(json);
-    } catch (err: any) {
-      setError(err.message);
+      const res = await fetch(url, init);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      return json;
+    } catch (e: any) {
+      setError(e.message);
+      return null;
     } finally {
       setBusy(null);
     }
   }
 
-  function renderPick(p: any, label: ReactNode) {
-    return (
-      <div key={p.index} className="rounded-xl border bg-muted/20 p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="font-semibold">
-              {label}. {p.workingTitle || p.keyword}
-            </div>
-            <div className="text-sm text-muted-foreground">
-              {p.keyword}
-              {p.targetUrl && (
-                <>
-                  {' · '}
-                  <a href={safeHref(p.targetUrl)} target="_blank" rel="noreferrer" className={linkCls}>{shortUrl(p.targetUrl)}</a>
-                </>
-              )}
-            </div>
-          </div>
-          <div className="shrink-0 text-right">
-            <div className="text-2xl font-semibold tabular-nums text-primary">{p.score.priority}</div>
-            <div className="text-xs text-muted-foreground">priority</div>
-          </div>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <StatusBadge kind="gold">{p.action.replace('_', ' ')}</StatusBadge>
-          {p.regulatory && <StatusBadge kind="failed">Income-tax Act 2025</StatusBadge>}
-          {p.format && <StatusBadge kind="pending">{p.format}</StatusBadge>}
-          {p.funnel && <StatusBadge kind="approved">{p.funnel}</StatusBadge>}
-          {p.segment && <span className="text-xs text-muted-foreground">{p.segment}</span>}
-        </div>
-        <div className="mt-2 rounded-md bg-muted/50 px-2 py-1 font-mono text-xs text-muted-foreground">
-          {p.score.trafficPotential} extra clicks in 12 months
-          {p.score.trafficPotentialSource === 'estimate' ? ' (est.)' : ''} × value {p.score.businessValue} × deadline {p.score.deadlineFactor}
-          {p.score.deadline ? ` (${p.score.deadline})` : ''} × confidence {p.score.confidence} ÷ effort {p.score.effort}
-          {p.basis ? ` · ${p.basis}` : ''}
-        </div>
-        <p className="mt-2 mb-1 text-sm">{p.why}</p>
-        {p.addsBeyondTop5 && <Muted className="my-1">Adds beyond the top results: {p.addsBeyondTop5}</Muted>}
-        {p.faqQuestions.length > 0 && <Muted className="my-1">Suggested FAQ questions: {p.faqQuestions.join(' · ')}</Muted>}
-        <div className="mt-2 flex">
-          {p.action === 'new' ? (
-            p.status?.keywordId ? (
-              <StatusBadge kind="approved">In the blog pipeline</StatusBadge>
-            ) : (
-              <Button variant="outline" size="sm" disabled={!canAct || busy !== null} onClick={() => act(p.index, 'pipeline')}>
-                {busy === `${p.index}:pipeline` && <Loader2 className="animate-spin" />}
-                {busy === `${p.index}:pipeline` ? 'Adding…' : 'Add to blog pipeline'}
-              </Button>
-            )
-          ) : p.targetUrl ? (
-            p.status?.auditId ? (
-              <StatusBadge kind="approved">Audit #{p.status.auditId} ready in Blog Audit</StatusBadge>
-            ) : (
-              <Button variant="outline" size="sm" disabled={!canAct || busy !== null} onClick={() => act(p.index, 'audit')}>
-                {busy === `${p.index}:audit` && <Loader2 className="animate-spin" />}
-                {busy === `${p.index}:audit` ? 'Auditing… (1-3 min)' : 'Audit this page'}
-              </Button>
-            )
-          ) : null}
-        </div>
-      </div>
-    );
+  // Saves only the sections that changed; each save is one audit-log entry.
+  async function saveEdits() {
+    let latest = null;
+    for (const section of ['summary', 'included', 'keywords', 'blogPlan', 'aeoGeo', 'backlinks', 'technical', 'targets']) {
+      if (JSON.stringify(draft[section]) === JSON.stringify(plan[section])) continue;
+      latest = await call('save', `/api/strategy/${s.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ section, value: draft[section] }) });
+      if (!latest) return;
+    }
+    if (latest) onChanged(latest);
+    setEditing(false);
   }
 
+  async function upload(file: File) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const ok = await call('upload', '/api/strategy/crawl', { method: 'POST', body: fd });
+    if (ok) {
+      const fresh = await call('reload', `/api/strategy/${s.id}`, { method: 'GET' });
+      if (fresh) onChanged(fresh);
+    }
+  }
+
+  async function approve() {
+    const json = await call('approve', `/api/strategy/${s.id}/approve`, { method: 'POST' });
+    if (json) onChanged(json);
+  }
+
+  async function logChange() {
+    const json = await call('change', `/api/strategy/${s.id}/changes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change) });
+    if (json) {
+      onChanged(json);
+      setChange({ what: '', why: '' });
+    }
+  }
+
+  const upd = (section: string, value: any) => setDraft((d: any) => ({ ...d, [section]: value }));
+  const errors: string[] = s.validation?.errors || [];
+  const warnings: string[] = s.validation?.warnings || [];
+  const crawlFresh = s.crawl?.fresh;
+  const declining: string[] = s.validation?.decliningChannels || [];
+
   return (
-    <>
-      {checkErrors.length > 0 && (
-        <Card className="ring-destructive/30">
-          <CardContent>
-            <p className="text-sm text-destructive">
-              Some checks could not run:{' '}
-              {checkErrors.map(([k, v]) => `${CHECK_LABELS[k] || k} (${String(v).slice(0, 160)})`).join('; ')}. The tables that
-              depend on them say &quot;Could not check&quot; below, so an empty result there does not mean nothing was found.
-            </p>
-          </CardContent>
-        </Card>
+    <div className="space-y-4">
+      {/* Screaming Frog gate banner */}
+      {crawlFresh ? (
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm">
+          Screaming Frog crawl uploaded on {fmtDate(s.crawl.uploadedAt)} by {s.crawl.uploadedBy || 'unknown'}.
+        </div>
+      ) : (
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm font-bold">
+          ACTION REQUIRED BEFORE APPROVAL: Upload the latest Screaming Frog crawl export (full links list) to the dashboard. The strategy cannot be approved without it.
+        </div>
       )}
 
-      <Section title="1. Data notes" description="Things that make some numbers misleading this month. Read these before reacting to any drop.">
-        <BulletList items={[...(a.dataHygiene || []).map((e: any) => `${e.start}${e.end ? ` to ${e.end}` : ' onward'}: ${e.note}`), ...(report.dataNotes || [])]} />
+      {/* Core objective, hardcoded */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Core objective</CardTitle>
+          <CardDescription>{plan.coreObjective?.motive}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2 text-sm sm:grid-cols-3">
+          {plan.coreObjective?.channels?.map((c: any) => (
+            <div key={c.channel} className="rounded-lg border p-3">
+              <div className="font-semibold">{c.channel}{declining.includes(c.channel) ? ' (top priority: flat or down last month)' : ''}</div>
+              <div className="text-muted-foreground">{c.meaning}</div>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground sm:col-span-3">{plan.coreObjective?.signalNote}</p>
+        </CardContent>
+      </Card>
+
+      {(errors.length > 0 || warnings.length > 0) && (
+        <div className="space-y-2">
+          {errors.length > 0 && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm">
+              <div className="font-semibold">Validation blocks approval ({errors.length})</div>
+              <ul className="ml-5 list-disc">{errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+              <ul className="ml-5 list-disc">{warnings.map((e, i) => <li key={i}>{e}</li>)}</ul>
+            </div>
+          )}
+        </div>
+      )}
+      {plan.dataMissing?.length > 0 && (
+        <div className="rounded-lg border p-3 text-sm">
+          <div className="font-semibold">Data that could not be read</div>
+          <ul className="ml-5 list-disc">{plan.dataMissing.map((m: string, i: number) => <li key={i}>DATA MISSING: {m}</li>)}</ul>
+        </div>
+      )}
+
+      {/* 1 */}
+      <Section title="1. Strategy summary">
+        <div className="grid gap-2 text-sm sm:grid-cols-2">
+          <div><span className="text-muted-foreground">Month: </span>{p.summary.month}</div>
+          <div><span className="text-muted-foreground">Approval status: </span>{approved ? `Approved by ${s.approved_by} on ${fmtDate(s.approved_at)} (version ${s.approved_version})` : `Waiting for approval (version ${s.version})`}</div>
+          <div className="sm:col-span-2"><span className="text-muted-foreground">Core objective: </span>{plan.coreObjective?.motive}</div>
+          {(['focus', 'strategyType', 'whyThisType'] as const).map((k) => (
+            <div key={k} className="sm:col-span-2">
+              <span className="text-muted-foreground">{k === 'focus' ? "This month's focus: " : k === 'strategyType' ? 'Strategy type: ' : 'Why this type: '}</span>
+              {editing ? <Textarea value={p.summary[k] || ''} onChange={(e) => upd('summary', { ...p.summary, [k]: e.target.value })} /> : p.summary[k]}
+            </div>
+          ))}
+          {Object.entries(p.summary.declineNotes || {}).map(([c, n]: any) => (
+            <div key={c} className="rounded-lg border p-2 sm:col-span-2">
+              <div className="font-semibold">{c} fell last month</div>
+              <div><span className="text-muted-foreground">Why: </span>{n.whyFell}</div>
+              <div><span className="text-muted-foreground">How this month fixes it: </span>{n.howFixed}</div>
+            </div>
+          ))}
+          <div className="text-xs text-muted-foreground sm:col-span-2">Last month trend from the month-end report ({plan.reportRange}): {CHANNELS.map((c) => `${c} ${plan.lastMonthTrend?.[c] ?? 'DATA MISSING'}${typeof plan.lastMonthTrend?.[c] === 'number' ? '%' : ''}`).join(', ')}</div>
+        </div>
       </Section>
 
-      <StrategyMetrics mom={strategy.data_snapshot?.monthOverMonth} title="2. Scoreboard" tilesOnly />
-      {(nb || ai || a.aiReferrals || failed('scoreboard', 'aiReferrals', 'aiVisibility')) && (
-        <Section
-          title="Search that is not your brand name"
-          description="Branded searches (people typing USAIndiaCFO) mostly reflect existing demand. Growth from SEO shows up here."
-        >
-          <KpiGrid>
-            {nb && (
-              <>
-                <KpiTile label="Non-branded clicks, US" value={nb.now.US}>
-                  <Delta value={nb.changePct.US} /> <span className="text-muted-foreground">vs previous</span>
-                </KpiTile>
-                <KpiTile label="Non-branded clicks, India" value={nb.now.India}>
-                  <Delta value={nb.changePct.India} /> <span className="text-muted-foreground">vs previous</span>
-                </KpiTile>
-                <KpiTile label="Branded clicks" value={a.scoreboard.brandedClicks.now}>
-                  <span className="text-muted-foreground">was {a.scoreboard.brandedClicks.before}</span>
-                </KpiTile>
-              </>
+      {/* 2 */}
+      <Section title="2. What's included">
+        <EditTable rows={p.included} editing={editing} onChange={(v) => upd('included', v)} cols={[{ key: 'item', label: 'Item', edit: 'text' }, { key: 'tags', label: 'Tag', edit: 'tags' }]} />
+      </Section>
+
+      {/* 3 */}
+      <Section title="3. Keyword and topic plan" description="Priority score = (Business value x 3) + (Volume score x 2) + (Ease score x 2) + 5 if already ranking 11 to 20. One main keyword per blog, never repeated across months.">
+        <EditTable
+          rows={p.keywords}
+          editing={editing}
+          onChange={(v) => upd('keywords', v)}
+          cols={[
+            { key: 'keyword', label: 'Keyword', edit: 'text' },
+            { key: 'intent', label: 'Intent', edit: 'text' },
+            { key: 'volumeUs', label: 'Volume US', render: (r) => <M m={r.volumeUs} /> },
+            { key: 'volumeIndia', label: 'Volume India', render: (r) => <M m={r.volumeIndia} /> },
+            { key: 'difficulty', label: 'Difficulty', render: (r) => <M m={r.difficulty} /> },
+            { key: 'currentPosition', label: 'Current position', render: (r) => <M m={r.currentPosition} /> },
+            { key: 'serpFeature', label: 'SERP feature to win', edit: 'text' },
+            { key: 'tags', label: 'Tag', edit: 'tags' },
+            { key: 'businessValue', label: 'Business value', edit: 'number' },
+            { key: 'score', label: 'Score' },
+            { key: 'blogTitle', label: 'Blog title', edit: 'text' },
+            { key: 'newOrRefresh', label: 'New or refresh', edit: 'text' },
+          ]}
+        />
+      </Section>
+
+      {/* 4 */}
+      <Section title="4. Blog plan" description={`${p.blogPlan.newCount} new, ${p.blogPlan.refreshCount} refreshes. Posting days: ${(p.blogPlan.postingDays || []).join(', ')} at ${p.blogPlan.postingTime}. Each blog enters review 24 hours before its slot.`}>
+        <EditTable
+          rows={p.blogPlan.calendar}
+          editing={editing}
+          onChange={(v) => upd('blogPlan', { ...p.blogPlan, calendar: v })}
+          cols={[
+            { key: 'publishDate', label: 'Publish date', render: (r) => fmtDate(r.publishDate) },
+            { key: 'title', label: 'Title', edit: 'text' },
+            { key: 'mainKeyword', label: 'Main keyword', edit: 'text' },
+            { key: 'cluster', label: 'Cluster', edit: 'text' },
+            { key: 'tags', label: 'Tag', edit: 'tags' },
+            { key: 'reviewDeadline', label: 'Review deadline', render: (r) => fmtDate(r.reviewDeadline) },
+            { key: 'status', label: 'Status' },
+          ]}
+        />
+      </Section>
+
+      {/* 5 */}
+      <Section title="5. AEO and GEO plan" description="Snippets, People Also Ask boxes, AI Overview topics and AI chat citations targeted, and the pages that get direct-answer blocks, FAQ schema and comparison tables.">
+        <EditTable
+          rows={p.aeoGeo.items}
+          editing={editing}
+          onChange={(v) => upd('aeoGeo', { items: v })}
+          cols={[
+            { key: 'type', label: 'Type', edit: 'text' },
+            { key: 'target', label: 'Target query or topic', edit: 'text' },
+            { key: 'page', label: 'Page', edit: 'text' },
+            { key: 'directAnswerBlock', label: 'Direct answer', render: (r) => (r.directAnswerBlock ? 'Yes' : 'No') },
+            { key: 'faqSchema', label: 'FAQ schema', render: (r) => (r.faqSchema ? 'Yes' : 'No') },
+            { key: 'comparisonTable', label: 'Comparison table', render: (r) => (r.comparisonTable ? 'Yes' : 'No') },
+            { key: 'tags', label: 'Tag', edit: 'tags' },
+          ]}
+        />
+      </Section>
+
+      {/* 6 */}
+      <Section title="6. Backlink plan" description="Safe methods only: SE Ranking backlink gap outreach, unlinked brand mentions, broken link replacement, directory and citation listings, automatic internal linking. Never paid links, link farms, comment spam or private blog networks.">
+        <EditTable
+          rows={p.backlinks}
+          editing={editing}
+          onChange={(v) => upd('backlinks', v)}
+          cols={[
+            { key: 'targetSite', label: 'Target site', edit: 'text' },
+            { key: 'method', label: 'Method', edit: 'text' },
+            { key: 'ourPage', label: 'Our page', edit: 'text' },
+            { key: 'sendDate', label: 'Send date', edit: 'text' },
+            { key: 'status', label: 'Status' },
+            { key: 'tags', label: 'Tag', edit: 'tags' },
+          ]}
+        />
+      </Section>
+
+      {/* 7 */}
+      <Section title="7. Automation map">
+        <DataTable head={['Platform', 'What runs automatically', 'When']}>
+          {plan.automation.map((a: any, i: number) => (
+            <tr key={i}><td className={TD}>{a.platform}</td><td className={TD}>{a.what}</td><td className={TD_MUTED}>{a.when}</td></tr>
+          ))}
+        </DataTable>
+      </Section>
+
+      {/* 8 */}
+      <Section title="8. Technical and refresh plan" description={p.technical.crawl ? `From the Screaming Frog crawl uploaded ${fmtDate(p.technical.crawl.uploadedAt)} by ${p.technical.crawl.uploadedBy || 'unknown'}.` : 'DATA MISSING: Screaming Frog crawl. Upload one to fill this section.'}>
+        <EditTable rows={p.technical.fixes} editing={editing} onChange={(v) => upd('technical', { ...p.technical, fixes: v })} cols={[{ key: 'url', label: 'URL', edit: 'text' }, { key: 'issue', label: 'Issue', edit: 'text' }, { key: 'fix', label: 'Fix', edit: 'text' }, { key: 'tags', label: 'Tag', edit: 'tags' }]} empty="No crawl fixes." />
+        <div className="text-sm font-semibold">Refresh triggers</div>
+        <EditTable rows={p.technical.refreshes} editing={editing} onChange={(v) => upd('technical', { ...p.technical, refreshes: v })} cols={[{ key: 'page', label: 'Page or keyword', edit: 'text' }, { key: 'trigger', label: 'Trigger' }, { key: 'source', label: 'Source' }, { key: 'tags', label: 'Tag', edit: 'tags' }]} empty="No page hit a refresh trigger." />
+      </Section>
+
+      {/* 9 */}
+      <Section title="9. Monthly targets" description="Every SEO, AEO and GEO target must be higher than last month's actual. Organic leads are a signal only.">
+        <EditTable
+          rows={p.targets}
+          editing={editing}
+          onChange={(v) => upd('targets', v)}
+          cols={[
+            { key: 'channel', label: 'Channel' },
+            { key: 'kpi', label: 'KPI' },
+            { key: 'lastMonth', label: 'Last month', render: (r) => <M m={r.lastMonth} /> },
+            { key: 'target', label: 'Target', edit: 'number', render: (r) => (r.channel === 'Signal' ? 'Signal only' : r.target ?? 'Not set') },
+          ]}
+        />
+      </Section>
+
+      {/* 10 */}
+      <Section title="10. Automatic safeguards">
+        <DataTable head={['Safeguard', 'Rule']}>
+          {plan.safeguards.map((g: any) => (
+            <tr key={g.name}><td className={TD}>{g.name}</td><td className={TD}>{g.rule}</td></tr>
+          ))}
+        </DataTable>
+      </Section>
+
+      {/* 11 */}
+      <Section title="11. Action buttons">
+        {error && <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-2 text-sm">{error}</div>}
+        {s.blockers?.length > 0 && !approved && <ul className="ml-5 list-disc text-sm text-muted-foreground">{s.blockers.map((b: string) => <li key={b}>{b}</li>)}</ul>}
+        <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={!!busy} onClick={() => fileRef.current?.click()}>
+            {busy === 'upload' && <Loader2 className="animate-spin" />}Upload Screaming Frog file
+          </Button>
+          {!approved && !editing && <Button variant="outline" disabled={!!busy} onClick={() => setEditing(true)}>Edit Strategy</Button>}
+          {editing && (
+            <>
+              <Button disabled={!!busy} onClick={saveEdits}>{busy === 'save' && <Loader2 className="animate-spin" />}Save edits</Button>
+              <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+            </>
+          )}
+          <Button disabled={approved || editing || !!busy || s.blockers?.length > 0} onClick={approve}>
+            {busy === 'approve' && <Loader2 className="animate-spin" />}{approved ? 'Approved' : 'Approve Strategy'}
+          </Button>
+        </div>
+
+        {approved && (
+          <div className="space-y-2 rounded-lg border p-3">
+            <div className="text-sm font-semibold">Strategy change (mid-month)</div>
+            <Input placeholder="What changed" value={change.what} onChange={(e) => setChange({ ...change, what: e.target.value })} />
+            <Input placeholder="Why" value={change.why} onChange={(e) => setChange({ ...change, why: e.target.value })} />
+            <Button size="sm" disabled={!!busy || !change.what || !change.why} onClick={logChange}>Log strategy change</Button>
+            {s.changes?.length > 0 && (
+              <DataTable head={['Date', 'What changed', 'Why', 'Approved by']}>
+                {s.changes.map((c: any) => (
+                  <tr key={c.id}><td className={TD_MUTED}>{fmtDate(c.created_at)}</td><td className={TD}>{c.what}</td><td className={TD}>{c.why}</td><td className={TD}>{c.approved_by}</td></tr>
+                ))}
+              </DataTable>
             )}
-            {a.aiReferrals && (
-              <KpiTile label="Visits from AI assistants" value={a.aiReferrals.now.sessions}>
-                <Delta value={a.aiReferrals.changePct} /> <span className="text-muted-foreground">vs previous</span>
-              </KpiTile>
-            )}
-            {ai && (
-              <KpiTile label="Google AI Overviews citing us" value={`${ai.citingUs} / ${ai.withAiOverview}`}>
-                <span className="text-muted-foreground">
-                  {ai.checked} priority keywords checked{aiFailedCount > 0 ? `, ${aiFailedCount} more failed` : ''}
-                </span>
-              </KpiTile>
-            )}
-          </KpiGrid>
-          <div className="mt-2 space-y-1">
-            {failed('scoreboard') && <Muted>Branded and non-branded clicks. {failed('scoreboard')}</Muted>}
-            {failed('aiReferrals') && <Muted>Visits from AI assistants. {failed('aiReferrals')}</Muted>}
-            {failed('aiVisibility') && <Muted>Google AI Overviews. {failed('aiVisibility')}</Muted>}
           </div>
-          <BulletList items={report.scoreboardNotes} />
-        </Section>
-      )}
-
-      <Section
-        title="3. Results of past work"
-        description="Posts published about 1, 3 and 6 months ago and what they earn now. Not in the top 10 by 6 months means it goes back into the plan."
-      >
-        {failed('cohorts') && <Muted>{failed('cohorts')}</Muted>}
-        {!failed('cohorts') && failed('searchConsoleBase') && (
-          <Muted>Clicks and positions below are missing because Search Console could not be read. {failed('searchConsoleBase')}</Muted>
         )}
-        {(a.cohorts || []).map((c: any) => (
-          <SimpleTable
-            key={c.label}
-            title={`Published ${c.label}`}
-            rows={c.posts}
-            empty="No posts published in this window."
-            cols={[
-              { key: 'title', label: 'Post', render: (p) => <a href={p.url} target="_blank" rel="noreferrer" className={linkCls}>{p.title}</a> },
-              { key: 'published', label: 'Published', muted: true },
-              { key: 'clicks28d', label: 'Clicks (28d)', muted: true },
-              { key: 'position', label: 'Position', muted: true, render: (p) => p.position ?? 'not ranking' },
-              { key: 'onTrack', label: 'On track', render: (p) => <StatusBadge kind={p.onTrack ? 'approved' : 'failed'}>{p.onTrack ? 'yes' : 'no'}</StatusBadge> },
-            ]}
-          />
-        ))}
       </Section>
 
-      <Section title="4. Diagnosis">
-        <BulletList items={report.diagnosis} />
-        <SimpleTable
-          title="Pages losing clicks, by cause"
-          note="Ranking decay: upgrade the content. Zero-click: the AI answer took the click, so sharpen the answer and title. Demand decay: fewer people searching, time it to the next deadline. Lost: the page no longer shows in Google results, so check it still exists, is indexed and is not redirected."
-          rows={a.decay}
-          empty={failed('decay') || 'No pages lost clicks this period.'}
-          cols={[
-            { key: 'page', label: 'Page', render: (d) => <a href={safeHref(d.page)} target="_blank" rel="noreferrer" className={linkCls}>{shortUrl(d.page)}</a> },
-            { key: 'type', label: 'Cause', render: (d) => decayLabel(d.type) },
-            { key: 'clicks', label: 'Clicks', muted: true, render: (d) => `${d.clicksBefore} → ${d.clicksNow ?? 0}` },
-            { key: 'position', label: 'Position', muted: true, render: (d) => `${d.positionBefore} → ${d.positionNow ?? 'not in results'}` },
-          ]}
-        />
-        <SimpleTable
-          title="Close to the top: click problems (positions 4 to 10)"
-          note="Fix the title, meta description and the direct answer near the top."
-          rows={a.strikingDistance?.clickProblems}
-          empty={failed('searchConsoleBase') || 'None with enough searches this period.'}
-          cols={[
-            { key: 'query', label: 'Query' },
-            { key: 'page', label: 'Page', render: (s) => shortUrl(s.page) },
-            { key: 'position', label: 'Position', muted: true },
-            { key: 'potentialExtraClicks', label: 'Extra clicks at #3 / 28d', muted: true },
-          ]}
-        />
-        <SimpleTable
-          title="Close to page one: ranking problems (positions 11 to 20)"
-          note="Add depth and sub-questions, internal links from related posts, and fresher facts."
-          rows={a.strikingDistance?.rankingProblems}
-          empty={failed('searchConsoleBase') || 'None with enough searches this period.'}
-          cols={[
-            { key: 'query', label: 'Query' },
-            { key: 'page', label: 'Page', render: (s) => shortUrl(s.page) },
-            { key: 'position', label: 'Position', muted: true },
-            { key: 'potentialExtraClicks', label: 'Extra clicks at #3 / 28d', muted: true },
-          ]}
-        />
-        <SimpleTable
-          title="Our pages competing for the same search"
-          note="If they answer the same question, merge into the stronger page and redirect the other. Never fix this with noindex or deletion."
-          rows={a.cannibalization}
-          empty={failed('searchConsoleBase') || 'No competing pages found.'}
-          cols={[
-            { key: 'query', label: 'Query' },
-            { key: 'pages', label: 'Pages (share, position)', render: (c) => c.pages.map((p: any) => `${shortUrl(p.page)} (${p.share}%, #${p.position})`).join('; ') },
-          ]}
-        />
-        <SimpleTable
-          title="Posts to update for India's Income-tax Act 2025"
-          note="These still use Assessment Year or 1961 Act wording. Highest traffic first."
-          rows={a.regulatoryRefresh}
-          empty={failed('regulatoryRefresh') || 'None found.'}
-          cols={[
-            { key: 'title', label: 'Post', render: (r) => <a href={r.url} target="_blank" rel="noreferrer" className={linkCls}>{r.title}</a> },
-            { key: 'example', label: 'Still says', muted: true },
-            { key: 'clicks28d', label: 'Clicks (28d)', muted: true },
-          ]}
-        />
-      </Section>
-
-      <Section
-        title={<>5. This month&apos;s picks</>}
-        description={
-          <>
-            Priority = Extra clicks over 12 months × Business value × Deadline factor × Confidence ÷ Effort, calculated in code. &quot;est.&quot;
-            means the click figure is an estimate for a new topic, not from your data. New articles go into the blog pipeline with their brief;
-            existing pages get a full audit, then use Rewrite in the Blog Audit tab.
-          </>
-        }
-      >
-        {report.planChecks?.length > 0 && (
-          <Banner className="mt-0 mb-3">
-            {report.planChecks.map((c: any, i: number) => (
-              <div key={i}>{c}</div>
+      {s.edits?.length > 0 && (
+        <Section title="Edit audit log">
+          <DataTable head={['Date', 'Reviewer', 'Section', 'Old value', 'New value']}>
+            {s.edits.map((e: any) => (
+              <tr key={e.id}>
+                <td className={TD_MUTED}>{fmtDate(e.created_at)}</td>
+                <td className={TD}>{e.reviewer}</td>
+                <td className={TD}>{e.section}</td>
+                <td className={TD}><pre className="max-h-32 max-w-xs overflow-auto text-[11px] whitespace-pre-wrap">{e.old_value}</pre></td>
+                <td className={TD}><pre className="max-h-32 max-w-xs overflow-auto text-[11px] whitespace-pre-wrap">{e.new_value}</pre></td>
+              </tr>
             ))}
-          </Banner>
-        )}
-        {error && <p className="mb-2 text-sm text-destructive">Error: {error}</p>}
-        <div className="grid gap-3 lg:grid-cols-2">{report.picks.map((p: any, i: number) => renderPick(p, i + 1))}</div>
-      </Section>
-
-      {report.quickEdits?.length > 0 && (
-        <Section
-          title="Quick-edit track (outside the 8 slots)"
-          description="One-hour fixes: title, meta description, the answer at the top, FAQ additions and Income-tax Act transition notes. Audit the page, then apply the small changes in the rewrite or ask the Assistant to make them."
-        >
-          <div className="grid gap-3 lg:grid-cols-2">{report.quickEdits.map((p: any, i: number) => renderPick(p, `Q${i + 1}`))}</div>
+          </DataTable>
         </Section>
       )}
-
-      {(report.quickWins?.length > 0 || report.nextInLine?.length > 0) && (
-        <Card>
-          <CardContent>
-            {report.quickWins?.length > 0 && (
-              <>
-                <h3 className="font-heading text-base font-medium">Other quick wins</h3>
-                <BulletList items={report.quickWins} />
-              </>
-            )}
-            {report.nextInLine?.length > 0 && (
-              <SimpleTable
-                title="Next in line (scored lower this month)"
-                rows={report.nextInLine}
-                cols={[
-                  { key: 'title', label: 'Pick', render: (p) => p.workingTitle || p.keyword },
-                  { key: 'action', label: 'Action', muted: true },
-                  { key: 'priority', label: 'Priority', muted: true, render: (p) => p.score.priority },
-                ]}
-              />
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      <Section title="6. Merge and redirect decisions">
-        <SimpleTable
-          title="Consolidation"
-          rows={report.consolidation}
-          empty="No merges needed this month."
-          cols={[
-            { key: 'query', label: 'Query' },
-            { key: 'keepUrl', label: 'Keep', render: (c) => shortUrl(c.keepUrl) },
-            { key: 'mergeUrl', label: 'Merge and 301', render: (c) => shortUrl(c.mergeUrl) },
-            { key: 'reason', label: 'Why', muted: true },
-          ]}
-        />
-      </Section>
-
-      <Section title="7. Technical fixes">
-        <SimpleTable
-          title="Top fixes by impact and effort"
-          rows={report.technical}
-          empty="No material technical issues found."
-          cols={[
-            { key: 'fix', label: 'Fix' },
-            { key: 'impact', label: 'Impact', muted: true },
-            { key: 'effort', label: 'Effort', muted: true },
-            { key: 'evidence', label: 'Evidence', muted: true },
-          ]}
-        />
-      </Section>
-
-      <Section title="8. AI search (GEO) and authority">
-        <SimpleTable
-          title="Google AI Overviews for priority keywords (US, live)"
-          note={aiFailedCount > 0 ? `${aiFailedCount} of ${aiRows.length} keyword checks failed (timed out or errored) and are not shown.` : undefined}
-          rows={aiRows.filter((r) => !r.error)}
-          empty={
-            failed('aiVisibility') ||
-            (aiFailedCount > 0 ? `Could not check: all ${aiFailedCount} keyword checks failed (timed out or errored).` : 'The AI Overview check did not run this time.')
-          }
-          cols={[
-            { key: 'keyword', label: 'Keyword' },
-            { key: 'aiOverview', label: 'AI Overview', render: (r) => (r.aiOverview ? 'yes' : 'no') },
-            { key: 'citesUs', label: 'Cites us', render: (r) => <StatusBadge kind={r.citesUs ? 'approved' : 'failed'}>{r.citesUs ? 'yes' : 'no'}</StatusBadge> },
-            { key: 'organicPosition', label: 'Our position', muted: true, render: (r) => r.organicPosition ?? 'not in top results' },
-            { key: 'citedSites', label: 'Sites it cites', muted: true, render: (r) => r.citedSites.join(', ') },
-          ]}
-        />
-        {a.aiReferrals?.now?.sessions > 0 && (
-          <SimpleTable
-            title="Visits from AI assistants (last 28 days, GA4)"
-            rows={Object.entries(a.aiReferrals.now.bySource).map(([source, v]: [string, any]) => ({ source, ...v }))}
-            cols={[
-              { key: 'source', label: 'Source' },
-              { key: 'sessions', label: 'Sessions', muted: true },
-              { key: 'conversions', label: 'Conversions', muted: true },
-            ]}
-          />
-        )}
-        {a.questionBank && (
-          <SimpleTable
-            title={`New Google "People also ask" questions this month (${a.questionBank.newCount} new, ${a.questionBank.total} in the question bank)`}
-            note={'Questions searchers are asking, counted as new once Google has shown them twice' + (a.questionBank.unconfirmedCount ? ' (' + a.questionBank.unconfirmedCount + ' more seen once so far)' : '') + '. Answer the ones that fit in the FAQ of the page that covers the topic.'}
-            rows={a.questionBank.newQuestions}
-            empty="No new questions this month."
-            cols={[
-              { key: 'question', label: 'Question' },
-              { key: 'keyword', label: 'Found for', muted: true },
-              { key: 'markets', label: 'Market', muted: true },
-            ]}
-          />
-        )}
-        <SectionLabel className="mt-4">AI search actions</SectionLabel>
-        <BulletList items={report.geo} />
-        <SectionLabel className="mt-4">Authority (earned mentions, never bought links)</SectionLabel>
-        <BulletList items={report.authority} />
-        <SimpleTable
-          title="Who you compete with in search"
-          rows={report.competitors}
-          cols={[
-            { key: 'domain', label: 'Site' },
-            { key: 'whatWorks', label: 'What works for them', muted: true },
-            { key: 'gap', label: 'Opening for us' },
-          ]}
-        />
-      </Section>
-
-      <Section title="9. Risks and open questions">
-        <BulletList items={report.risks} />
-        {report.measurementGaps?.length > 0 && (
-          <>
-            <SectionLabel className="mt-4">What cannot be measured yet, and the one-time fix</SectionLabel>
-            <BulletList items={report.measurementGaps} />
-          </>
-        )}
-        <SimpleTable
-          title="Upcoming deadlines that drive searches (confirm dates on the official calendar)"
-          rows={a.deadlines}
-          cols={[
-            { key: 'date', label: 'Date' },
-            { key: 'market', label: 'Market', muted: true },
-            { key: 'what', label: 'Deadline' },
-            { key: 'daysAway', label: 'Days away', muted: true },
-          ]}
-        />
-      </Section>
-    </>
+    </div>
   );
 }
 
-const fetchDueInfo = () =>
-  fetch('/api/strategy/auto-check')
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
-
-const clockTime = (iso: any) => {
-  const d = iso ? new Date(iso) : null;
-  return d && !Number.isNaN(d.getTime()) ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
-};
-
-const LIST_FIELDS = ['keyword_priorities', 'content_recommendations', 'technical_recommendations', 'competitor_notes'];
-
-// Stays mounted (hidden) while other tabs are open; `active` says whether it is the visible tab.
-export default function StrategyTab({ active: isVisible = true }: { active?: boolean }) {
-  const [strategies, setStrategies] = useState<any[]>([]);
-  const [generating, setGenerating] = useState(false);
-  const [progress, setProgress] = useState<any>(null); // { stage, percent, since }
-  const [elapsed, setElapsed] = useState(0);
-  const [message, setMessage] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<any>(null);
-  const [editing, setEditing] = useState<any>(null);
-  const [saving, setSaving] = useState(false);
-  const [liveMetrics, setLiveMetrics] = useState<any>(null);
-  const [due, setDue] = useState<any>(null); // { period, due, existingId, running, runningSince }
-  const abortRef = useRef<AbortController | null>(null);
-
+// The approved month's live blog calendar and the Verified Facts Register.
+function MonthRunning() {
+  const [data, setData] = useState<any>(null);
+  const [facts, setFacts] = useState<any[]>([]);
+  const [f, setF] = useState({ value: '', claim: '', source_url: '' });
+  const [msg, setMsg] = useState<string | null>(null);
   const load = useCallback(async () => {
-    const [list, dueInfo] = await Promise.all([
-      fetch('/api/strategy').then((r) => (r.ok ? r.json() : [])).catch(() => []),
-      fetchDueInfo(),
-    ]);
-    setStrategies(Array.isArray(list) ? list : []);
-    setDue(dueInfo);
-    return list;
+    setData(await fetch('/api/strategy/schedule').then((r) => r.json()).catch(() => null));
+    setFacts(await fetch('/api/facts/register').then((r) => r.json()).catch(() => []));
   }, []);
-
-  useEffect(() => {
-    fetch('/api/strategy/metrics')
-      .then((r) => r.json())
-      .then(setLiveMetrics)
-      .catch(() => {});
-  }, []);
-
-  // Reload the list each time the tab is shown (it used to remount on every visit).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (isVisible) load();
-  }, [isVisible, load]);
+    load();
+  }, [load]);
 
-  // A run started somewhere else (another browser tab, the monthly auto-run): check every 30
-  // seconds and show the new plan once it is saved.
-  const runningElsewhere = !generating && Boolean(due?.running);
-  useEffect(() => {
-    if (!runningElsewhere) return undefined;
-    const t = setInterval(async () => {
-      const info = await fetchDueInfo();
-      if (!info) return;
-      if (info.running) setDue(info);
-      else load();
-    }, 30000);
-    return () => clearInterval(t);
-  }, [runningElsewhere, load]);
-
-  // Opening a strategy copies it into the edit form. A reload of the same strategy (after a pick
-  // action, approval or revisiting the tab) takes the new server data but keeps unsaved typing.
-  useEffect(() => {
-    const s = strategies.find((x) => x.id === openId);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEditing((prev: any) => {
-      if (!s) return null;
-      if (!prev || prev.id !== s.id) return { ...s };
-      const kept: any = { summary: prev.summary };
-      if (!s.report) {
-        for (const f of LIST_FIELDS) kept[f] = prev[f];
-      }
-      return { ...s, ...kept };
-    });
-  }, [openId, strategies]);
-
-  useEffect(() => {
-    if (!generating) return undefined;
-    const start = Date.now();
-    const t = setInterval(() => setElapsed(Math.round((Date.now() - start) / 1000)), 1000);
-    return () => clearInterval(t);
-  }, [generating]);
-
-  async function generate() {
-    setGenerating(true);
-    setElapsed(0);
-    setMessage(null);
-    setProgress({ stage: 'Starting…', percent: 2 });
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const res = await fetch('/api/strategy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: controller.signal });
-      if (!res.ok) {
-        // 409: another run holds the lock. Say so; the finally block refreshes the running banner.
-        const json = await res.json().catch(() => null);
-        if (res.status === 409) {
-          setMessage(json?.error || 'A strategy is already being generated.');
-          return;
-        }
-        throw new Error(json?.error || `Request failed (${res.status})`);
-      }
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() as string;
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const evt = JSON.parse(line);
-          if (evt.stage || evt.percent != null) setProgress({ stage: evt.stage, percent: evt.percent });
-          if (evt.status === 'done') {
-            await load();
-            setOpenId(evt.result.id);
-            setMessage('The plan is ready below. Review it, then approve it to make it the active strategy.');
-          } else if (evt.status === 'stopped') setMessage('Stopped. Nothing was saved.');
-          else if (evt.status === 'error') setMessage('Error: ' + evt.error);
-        }
-      }
-    } catch (err: any) {
-      setMessage(err.name === 'AbortError' ? 'Stopped. Nothing was saved.' : 'Error: ' + err.message);
-    } finally {
-      setGenerating(false);
-      setProgress(null);
-      abortRef.current = null;
-      // The stream has ended, so the server has released its lock (or another run holds it).
-      fetchDueInfo().then((info) => info && setDue(info));
-    }
+  async function markReviewed(id: number) {
+    const res = await fetch(`/api/strategy/schedule/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reviewed' }) });
+    setMsg(res.ok ? 'Marked as reviewed. The reviewed version publishes at its slot.' : 'Could not mark as reviewed.');
+    load();
   }
-
-  async function saveEdits(status: string | null) {
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/strategy/${editing.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          editing.report
-            ? { summary: editing.summary, status }
-            : {
-                summary: editing.summary,
-                keyword_priorities: editing.keyword_priorities,
-                content_recommendations: editing.content_recommendations,
-                technical_recommendations: editing.technical_recommendations,
-                competitor_notes: editing.competitor_notes,
-                status,
-              }
-        ),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      await load();
-    } catch (err: any) {
-      setMessage('Error: ' + err.message);
-    } finally {
-      setSaving(false);
-    }
+  async function addFact() {
+    const res = await fetch('/api/facts/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) });
+    const j = await res.json().catch(() => ({}));
+    setMsg(res.ok ? 'Fact added. Held blogs that needed it publish on the next scheduler run.' : j.error);
+    if (res.ok) setF({ value: '', claim: '', source_url: '' });
+    load();
   }
-
-  async function deleteStrategy() {
-    if (!window.confirm(`Delete the ${editing.period} strategy${editing.status === 'approved' ? ' (currently approved)' : ''}? Keywords it added that are not written yet will be removed too. Drafts already written are kept.`)) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/strategy/${editing.id}`, { method: 'DELETE' });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-      setEditing(null);
-      setMessage(`Strategy deleted${json.removedKeywords ? `, ${json.removedKeywords} unwritten keyword(s) removed` : ''}. You can generate a new one now.`);
-      await load();
-      fetchDueInfo().then((info) => info && setDue(info));
-    } catch (err: any) {
-      setMessage('Error: ' + err.message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function updateListField(field: string, index: number, value: string) {
-    setEditing((prev: any) => {
-      const next = [...prev[field]];
-      next[index] = value;
-      return { ...prev, [field]: next };
-    });
-  }
-
-  // A row with status 'generating' only marks a run in progress; it is not a plan to open.
-  const listed = strategies.filter((s) => s.status !== 'generating');
-  const active = listed.find((s) => s.status === 'approved');
-  const minutes = `${Math.floor(elapsed / 60)} min ${elapsed % 60} s`;
-  const runningSince = clockTime(due?.runningSince);
-
-  const listInputs = (field: string, label: string) => (
-    <div className="space-y-1">
-      <SectionLabel>{label}</SectionLabel>
-      {editing[field].map((k: string, i: number) => (
-        <Input key={i} type="text" value={k} onChange={(e) => updateListField(field, i, e.target.value)} />
-      ))}
-    </div>
-  );
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CalendarRange className="size-4 text-muted-foreground" />
-            Monthly SEO and GEO strategy
-          </CardTitle>
-          <CardDescription>
-            Each month the dashboard checks your data (Search Console, GA4, SE Ranking, live Google results and AI Overviews, WordPress, the
-            crawl), finds what is decaying, close to the top, competing with itself or out of date under the new Income-tax Act, researches
-            competitors, and proposes 8 scored picks. Nothing changes until you approve. The approved plan guides every new draft.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {runningElsewhere ? (
-            <Banner className="mt-0">
-              A plan is being generated{runningSince ? ` (started ${runningSince})` : ''}. It appears here when done.
-            </Banner>
-          ) : (
-            due?.due &&
-            !generating && (
-              <Banner className="mt-0">
-                The {due.period} plan has not been made yet. Generate it now, or it runs automatically once the monthly schedule is set up.
-              </Banner>
-            )
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={generate} disabled={generating || runningElsewhere}>
-              {(generating || runningElsewhere) && <Loader2 className="animate-spin" />}
-              {generating || runningElsewhere ? 'Working…' : `Generate the ${due?.period || 'monthly'} strategy`}
-            </Button>
-            {generating && (
-              <Button variant="destructive" onClick={() => abortRef.current?.abort()}>
-                <Square /> Stop
-              </Button>
-            )}
-          </div>
-          {generating && progress && (
-            <div className="space-y-1.5">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress.percent}%` }} />
-              </div>
-              <Muted>
-                {progress.stage} ({minutes} so far; the whole run usually takes 10 to 20 minutes; you can use the other tabs meanwhile)
-              </Muted>
-            </div>
-          )}
-          {message && <Muted>{message}</Muted>}
-          {active && (
-            <Muted>
-              Active strategy: <strong className="text-foreground">{active.period}</strong> (approved {active.decided_at})
-            </Muted>
-          )}
-        </CardContent>
-      </Card>
-
-      {!editing &&
-        (liveMetrics ? (
-          <StrategyMetrics mom={liveMetrics} />
-        ) : (
-          <Card>
-            <CardContent className="space-y-3">
-              <Muted>Loading this period&apos;s numbers…</Muted>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-
-      <Card>
-        <CardContent>
-          <div className="overflow-x-auto rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead>Period</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Generated</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {listed.map((s) => (
-                  <TableRow key={s.id} data-state={s.id === openId ? 'selected' : undefined}>
-                    <TableCell className="font-medium">{s.period}</TableCell>
-                    <TableCell>
-                      <StatusBadge kind={statusBadgeClass(s.status)}>{s.status.replace('_', ' ')}</StatusBadge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{s.created_at}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="outline" size="sm" onClick={() => setOpenId(s.id)}>Open</Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {listed.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-muted-foreground">No strategy generated yet.</TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {editing && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              {editing.period}
-              <StatusBadge kind={statusBadgeClass(editing.status)}>{editing.status.replace('_', ' ')}</StatusBadge>
-            </CardTitle>
-            <CardAction className="flex flex-wrap gap-2">
-              <a href={`/api/strategy/${editing.id}/download`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
-                <Download /> Download report (.docx)
-              </a>
-              <Button variant="ghost" size="sm" onClick={() => setOpenId(null)}>
-                <X /> Close
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="space-y-1">
-              <SectionLabel>Summary (editable)</SectionLabel>
-              <Textarea rows={4} value={editing.summary || ''} onChange={(e) => setEditing({ ...editing, summary: e.target.value })} />
-            </div>
-
-            {!editing.report && (
-              <>
-                {listInputs('keyword_priorities', 'Keyword priorities')}
-                {listInputs('content_recommendations', 'Content recommendations')}
-                {listInputs('technical_recommendations', 'Technical recommendations')}
-                <div className="space-y-1">
-                  <SectionLabel>Competitor notes</SectionLabel>
-                  <Textarea rows={4} value={editing.competitor_notes || ''} onChange={(e) => setEditing({ ...editing, competitor_notes: e.target.value })} />
-                </div>
-              </>
-            )}
-
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => saveEdits(null)} disabled={saving}>
-                Save summary
-              </Button>
-              {editing.status !== 'approved' && (
-                <>
-                  <Button className="bg-emerald-600 text-white hover:bg-emerald-600/85" onClick={() => saveEdits('approved')} disabled={saving}>
-                    <Check /> Approve as active strategy
-                  </Button>
-                  <Button variant="destructive" onClick={() => saveEdits('rejected')} disabled={saving}>
-                    Reject
-                  </Button>
-                </>
-              )}
-              <Button variant="outline" className="text-red-600 dark:text-red-400" onClick={deleteStrategy} disabled={saving}>
-                Delete strategy
-              </Button>
-            </div>
-
-            {Object.keys(editing.data_snapshot || {}).some((k) => k.endsWith('Error')) && (
-              <Muted>
-                Some sources were unavailable when this was generated:{' '}
-                {Object.entries(editing.data_snapshot)
-                  .filter(([k]) => k.endsWith('Error'))
-                  .map(([k, v]) => `${k.replace('Error', '')} (${String(v).slice(0, 120)})`)
-                  .join('; ')}
-              </Muted>
-            )}
-          </CardContent>
-        </Card>
+    <div className="space-y-4">
+      {msg && <div className="rounded-lg border p-2 text-sm">{msg}</div>}
+      {data?.rows?.length > 0 && (
+        <Section title="This month's blogs" description="Blogs enter review 24 hours before their slot. Unreviewed blogs are auto-approved and published on schedule. Blogs with an unverified tax figure, rate or deadline are held.">
+          <DataTable head={['Slot', 'Title', 'Status', 'Held because', '']}>
+            {data.rows.map((r: any) => (
+              <tr key={r.id}>
+                <td className={TD_MUTED}>{fmtDate(r.publish_at)}</td>
+                <td className={TD}>{r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}</td>
+                <td className={TD}>{r.status}{r.approval_mode ? ` (${r.approval_mode === 'auto' ? 'auto-approved' : `reviewed by ${r.reviewed_by || 'reviewer'}`})` : ''}</td>
+                <td className={TD}>{r.hold_reasons?.length ? <ul className="ml-4 list-disc text-xs">{r.hold_reasons.map((h: string, i: number) => <li key={i}>{h}</li>)}</ul> : ''}</td>
+                <td className={TD}>{r.status === 'in_review' && !r.reviewed_at && <Button size="sm" variant="outline" onClick={() => markReviewed(r.id)}>Mark reviewed</Button>}</td>
+              </tr>
+            ))}
+          </DataTable>
+        </Section>
       )}
+      <Section title="Verified Facts Register" description="Tax figures, rates and deadlines blogs may state. Each needs an official source.">
+        <div className="grid gap-2 sm:grid-cols-4">
+          <Input placeholder='Figure as written, e.g. "30%"' value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} />
+          <Input placeholder="What it is" value={f.claim} onChange={(e) => setF({ ...f, claim: e.target.value })} />
+          <Input placeholder="Official source URL" value={f.source_url} onChange={(e) => setF({ ...f, source_url: e.target.value })} />
+          <Button onClick={addFact}>Add verified fact</Button>
+        </div>
+        {facts.length > 0 && (
+          <DataTable head={['Figure', 'Claim', 'Source', 'Verified by']}>
+            {facts.map((x) => (
+              <tr key={x.id}><td className={TD}>{x.value}</td><td className={TD}>{x.claim}</td><td className={TD_MUTED}><a className="underline" href={x.source_url} target="_blank" rel="noreferrer">source</a></td><td className={TD_MUTED}>{x.verified_by}</td></tr>
+            ))}
+          </DataTable>
+        )}
+      </Section>
+    </div>
+  );
+}
 
-      {editing && editing.report && <StrategyReport key={editing.id} strategy={editing} onUpdated={() => load()} />}
-      {editing && !editing.report && <StrategyMetrics mom={editing.data_snapshot?.monthOverMonth} />}
+export default function StrategyTab({ active = true }: { active?: boolean }) {
+  const [list, setList] = useState<any[]>([]);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [gen, setGen] = useState<{ stage: string; percent: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const rows = await fetch('/api/strategy').then((r) => (r.ok ? r.json() : [])).catch(() => []);
+    setList(rows);
+    setOpenId((id) => id ?? rows.find((r: any) => r.status !== 'superseded')?.id ?? null);
+  }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (active) load();
+  }, [active, load]);
+
+  async function generate() {
+    setError(null);
+    setGen({ stage: 'Starting', percent: 1 });
+    try {
+      const res = await fetch('/api/strategy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const reader = res.body!.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+        for (const l of lines) {
+          if (!l.trim()) continue;
+          const m = JSON.parse(l);
+          if (m.status === 'error') setError(m.error);
+          else if (m.status === 'done') setOpenId(m.id);
+          else setGen({ stage: m.stage, percent: m.percent });
+        }
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setGen(null);
+      load();
+    }
+  }
+
+  const current = list.find((s) => s.id === openId);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="mr-auto text-lg font-semibold">Monthly SEO, AEO and GEO Strategy</h2>
+        {list.length > 0 && (
+          <select className="h-8 rounded-lg border bg-background px-2 text-sm" value={openId ?? ''} onChange={(e) => setOpenId(Number(e.target.value))}>
+            {list.map((s) => <option key={s.id} value={s.id}>{s.period} ({s.status.replace('_', ' ')}, v{s.version})</option>)}
+          </select>
+        )}
+        <Button variant="outline" disabled={!!gen} onClick={generate}>{gen && <Loader2 className="animate-spin" />}Generate next month now</Button>
+      </div>
+      <p className="text-xs text-muted-foreground">Generated automatically on the 1st of every month for the next month. Uses only real dashboard numbers.</p>
+      {gen && <div className="rounded-lg border p-2 text-sm">{gen.stage} ({gen.percent}%)</div>}
+      {error && <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-2 text-sm">{error}</div>}
+      {current ? (
+        <StrategyView key={current.id} s={current} onChanged={(v) => setList((l) => l.map((x) => (x.id === v.id ? v : x)))} />
+      ) : (
+        <>
+          <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm font-bold">
+            ACTION REQUIRED BEFORE APPROVAL: Upload the latest Screaming Frog crawl export (full links list) to the dashboard. The strategy cannot be approved without it.
+          </div>
+          <label className="block text-sm">
+            Screaming Frog crawl export (CSV or XLSX):{' '}
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const fd = new FormData();
+                fd.append('file', file);
+                const res = await fetch('/api/strategy/crawl', { method: 'POST', body: fd });
+                const j = await res.json().catch(() => ({}));
+                setError(res.ok ? null : j.error || 'Upload failed');
+                load();
+              }}
+            />
+          </label>
+          <p className="text-sm text-muted-foreground">No strategy yet. Generate one, or wait for the monthly run.</p>
+        </>
+      )}
+      <MonthRunning />
     </div>
   );
 }
