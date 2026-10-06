@@ -236,7 +236,16 @@ export default function SettingsTab() {
       const res = await fetch('/api/wordpress/test');
       const json = await res.json();
       markConn('wordpress', json);
-      setStatus(json.ok ? `Connected as ${json.connectedAs}` : `Failed: ${json.error}`);
+      if (!json.ok) setStatus(`Failed: ${json.error}`);
+      else {
+        const yn = (b: boolean) => (b ? 'yes' : 'NO');
+        const role = json.roles?.length ? json.roles.join(', ') : 'unknown';
+        setStatus(
+          `Connected as ${json.connectedAs}. Role: ${role}${json.isAdministrator ? ' (Administrator)' : ''}. ` +
+            `Install plugins (Redirection, Cache Enabler): ${yn(json.canInstallPlugins)}. Upload images: ${yn(json.canUploadMedia)}. Edit all posts and pages: ${yn(json.canEditPages)}.` +
+            (json.isAdministrator ? ' All automatic fixes can run.' : ' Make this user an Administrator in WordPress (Users) so every automatic fix can run.')
+        );
+      }
     } catch (err: any) {
       setStatus('Failed: ' + err.message);
     }
