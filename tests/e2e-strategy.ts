@@ -150,6 +150,24 @@ async function main() {
     await prisma.settings.deleteMany({ where: { key: 'competitor_domains_auto' } });
     console.log('PASS update with latest changes adds only what is new and queues it; builds the competitor list when missing');
   }
+
+  // Tasks for a person: listed with a written guide, ticked off, and never picked up by outreach.
+  {
+    const manual = await import('../lib/strategy/manual');
+    const t = await prisma.backlink_tasks.create({ data: { strategy_id: row.id, target_site: 'Clutch (company profile)', method: 'Directory or citation listing', our_page: '/', send_date: '2026-10-06', tags: '[]', status: 'manual' } });
+    let list = await manual.listManualTasks(row.id);
+    assert.ok(list.some((x) => x.kind === 'backlink' && x.id === t.id && !x.done && !x.guide));
+    const fake = async () => ({ text: '===JSON==={"summary":"Create the Clutch profile.","link":"https://clutch.co/","timeMinutes":20,"prepare":["Logo"],"steps":[{"title":"Open Clutch","detail":"Click Get Listed","link":"https://clutch.co/"}],"copy":[{"field":"Company name","value":"USAIndiaCFO"}],"check":"Search your name","ifStuck":"Ask your manager"}===END===' });
+    const g = await manual.guideFor('backlink', t.id, { write: fake as any });
+    assert.equal(g.steps.length, 1);
+    const again = await manual.guideFor('backlink', t.id, { write: async () => { throw new Error('should use the saved guide'); } });
+    assert.equal(again.link, 'https://clutch.co/');
+    await manual.setManualDone('backlink', t.id, true, 'Reviewer A');
+    list = await manual.listManualTasks(row.id);
+    assert.ok(list.find((x) => x.id === t.id)?.done);
+    await prisma.backlink_tasks.delete({ where: { id: t.id } });
+    console.log('PASS manual tasks: listed, guide written once and saved, ticked off');
+  }
   assert.equal(await prisma.strategy_keywords.count(), 4);
   await assert.rejects(service.editSection(row.id, 'targets', plan.targets, 'Reviewer A'), /Say why/);
   view = await service.logStrategyChange(row.id, { what: 'Swap blog 2', why: 'New IRS notice' }, 'Reviewer B');

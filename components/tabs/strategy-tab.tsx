@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
+import { useManualTasks, ManualTasksBanner, ManualTaskList } from '@/components/shared/manual-tasks';
 
 // Strategy section (v2): one monthly SEO / AEO / GEO strategy in 11 fixed sections, one approval,
 // then the month runs automatically. All UI text avoids em dashes by design.
@@ -284,6 +285,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
   const fileRef = useRef<HTMLInputElement>(null);
   const approved = s.status === 'approved';
   const p = editing ? draft : plan;
+  const manual = useManualTasks(s.id, approved);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -371,7 +373,15 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
         </div>
       )}
 
+      <ManualTasksBanner m={manual} strategyId={s.id} />
+
       <StrategyProgress key={s.version} id={s.id} approved={approved} />
+
+      {approved && (
+        <Section title="Tasks for your team" description="Work in this strategy that a person has to do: profiles that need a sign-up and verification, and website fixes that need a developer. Each has a step-by-step guide with links and text to copy. Tick each one when done.">
+          <ManualTaskList m={manual} />
+        </Section>
+      )}
 
       {/* Core objective, hardcoded */}
       <Card>
