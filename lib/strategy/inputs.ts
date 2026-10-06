@@ -12,6 +12,7 @@ import { hasStoredTokens } from '../zohoAuth';
 import * as settings from '../settings';
 import { gatherAiVisibility } from '../aiVisibility';
 import { metric, keywordKey, CRAWL_MAX_AGE_DAYS } from './core';
+import { competitorList, detectCompetitors } from '../competitors';
 
 const SITE_HOST = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '');
 
@@ -142,20 +143,8 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   } catch (e: any) {
     out.missing.push(`referring domains (${e.message})`);
   }
-  const competitors = String((await settings.get('competitor_domains')) || '')
-    .split(/[\s,]+/)
-    .filter(Boolean);
-  out.competitors = competitors;
+  // Backlink gap is computed after the site analysis, which also finds our competitors.
   out.backlinkGap = [];
-  if (competitors.length) {
-    try {
-      out.backlinkGap = await limit(getBacklinkGap(SITE_HOST(), competitors, 40), 6, 'SE Ranking backlink gap');
-    } catch (e: any) {
-      out.missing.push(`backlink gap (${e.message})`);
-    }
-  } else {
-    out.missing.push('backlink gap (no competitor domains in Settings, key "competitor_domains")');
-  }
 
   // Live SERP features for the top priority keywords (AEO: snippets, PAA, AI Overviews).
   await onStep?.('Checking featured snippets, People Also Ask and AI Overviews', 0.35);
@@ -253,6 +242,29 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
     out.snapshot = await limit(gatherSnapshot({ onStep: (l, f) => onStep?.(l, 0.45 + 0.4 * f) }), 20, 'Site analysis');
   } catch (e: any) {
     out.missing.push(`site analysis (${e.message})`);
+  }
+
+  // Competitors: typed in Settings, otherwise detected from who ranks next to us in Google.
+  await onStep?.('Finding competitors and the backlink gap', 0.86);
+  let comp = await competitorList();
+  if (comp.source !== 'Settings' && out.snapshot?.analysis?.searchCompetitors?.length) {
+    try {
+      const found = await limit(detectCompetitors(out.snapshot.analysis.searchCompetitors, SITE_HOST()), 3, 'Competitor detection');
+      if (found.length) comp = { domains: found, source: 'detected automatically from Google results for our keywords' };
+    } catch (e: any) {
+      out.missing.push(`competitor detection (${e.message})`);
+    }
+  }
+  out.competitors = comp.domains;
+  out.competitorSource = comp.source;
+  if (comp.domains.length) {
+    try {
+      out.backlinkGap = await limit(getBacklinkGap(SITE_HOST(), comp.domains, 40), 6, 'SE Ranking backlink gap');
+    } catch (e: any) {
+      out.missing.push(`backlink gap (${e.message})`);
+    }
+  } else {
+    out.missing.push('backlink gap (no competitors found: the site analysis returned no Google competitors, and none are typed in Settings)');
   }
 
   out.usedKeywords = (await prisma.strategy_keywords.findMany({ select: { keyword: true, period: true } })).map((k) => `${k.keyword} (${k.period})`);
