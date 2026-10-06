@@ -134,7 +134,21 @@ async function main() {
     assert.equal(r2.changes.length, 0, 'a second update finds nothing new');
     assert.equal(await prisma.backlink_tasks.count({ where: { target_site: 'newsite.com' } }), 1);
     await prisma.settings.delete({ where: { key: 'competitor_domains' } });
-    console.log('PASS update with latest changes adds only what is new and queues it');
+    // No competitor list at all: the update builds one from Google results and saves it.
+    await prisma.settings.deleteMany({ where: { key: { in: ['competitor_domains_auto', 'competitor_domains_auto_at'] } } });
+    const r3 = await refreshStrategy(row.id, 'Reviewer A', {
+      ...opts,
+      serpCheck: async () => [{ domain: 'rivalcfo.com', top5Appearances: 4 }],
+      detect: async (rows: any[]) => {
+        await prisma.settings.upsert({ where: { key: 'competitor_domains_auto' }, create: { key: 'competitor_domains_auto', value: rows[0].domain }, update: { value: rows[0].domain } });
+        return [rows[0].domain];
+      },
+    });
+    assert.ok(r3.notes.some((n: string) => n.includes('was missing, so it was built now') && n.includes('rivalcfo.com')), JSON.stringify(r3.notes));
+    const r4 = await refreshStrategy(row.id, 'Reviewer A', opts);
+    assert.ok(r4.notes.some((n: string) => n.startsWith('Competitor list found') && n.includes('rivalcfo.com')));
+    await prisma.settings.deleteMany({ where: { key: 'competitor_domains_auto' } });
+    console.log('PASS update with latest changes adds only what is new and queues it; builds the competitor list when missing');
   }
   assert.equal(await prisma.strategy_keywords.count(), 4);
   await assert.rejects(service.editSection(row.id, 'targets', plan.targets, 'Reviewer A'), /Say why/);

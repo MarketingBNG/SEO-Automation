@@ -13,7 +13,7 @@ import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { callClaude } from '../anthropic';
 import { getBacklinkGap } from '../seranking';
-import { competitorList } from '../competitors';
+import { competitorList, detectCompetitors, searchCompetitorsFromSerp } from '../competitors';
 import { SAFEGUARDS } from './core';
 import { AUTOMATION, technicalFixesFromCrawl, calendarSlots, parseJson } from './generate';
 import { fixKind } from './fixer';
@@ -40,7 +40,7 @@ Return ONLY ===JSON===[{"targetSite":"","ourPage":"","method":"","tags":["SEO"]}
   return Array.isArray(rows) ? rows : [];
 }
 
-export async function refreshStrategy(id: number, actor: string, { pick = assignPages, gap = getBacklinkGap } = {}) {
+export async function refreshStrategy(id: number, actor: string, { pick = assignPages, gap = getBacklinkGap, serpCheck = searchCompetitorsFromSerp, detect = detectCompetitors }: any = {}) {
   const row = await prisma.seo_strategies.findUnique({ where: { id } });
   if (!row?.plan_json) throw Object.assign(new Error('Not found'), { status: 404 });
   if (row.status === 'generating') throw Object.assign(new Error('The strategy is still being generated.'), { status: 409 });
@@ -62,9 +62,30 @@ export async function refreshStrategy(id: number, actor: string, { pick = assign
   }
 
   // Section 6: new targets from the backlink gap.
-  const comp = await competitorList();
+  // Competitor list: use the one that exists; if there is none, build it now from Google results
+  // for this strategy's main keywords (SERPHouse searches plus one small Claude check).
+  let comp = await competitorList();
+  if (comp.domains.length) {
+    notes.push(`Competitor list found (${comp.source}): ${comp.domains.join(', ')}`);
+  } else {
+    const kws = [...(plan.keywords || [])].sort((a, b) => (b.score || 0) - (a.score || 0)).map((k) => k.keyword || k.mainKeyword).filter(Boolean);
+    const fromCalendar = (plan.blogPlan?.calendar || []).map((b) => b.mainKeyword).filter(Boolean);
+    const keywords = [...new Set([...kws, ...fromCalendar])];
+    if (keywords.length) {
+      try {
+        const serp = await serpCheck(keywords, HOST());
+        const found = serp.length ? await detect(serp, HOST()) : [];
+        if (found.length) {
+          comp = { domains: found, source: 'built now from Google results for this strategy keywords' };
+          notes.push(`Competitor list was missing, so it was built now and saved: ${found.join(', ')}`);
+        }
+      } catch (e: any) {
+        notes.push(`Could not build the competitor list: ${e.message}`);
+      }
+    }
+  }
   if (!comp.domains.length) {
-    notes.push('No competitors yet: they are found during a full strategy run (or type them in Settings, key "competitor_domains"). Backlink targets were not changed.');
+    notes.push('No competitor list yet and none could be built (Google results were not available). Backlink targets were not changed.');
   } else {
     let gapRows = [];
     try {
