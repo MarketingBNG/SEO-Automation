@@ -7,8 +7,8 @@ import { nextPeriod } from '@/lib/strategy/core';
 import { isCronRequest, methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
-// Only applies on serverless hosts. On the self-hosted Coolify server there is no time limit.
-export const maxDuration = 800;
+// Only applies on Vercel (300 is its plan limit). The self-hosted Coolify server has no time limit.
+export const maxDuration = 300;
 
 async function existing(period: string) {
   return prisma.seo_strategies.findFirst({ where: { period, plan_json: { not: null }, status: { in: ['pending_review', 'approved'] } }, select: { id: true } });

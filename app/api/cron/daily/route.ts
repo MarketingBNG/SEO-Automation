@@ -7,8 +7,8 @@ import { runDaily } from '@/lib/strategy/autopilot';
 import { methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
-// Only applies on serverless hosts. On the self-hosted Coolify server there is no time limit.
-export const maxDuration = 800;
+// Only applies on Vercel (300 is its plan limit). The self-hosted Coolify server has no time limit.
+export const maxDuration = 300;
 
 export async function GET() {
   return NextResponse.json(await runDaily());
