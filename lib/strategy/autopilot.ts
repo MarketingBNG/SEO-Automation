@@ -17,6 +17,7 @@ import { gatherAiVisibility } from '../aiVisibility';
 import { syncMeetings } from '../clientInsights';
 import { runFixes } from './fixer';
 import { runOutreach } from './outreach';
+import { runSpeedFixes } from './speed';
 import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh } from './core';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
@@ -267,7 +268,12 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
     summary.outreach = await runOutreach(now).catch((e) => ({ error: e.message }));
     if (!summary.outreach?.error) await settings.set('last_outreach_run', today);
   }
-  // Fireflies meetings: pull new ones and auto-review them, once per day.
+  // Speed: page cache plugin and WebP images, once per day (only while a strategy is approved).
+  if ((await settings.get('last_speed_run')) !== today && (await prisma.seo_strategies.count({ where: { status: 'approved' } }))) {
+    summary.speed = await runSpeedFixes().catch((e) => ({ error: e.message }));
+    if (!summary.speed?.error) await settings.set('last_speed_run', today);
+  }
+    // Fireflies meetings: pull new ones and auto-review them, once per day.
   if (process.env.FIREFLIES_API_KEY && (await settings.get('last_meeting_sync')) !== today) {
     summary.meetings = await syncMeetings().catch((e) => ({ error: e.message }));
     if (!summary.meetings?.error) await settings.set('last_meeting_sync', today);

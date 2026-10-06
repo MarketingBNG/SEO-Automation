@@ -118,6 +118,51 @@ function EditTable({ rows: rowsIn, cols, editing, onChange, empty }: { rows: any
 
 const fmtDate = (s?: string | null) => (s ? new Date(String(s).replace(' ', 'T') + 'Z').toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : '');
 
+// When each part of the strategy starts running. Before approval nothing runs; everything starts
+// from the approval, and blogs and outreach then follow their own dates in the plan.
+function ImplementationStart({ plan, approved, approvedAt }: { plan: any; approved: boolean; approvedAt?: string | null }) {
+  const sorted = (dates: (string | undefined)[]) => dates.filter(Boolean).map(String).sort();
+  const blogDates = sorted((plan.blogPlan?.calendar || []).map((b: any) => b.publishDate));
+  const firstBlog = blogDates[0];
+  const lastBlog = blogDates[blogDates.length - 1];
+  const firstDraft = firstBlog ? new Date(Date.parse(firstBlog.replace(' ', 'T') + 'Z') - 48 * 3600000).toISOString().slice(0, 19).replace('T', ' ') : null;
+  const emailLinks = (plan.backlinks || []).filter((b: any) => !/internal|directory|citation/i.test(b.method || ''));
+  const linkDates = sorted(emailLinks.map((b: any) => b.sendDate));
+  const day = (d?: string) => (d ? new Date(d.slice(0, 10) + 'T00:00:00Z').toLocaleDateString('en-IN', { dateStyle: 'medium', timeZone: 'UTC' }) : 'not planned');
+  const fixes = (plan.technical?.fixes || []).filter((f: any) => f.apply !== false).length;
+  const start = approved ? `approval (${fmtDate(approvedAt)})` : 'approval';
+  // Phases mirror what the scheduler really does: spread out so nothing lands in one burst.
+  const phases = [
+    { phase: '1. Approval', when: approved ? fmtDate(approvedAt) : 'When you click Approve', what: 'Blog calendar, backlink tasks and ticked fixes are queued. Daily rank checks begin.', why: 'One approval starts everything; nothing runs before it.', time: 'Instant' },
+    { phase: '2. Technical fixes', when: `From ${start}, every 15 minutes`, what: `${fixes} ticked fix(es): titles, meta descriptions, broken links, redirects, FAQs`, why: 'Small, safe changes first. Max 5 per run and 20 per day, so the site changes gradually and AI cost is spread out.', time: fixes ? `About ${Math.ceil(fixes / 20)} day(s)` : 'Nothing to fix' },
+    { phase: '3. Speed', when: `First run after ${start}, then daily`, what: 'Page cache plugin (if none), then large images to WebP', why: 'No AI credits used. 5 images a day so every change can be checked; the cache is removed again if PageSpeed drops.', time: 'Cache: day 1. Images: 5 a day until done' },
+    { phase: '4. Blogs', when: firstBlog ? `${fmtDate(firstDraft)} to ${fmtDate(lastBlog)}` : 'Per calendar', what: `${blogDates.length} blog(s): deep research draft, fact check until two clean checks, 24-hour review, publish`, why: 'Precision work at full quality, one draft at a time, 48 hours ahead of each slot. Never rushed or batched.', time: blogDates.length ? `${blogDates.length} slot(s) across the 30 days` : '-' },
+    { phase: '5. Backlink outreach', when: linkDates.length ? `${day(linkDates[0])} to ${day(linkDates[linkDates.length - 1])}, weekdays` : 'Per send dates', what: `${emailLinks.length} site(s) added to the Smartlead campaign with a personal opening line`, why: 'Max 5 leads a day so outreach never looks like spam; Smartlead spaces the emails and follow-ups.', time: emailLinks.length ? `At least ${Math.ceil(emailLinks.length / 5)} working day(s)` : '-' },
+    { phase: '6. Checks', when: 'Daily and every Monday', what: 'Daily rank check (alert on a 5+ drop); weekly plan vs actual; new links verified in SE Ranking', why: 'Catches problems early without extra AI cost.', time: 'Whole 30 days' },
+  ];
+  return (
+    <span>
+      {approved ? `Started on ${fmtDate(approvedAt)}.` : 'Nothing runs until you approve. Everything starts automatically on approval, in phases:'}
+      <details className="mt-1 rounded-md border p-2">
+        <summary className="cursor-pointer font-medium">Implementation timeline: phases, when, why and how long</summary>
+        <div className="mt-2 overflow-x-auto">
+          <DataTable head={['Phase', 'When', 'What', 'Why this way', 'Time needed']}>
+            {phases.map((ph) => (
+              <tr key={ph.phase}>
+                <td className={TD}>{ph.phase}</td>
+                <td className={TD}>{ph.when}</td>
+                <td className={TD}>{ph.what}</td>
+                <td className={TD}>{ph.why}</td>
+                <td className={TD}>{ph.time}</td>
+              </tr>
+            ))}
+          </DataTable>
+        </div>
+      </details>
+    </span>
+  );
+}
+
 // How much of the strategy is done, and the estimated AI cost for its 30 days.
 function StrategyProgress({ id, approved }: { id: number; approved: boolean }) {
   const [d, setD] = useState<any>(null);
@@ -346,6 +391,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
         <div className="grid gap-2 text-sm sm:grid-cols-2">
           <div><span className="text-muted-foreground">Strategy period (30 days): </span>{p.summary.month}</div>
           <div><span className="text-muted-foreground">Approval status: </span>{approved ? `Approved by ${s.approved_by} on ${fmtDate(s.approved_at)} (version ${s.approved_version})` : `Waiting for approval (version ${s.version})`}</div>
+          <div className="sm:col-span-2"><span className="text-muted-foreground">Implementation starts: </span><ImplementationStart plan={plan} approved={approved} approvedAt={s.approved_at} /></div>
           <div className="sm:col-span-2"><span className="text-muted-foreground">Core objective: </span>{plan.coreObjective?.motive}</div>
           {(['focus', 'strategyType', 'whyThisType'] as const).map((k) => (
             <div key={k} className="sm:col-span-2">

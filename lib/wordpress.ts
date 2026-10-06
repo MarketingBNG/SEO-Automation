@@ -57,6 +57,18 @@ async function uploadFeaturedImage(localFilePath) {
   return json.id;
 }
 
+// Uploads image bytes held in memory (for example an image re-compressed by the speed fixer).
+async function uploadBuffer(buffer: Buffer, filename: string, mime: string) {
+  const { siteUrl, authHeader } = getConfig();
+  const res = await fetch(`${siteUrl}/wp-json/wp/v2/media`, {
+    method: 'POST',
+    headers: { Authorization: authHeader, 'Content-Type': mime, 'Content-Disposition': `attachment; filename="${filename}"` },
+    body: new Uint8Array(buffer),
+  });
+  if (!res.ok) throw new Error(`WordPress media upload failed (${res.status}): ${(await res.text()).slice(0, 300)}`);
+  return res.json();
+}
+
 // Yoast's own fields. WordPress silently ignores them until the one-time snippet in
 // wordpress/yoast-rest-fields.php registers them for the REST API (see Settings > Yoast SEO fields).
 function yoastMeta({ metaDescription, focusKeyphrase }) {
@@ -245,6 +257,7 @@ async function findPostByUrl(url) {
 
 export {
   testConnection,
+  uploadBuffer,
   uploadFeaturedImage,
   uploadMedia,
   publishPost,
