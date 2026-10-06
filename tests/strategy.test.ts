@@ -137,3 +137,12 @@ test('a figure sentence never spans paragraphs', () => {
   const claims = extractClaims('<p>The FBAR is due April 15.</p><p>Other text here</p><h2>FAQ</h2>');
   assert.equal(claims[0].sentence, 'The FBAR is due April 15.');
 });
+
+test('a strategy covers 30 days from the day it is generated (India time)', async () => {
+  const { strategyWindow } = await import('../lib/strategy/core');
+  // 6 Oct 2026, 20:00 UTC is already 7 Oct in India.
+  const w = strategyWindow(new Date('2026-10-06T20:00:00Z'));
+  assert.equal(w.start, '2026-10-07');
+  assert.equal(w.end, '2026-11-05');
+  assert.equal(w.label, '7 Oct 2026 to 5 Nov 2026');
+});

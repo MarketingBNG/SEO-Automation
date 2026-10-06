@@ -77,7 +77,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   const out: any = { gatheredAt: today, missing: [] as string[] };
 
   // Month-end report (already built in the Performance section); read only.
-  onStep?.('Reading last month\'s report', 0.05);
+  await onStep?.('Reading last month\'s report', 0.05);
   let perf: any = null;
   try {
     perf = await cachedPerformance(28);
@@ -105,7 +105,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   // (GEO is replaced below by SE Ranking AI data when available.)
 
   // SE Ranking: tracked keywords and positions.
-  onStep?.('Reading SE Ranking positions', 0.15);
+  await onStep?.('Reading SE Ranking positions', 0.15);
   let rankings: any[] = [];
   let rankDate = today;
   try {
@@ -123,7 +123,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   const top10 = rankings.length ? ranked.filter((r) => r.position <= 10).length : null;
 
   // SE Ranking: referring domains and backlink gap vs competitors.
-  onStep?.('Reading SE Ranking backlinks', 0.25);
+  await onStep?.('Reading SE Ranking backlinks', 0.25);
   let refDomains = null;
   try {
     refDomains = await getReferringDomainsCount(SITE_HOST());
@@ -146,7 +146,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   }
 
   // Live SERP features for the top priority keywords (AEO: snippets, PAA, AI Overviews).
-  onStep?.('Checking featured snippets, People Also Ask and AI Overviews', 0.35);
+  await onStep?.('Checking featured snippets, People Also Ask and AI Overviews', 0.35);
   const priority = rankings
     .filter((r) => r.position > 0 && r.position <= 30)
     .sort((a, b) => (b.volume || 0) - (a.volume || 0))
@@ -157,7 +157,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   const serpRange = `live SERP check on ${today}, ${serp?.checked || 0} keyword-market pairs`;
 
   // SE Ranking AI visibility: ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode.
-  onStep?.('Reading SE Ranking AI visibility (ChatGPT, Perplexity, Gemini, AI Overviews)', 0.4);
+  await onStep?.('Reading SE Ranking AI visibility (ChatGPT, Perplexity, Gemini, AI Overviews)', 0.4);
   let ai: any = null;
   try {
     ai = await gatherAiVisibility(SITE_HOST(), perf ? { from: perf.ranges.current.startDate, to: perf.ranges.current.endDate } : {});
@@ -236,7 +236,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
 
   // The deeper analysis (striking distance, decay, cannibalization, AI visibility) from Search
   // Console, GA4, SERPHouse, WordPress, PageSpeed and Clarity.
-  onStep?.('Running the full site analysis', 0.45);
+  await onStep?.('Running the full site analysis', 0.45);
   try {
     out.snapshot = await gatherSnapshot({ onStep: (l, f) => onStep?.(l, 0.45 + 0.4 * f) });
   } catch (e: any) {

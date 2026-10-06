@@ -28,7 +28,7 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
       {jobs.map((j) => (
         <button key={`${j.kind}-${j.id}`} type="button" onClick={() => onOpen?.(j.kind)} className="block w-full text-left">
           <div className="flex items-center gap-2 text-xs">
-            <Loader2 className="size-3.5 shrink-0 animate-spin" />
+            <Loader2 className={`size-3.5 shrink-0 ${j.paused ? "" : "animate-spin"}`} />
             <span className="truncate font-medium">{j.label}</span>
             <span className="truncate text-muted-foreground">{j.stage}</span>
             <span className="ml-auto tabular-nums">{j.percent}%</span>

@@ -290,7 +290,7 @@ export function faqSchema(html: string): string | null {
   return `<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: pairs })}</script>`;
 }
 
-// Next month's label, e.g. "November 2026", as used in seo_strategies.period.
+// Next month's label, e.g. "November 2026" (strategies made before the 30-day windows).
 export function nextPeriod(now = new Date()): string {
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   return d.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -298,4 +298,28 @@ export function nextPeriod(now = new Date()): string {
 export function periodStart(period: string): Date {
   const d = new Date(`1 ${period} 00:00:00 UTC`);
   return Number.isFinite(d.getTime()) ? d : new Date();
+}
+
+// ---------- 30-day strategy window ----------
+// A strategy covers 30 days starting the day it is generated (India time).
+export type StrategyWindow = { start: string; end: string; label: string };
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+const nice = (s: string) => new Date(`${s}T00:00:00Z`).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+export function strategyWindow(now = new Date(), days = 30): StrategyWindow {
+  const ist = new Date(now.getTime() + 330 * 60000);
+  const start = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
+  const end = new Date(start.getTime() + (days - 1) * 86400000);
+  return { start: ymd(start), end: ymd(end), label: `${nice(ymd(start))} to ${nice(ymd(end))}` };
+}
+
+// The window of a stored plan; older plans named a calendar month ("November 2026").
+export function windowOf(planOrPeriod: any): StrategyWindow {
+  if (planOrPeriod && typeof planOrPeriod === 'object' && planOrPeriod.startDate && planOrPeriod.endDate) {
+    return { start: planOrPeriod.startDate, end: planOrPeriod.endDate, label: planOrPeriod.period };
+  }
+  const period = typeof planOrPeriod === 'string' ? planOrPeriod : planOrPeriod?.period;
+  const s = periodStart(period);
+  const e = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + 1, 0));
+  return { start: ymd(s), end: ymd(e), label: period };
 }

@@ -99,7 +99,7 @@ function fillPublishDates(plan) {
   const taken = new Set(cal.map((b) => b.publishDate).filter(Boolean));
   const days = plan.blogPlan?.postingDays?.length ? plan.blogPlan.postingDays : ['Tue', 'Thu'];
   const time = String(plan.blogPlan?.postingTime || '10:00').slice(0, 5);
-  const free = calendarSlots(plan.period, days, time, 31).filter((t) => !taken.has(t));
+  const free = calendarSlots(plan, days, time, 31).filter((t) => !taken.has(t));
   for (const b of cal) {
     if (b.publishDate) continue;
     const slot = free.shift();

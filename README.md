@@ -35,7 +35,7 @@ node -e "fetch('http://localhost:'+(process.env.PORT||3000)+'/api/cron/daily',{h
 |---|---|---|
 | `/api/cron/daily` | `*/15 * * * *` (every 15 min) | Blog drafts, 24-hour review window, auto-approve and publish after the automatic fact check; once a day: rank check and Fireflies meeting sync (meetings are cleaned of names, prices and contact details, then auto-approved) |
 | `/api/cron/weekly` | `0 5 * * 1` (Mondays) | Plan vs actual check |
-| `/api/strategy/auto-check` | `30 3 1 * *` (1st of month) | Generates next month's strategy |
+| `/api/strategy/auto-check` | `30 3 * * *` (daily) | Generates a new 30-day strategy when the current one has 3 days left |
 | `/api/skill/auto-check` | `0 3 * * *` | Refreshes the writing skill when it is 15+ days old |
 | `/api/cron/sweep` | `*/15 * * * *` | Frees keywords/assistant runs left stuck by a killed process |
 
@@ -56,8 +56,9 @@ Cron requests are authorised with `CRON_SECRET`; everything else requires a sign
 
 One strategy per month, one approval, then the month runs automatically.
 
-- **Generate:** `/api/strategy/auto-check` runs at 03:30 UTC on the 1st and builds next month's
-  strategy (Claude at maximum effort with web research; every number filled in code from SE
+- **Generate:** each strategy covers 30 days from the day it is generated (pause, resume or stop
+  it while it runs). `/api/strategy/auto-check` runs daily and builds the next one when the current
+  strategy has 3 days left (Claude at maximum effort with web research; every number filled in code from SE
   Ranking, Search Console, GA4, SERPHouse, Zoho and the month-end report, else `DATA MISSING`).
 - **Approve gate:** a Screaming Frog export (CSV/XLSX) uploaded in the last 7 days plus zero
   validation errors (tags on every item, growth targets, 40% priority for a falling channel, intent

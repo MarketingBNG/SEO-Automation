@@ -44,6 +44,9 @@ export async function GET() {
     data: { status: 'failed', error: 'Generation was interrupted (server restart or crash). Start it again.', progress_stage: 'Failed' },
   });
 
+  // A Stop that the server could not finish (restart) is completed here.
+  await prisma.seo_strategies.updateMany({ where: { status: 'stopping', created_at: { lt: cutoff } }, data: { status: 'stopped', progress_stage: 'Stopped' } });
+
   return NextResponse.json({
     strategiesFailed: strategies.count,
     keywordsReset: kw.count,

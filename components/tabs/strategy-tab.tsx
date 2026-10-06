@@ -239,7 +239,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
       {/* 1 */}
       <Section title="1. Strategy summary">
         <div className="grid gap-2 text-sm sm:grid-cols-2">
-          <div><span className="text-muted-foreground">Month: </span>{p.summary.month}</div>
+          <div><span className="text-muted-foreground">Strategy period (30 days): </span>{p.summary.month}</div>
           <div><span className="text-muted-foreground">Approval status: </span>{approved ? `Approved by ${s.approved_by} on ${fmtDate(s.approved_at)} (version ${s.approved_version})` : `Waiting for approval (version ${s.version})`}</div>
           <div className="sm:col-span-2"><span className="text-muted-foreground">Core objective: </span>{plan.coreObjective?.motive}</div>
           {(['focus', 'strategyType', 'whyThisType'] as const).map((k) => (
@@ -508,7 +508,19 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
   }, [active, load]);
 
   // While a strategy is generating in the background, refresh every 3 seconds for its progress.
-  const generating = list.find((s) => s.status === 'generating');
+  const generating = list.find((s) => ['generating', 'paused', 'stopping'].includes(s.status));
+  const paused = generating?.status === 'paused';
+
+  // Pause, resume or stop the generation that is running.
+  async function control(action: 'pause' | 'resume' | 'stop') {
+    if (!generating) return;
+    if (action === 'stop' && !window.confirm('Stop generating this strategy? You can start a new one any time.')) return;
+    setError(null);
+    const res = await fetch(`/api/strategy/${generating.id}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) setError(json.error || `HTTP ${res.status}`);
+    load();
+  }
   useEffect(() => {
     if (!active || !generating) return;
     const t = setInterval(load, 3000);
@@ -544,22 +556,31 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
         )}
         <Button variant="outline" disabled={starting || !!generating} onClick={generate}>
           {(starting || generating) && <Loader2 className="animate-spin" />}
-          {generating ? 'Generating...' : 'Generate next month now'}
+          {generating ? (paused ? 'Paused' : 'Generating...') : 'Generate strategy (next 30 days)'}
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">Generated automatically on the 1st of every month for the next month. Uses only real dashboard numbers. Generation runs on the server, so you can leave this page; progress also shows at the top of every tab.</p>
+      <p className="text-xs text-muted-foreground">Each strategy covers 30 days from the day it is generated. A new one is generated automatically when the current one has 3 days left. Uses only real dashboard numbers. Generation runs on the server, so you can leave this page; progress also shows at the top of every tab.</p>
       {generating && (
         <div className="rounded-lg border p-3 text-sm">
-          <div className="flex items-center gap-2">
-            <Loader2 className="size-4 animate-spin" />
-            <span className="font-medium">Generating the {generating.period} strategy</span>
-            <span className="text-muted-foreground">{generating.progress?.stage}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Loader2 className={`size-4 ${paused ? '' : 'animate-spin'}`} />
+            <span className="font-medium">{paused ? 'Paused:' : generating.status === 'stopping' ? 'Stopping:' : 'Generating'} the strategy for {generating.period}</span>
+            <span className="text-muted-foreground">{paused ? 'Waiting for you to resume' : generating.progress?.stage}</span>
             <span className="ml-auto tabular-nums">{generating.progress?.percent ?? 0}%</span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {generating.status === 'generating' && <Button size="sm" variant="outline" onClick={() => control('pause')}>Pause</Button>}
+            {paused && <Button size="sm" onClick={() => control('resume')}>Resume</Button>}
+            {generating.status !== 'stopping' && <Button size="sm" variant="destructive" onClick={() => control('stop')}>Stop</Button>}
+            <span className="self-center text-xs text-muted-foreground">Pause takes effect at the next step; Stop cancels at once.</span>
           </div>
           <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
             <div className="h-full rounded-full bg-primary transition-all duration-700" style={{ width: `${Math.max(2, generating.progress?.percent ?? 0)}%` }} />
           </div>
         </div>
+      )}
+      {current?.status === 'stopped' && (
+        <div className="rounded-lg border p-3 text-sm">Generation of the strategy for {current.period} was stopped. Click Generate to start a new one.</div>
       )}
       {current?.status === 'failed' && (
         <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm">
