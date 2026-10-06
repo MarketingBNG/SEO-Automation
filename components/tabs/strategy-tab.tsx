@@ -109,6 +109,90 @@ function EditTable({ rows: rowsIn, cols, editing, onChange, empty }: { rows: any
 
 const fmtDate = (s?: string | null) => (s ? new Date(String(s).replace(' ', 'T') + 'Z').toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : '');
 
+// How much of the strategy is done, and the estimated AI cost for its 30 days.
+function StrategyProgress({ id, approved }: { id: number; approved: boolean }) {
+  const [d, setD] = useState<any>(null);
+  const load = useCallback(async () => {
+    setD(await fetch(`/api/strategy/${id}/progress`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+  }, [id]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+    const t = setInterval(load, 60000);
+    return () => clearInterval(t);
+  }, [load]);
+  if (!d) return null;
+  const usd = (n: number) => `$${n.toFixed(2)}`;
+  async function toggle(t: any) {
+    await fetch(`/api/strategy/backlinks/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: t.status === 'done' ? 'planned' : 'done' }) });
+    load();
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{approved ? 'How much of this strategy is done' : 'Estimated cost of this strategy'}</CardTitle>
+        <CardDescription>
+          {approved
+            ? `Counts published blogs and finished backlink tasks.${d.window.daysUsed ? ` Day ${d.window.daysUsed} of 30.` : ''}`
+            : 'Progress starts counting once the strategy is approved.'}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        {approved && (
+          <>
+            <div>
+              <div className="flex items-center justify-between"><span className="font-medium">Overall</span><span className="tabular-nums">{d.percent}%</span></div>
+              <div className="mt-1 h-3 w-full overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${d.percent}%` }} /></div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border p-3">
+                <div className="font-medium">Blogs: {d.blogs.published} of {d.blogs.total} published</div>
+                <div className="text-xs text-muted-foreground">{d.blogs.inReview} in review, {d.blogs.drafting} being written, {d.blogs.planned} planned, {d.blogs.held} held</div>
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${d.blogs.total ? (d.blogs.published / d.blogs.total) * 100 : 0}%` }} /></div>
+              </div>
+              <div className="rounded-lg border p-3">
+                <div className="font-medium">Backlink tasks: {d.backlinks.done} of {d.backlinks.total} done</div>
+                <div className="text-xs text-muted-foreground">Outreach is done by a person; tick each one off below when it is done.</div>
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${d.backlinks.total ? (d.backlinks.done / d.backlinks.total) * 100 : 0}%` }} /></div>
+              </div>
+            </div>
+            {d.backlinks.tasks.length > 0 && (
+              <details>
+                <summary className="cursor-pointer">Backlink tasks ({d.backlinks.tasks.length})</summary>
+                <ul className="mt-2 space-y-1">
+                  {d.backlinks.tasks.map((t: any) => (
+                    <li key={t.id} className="flex items-center gap-2">
+                      <input type="checkbox" checked={t.status === 'done'} onChange={() => toggle(t)} />
+                      <span>{t.send_date} {t.method}: <strong>{t.target_site}</strong>{t.our_page ? ` for ${t.our_page}` : ''}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
+        )}
+        <div className="rounded-lg border p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="font-medium">Estimated AI (API) cost for the 30 days</span>
+            <span className="text-lg font-semibold">{usd(d.cost.estimate)}</span>
+          </div>
+          {approved && <div className="text-xs text-muted-foreground">Spent so far since approval: {usd(d.cost.spentSinceApproval)}</div>}
+          <table className="mt-2 w-full text-xs">
+            <tbody>
+              {d.cost.lines.map((l: any) => (
+                <tr key={l.item}><td className="py-0.5">{l.item}</td><td className="text-right text-muted-foreground">{l.units} x {usd(l.unitCost)}{l.measured ? '' : ' (default)'}</td><td className="text-right">{usd(l.cost)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {d.cost.basis === 'measured' ? 'Based on what similar work actually cost on this account in the last 60 days.' : 'Lines marked (default) use typical costs until the dashboard has measured your own; the estimate gets more accurate after the first blogs. Fact checking can cost more for blogs that need many correction rounds.'}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => void }) {
   const plan = s.plan;
   const [editing, setEditing] = useState(false);
@@ -196,6 +280,8 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
           ACTION REQUIRED BEFORE APPROVAL: Upload the latest Screaming Frog crawl export (full links list) to the dashboard. The strategy cannot be approved without it.
         </div>
       )}
+
+      <StrategyProgress id={s.id} approved={approved} />
 
       {/* Core objective, hardcoded */}
       <Card>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import HTMLtoDOCX from 'html-to-docx';
+import { htmlToDocx } from '@/lib/docx';
 import prisma from '@/lib/prisma';
 import { methodNotAllowed, toId } from '../../../_lib/http';
 
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     ${audit.rewrite_content_html}
   `;
 
-  const buffer: any = await (HTMLtoDOCX as any)(html, null, {
+  const buffer: any = await htmlToDocx(html, {
     title: audit.rewrite_title || audit.title || 'Blog rewrite',
     margins: { top: 720, bottom: 720, left: 720, right: 720 },
   });
