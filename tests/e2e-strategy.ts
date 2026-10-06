@@ -113,6 +113,29 @@ async function main() {
   const fixes = await prisma.technical_fix_tasks.findMany();
   assert.ok(fixes.length >= 1 && fixes.every((f) => f.status === 'planned'), 'ticked technical fixes are queued on approval');
   console.log(`PASS approval queued ${fixes.length} technical fix(es) for automatic apply`);
+
+  // "Update with latest changes": adds new backlink targets and automation steps, nothing else.
+  {
+    const { refreshStrategy } = await import('../lib/strategy/refresh');
+    const { AUTOMATION } = await import('../lib/strategy/generate');
+    await prisma.settings.upsert({ where: { key: 'competitor_domains' }, create: { key: 'competitor_domains', value: 'rival.com' }, update: { value: 'rival.com' } });
+    const before = JSON.parse((await prisma.seo_strategies.findUnique({ where: { id: row.id } }))!.plan_json!);
+    before.automation = before.automation.slice(0, 3);
+    await prisma.seo_strategies.update({ where: { id: row.id }, data: { plan_json: JSON.stringify(before) } });
+    const opts = { gap: async () => [{ domain: 'newsite.com', linksTo: ['rival.com'] }], pick: async () => [{ targetSite: 'newsite.com', ourPage: '/guide', method: 'Unlinked brand mention' }] };
+    const r1 = await refreshStrategy(row.id, 'Reviewer A', opts);
+    assert.ok(r1.changes.some((c: string) => c.startsWith('Section 6: 1 new backlink')), JSON.stringify(r1));
+    assert.ok(r1.changes.some((c: string) => c.startsWith('Section 7')));
+    assert.equal(r1.view!.plan.automation.length, AUTOMATION.length);
+    assert.deepEqual(r1.view!.plan.blogPlan, before.blogPlan, 'the blog calendar is not touched');
+    const task = await prisma.backlink_tasks.findFirst({ where: { target_site: 'newsite.com' } });
+    assert.equal(task?.method, 'Unlinked brand mention');
+    const r2 = await refreshStrategy(row.id, 'Reviewer A', opts);
+    assert.equal(r2.changes.length, 0, 'a second update finds nothing new');
+    assert.equal(await prisma.backlink_tasks.count({ where: { target_site: 'newsite.com' } }), 1);
+    await prisma.settings.delete({ where: { key: 'competitor_domains' } });
+    console.log('PASS update with latest changes adds only what is new and queues it');
+  }
   assert.equal(await prisma.strategy_keywords.count(), 4);
   await assert.rejects(service.editSection(row.id, 'targets', plan.targets, 'Reviewer A'), /Say why/);
   view = await service.logStrategyChange(row.id, { what: 'Swap blog 2', why: 'New IRS notice' }, 'Reviewer B');
@@ -195,9 +218,11 @@ async function main() {
   await prisma.backlink_tasks.update({ where: { id: bl.id }, data: { status: 'done' } });
   pr = await strategyProgress(row.id);
   assert.equal(pr.backlinks.done, 1);
-  assert.equal(pr.percent, Math.round((3 / 6) * 100));
-  assert.ok(pr.cost.estimate > 0 && pr.cost.lines.length === 4);
-  console.log(`PASS strategy progress ${pr.percent}% (2 of 5 blogs, 1 of 1 backlink), estimated AI cost $${pr.cost.estimate.toFixed(2)} (${pr.cost.basis})`);
+  assert.equal(pr.backlinks.total, 2, 'the original target plus the one added by the update');
+  assert.equal(pr.percent, Math.round((3 / 7) * 100));
+  assert.ok(pr.cost.estimate > 0 && pr.cost.lines.length === 7);
+  assert.ok(pr.cost.lines.some((l: any) => l.item.startsWith('Backlink outreach') && l.units === 2));
+  console.log(`PASS strategy progress ${pr.percent}% (2 of 5 blogs, 1 of 2 backlinks), estimated AI cost $${pr.cost.estimate.toFixed(2)} (${pr.cost.basis})`);
 
   // Meeting insights: cleaned and auto-approved, or held when something identifying is left.
   const { autoReview } = await import('../lib/clientInsights');

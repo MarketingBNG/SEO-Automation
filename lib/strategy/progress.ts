@@ -6,7 +6,7 @@ import prisma from '../prisma';
 
 // Default per-unit estimates (USD, Claude Opus 5.5 at max effort with web search) used until the
 // dashboard has measured real averages.
-const DEFAULTS = { strategy: 8, blogDraft: 3, factCheckPerBlog: 4, otherPerDay: 0.5 };
+const DEFAULTS = { strategy: 8, blogDraft: 3, factCheckPerBlog: 4, otherPerDay: 0.5, outreachLead: 0.15, technicalFix: 0.05, update: 0.1 };
 
 async function avgCost(features: string[], perUnitRows: number) {
   const ago = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
@@ -46,10 +46,22 @@ export async function strategyProgress(strategyId: number) {
   const perFact = await avgCost(['fact-check'], draftsWritten);
   const perStrategy = await avgCost(['strategy'], strategiesRun);
   const otherDaily = (await avgCost(['reports', 'meetings', 'assistant', 'audit', 'training', 'other'], 60)) ?? null;
+  const since60 = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  const leadsPushed = await prisma.backlink_tasks.count({ where: { sent_at: { gte: since60 } } });
+  const fixesRun = await prisma.technical_fix_tasks.count({ where: { applied_at: { gte: since60 }, status: 'applied' } });
+  const perLead = await avgCost(['outreach'], leadsPushed);
+  const perFix = await avgCost(['technical_fix'], fixesRun);
+  const emailTasks = (links.length ? links : plan.backlinks || []).filter((l) => !/internal|directory|citation/i.test(l.method || '')).length;
+  const fixesPlanned = s.status === 'approved'
+    ? await prisma.technical_fix_tasks.count({ where: { strategy_id: strategyId, kind: { in: ['title', 'meta', 'thin'] } } })
+    : (plan.technical?.fixes || []).filter((f) => f.apply !== false && /title|meta description|thin content/i.test(f.issue || '')).length;
   const lines = [
     { item: 'Strategy research (this strategy)', units: 1, unitCost: perStrategy ?? DEFAULTS.strategy, measured: perStrategy !== null },
     { item: 'Blog writing', units: blogs.total, unitCost: perBlog ?? DEFAULTS.blogDraft, measured: perBlog !== null },
     { item: 'Fact checking (check, correct, re-check)', units: blogs.total, unitCost: perFact ?? DEFAULTS.factCheckPerBlog, measured: perFact !== null },
+    { item: 'Backlink outreach (opening line per Smartlead lead)', units: emailTasks, unitCost: perLead ?? DEFAULTS.outreachLead, measured: perLead !== null },
+    { item: 'Technical fixes written by Claude (titles, meta, FAQs)', units: fixesPlanned, unitCost: perFix ?? DEFAULTS.technicalFix, measured: perFix !== null },
+    { item: 'Competitor check and strategy updates', units: 2, unitCost: DEFAULTS.update, measured: false },
     { item: 'Reports, meetings, Assistant and other (30 days)', units: 30, unitCost: otherDaily ?? DEFAULTS.otherPerDay, measured: otherDaily !== null },
   ].map((l) => ({ ...l, cost: l.units * l.unitCost }));
   const estimate = lines.reduce((t, l) => t + l.cost, 0);

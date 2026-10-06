@@ -51,6 +51,8 @@ function Section({ title, description, children }: { title: ReactNode; descripti
   );
 }
 
+const usd = (n: number) => `$${n.toFixed(2)}`;
+
 // Mirrors lib/strategy/fixer.ts fixKind: what the automatic fixer will do with each issue.
 const fixKindOf = (issue: string) =>
   /^Broken link to /i.test(issue || '') ? 'broken_link' : /\b4\d\d status code/i.test(issue || '') ? 'redirect' : /missing title|duplicate title/i.test(issue || '') ? 'title' : /meta description/i.test(issue || '') ? 'meta' : /thin content/i.test(issue || '') ? 'thin' : 'manual';
@@ -129,7 +131,6 @@ function StrategyProgress({ id, approved }: { id: number; approved: boolean }) {
     return () => clearInterval(t);
   }, [load]);
   if (!d) return null;
-  const usd = (n: number) => `$${n.toFixed(2)}`;
   async function toggle(t: any) {
     await fetch(`/api/strategy/backlinks/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: t.status === 'done' ? 'planned' : 'done' }) });
     load();
@@ -208,6 +209,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
   const [error, setError] = useState<string | null>(null);
   const [change, setChange] = useState({ what: '', why: '' });
   const [editWhy, setEditWhy] = useState('');
+  const [updateResult, setUpdateResult] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const approved = s.status === 'approved';
   const p = editing ? draft : plan;
@@ -261,6 +263,16 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
     if (json) onChanged(json);
   }
 
+  // Adds what is new (automation steps, backlink targets, crawl fixes) without rebuilding the strategy.
+  async function updateLatest() {
+    setUpdateResult(null);
+    const json = await call('update', `/api/strategy/${s.id}/refresh`, { method: 'POST' });
+    if (json) {
+      onChanged(json.view);
+      setUpdateResult(json);
+    }
+  }
+
   async function logChange() {
     const json = await call('change', `/api/strategy/${s.id}/changes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change) });
     if (json) {
@@ -288,7 +300,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
         </div>
       )}
 
-      <StrategyProgress id={s.id} approved={approved} />
+      <StrategyProgress key={s.version} id={s.id} approved={approved} />
 
       {/* Core objective, hardcoded */}
       <Card>
@@ -490,10 +502,22 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
               <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
             </>
           )}
+          <Button variant="outline" disabled={editing || !!busy} onClick={updateLatest} title="Adds new automation steps, new backlink targets and fixes from a newer crawl. Does not rebuild the strategy.">
+            {busy === 'update' && <Loader2 className="animate-spin" />}Update with latest changes
+          </Button>
           <Button disabled={approved || editing || !!busy || s.blockers?.length > 0} onClick={approve}>
             {busy === 'approve' && <Loader2 className="animate-spin" />}{approved ? 'Approved' : 'Approve Strategy'}
           </Button>
         </div>
+
+        {updateResult && (
+          <div className="space-y-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm">
+            <div className="font-semibold">{updateResult.changes.length ? 'Strategy updated' : 'No changes needed'} (AI cost {usd(updateResult.cost || 0)})</div>
+            <ul className="ml-5 list-disc">
+              {[...updateResult.changes, ...updateResult.notes].map((c: string) => <li key={c}>{c}</li>)}
+            </ul>
+          </div>
+        )}
 
         {approved && (
           <div className="space-y-2 rounded-lg border p-3">
