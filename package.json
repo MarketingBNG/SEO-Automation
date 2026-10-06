@@ -11,7 +11,7 @@
     "db:migrate": "prisma migrate dev",
     "migrate:sqlite": "tsx scripts/migrate-sqlite.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test tests/strategy.test.ts tests/ai-visibility.test.ts tests/fact-check.test.ts tests/client-insights.test.ts tests/time-limit.test.ts tests/ai-credits.test.ts",
+    "test": "node --import tsx --test tests/strategy.test.ts tests/ai-visibility.test.ts tests/fact-check.test.ts tests/client-insights.test.ts tests/time-limit.test.ts tests/ai-credits.test.ts tests/parse-json.test.ts",
     "test:e2e": "tsx tests/e2e-strategy.ts"
   },
   "dependencies": {

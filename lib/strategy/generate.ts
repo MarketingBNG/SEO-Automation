@@ -70,10 +70,27 @@ Return ONLY JSON between ===JSON=== and ===END=== with this shape:
 }`;
 }
 
-function parseJson(text: string) {
-  const m = text.match(/===JSON===([\s\S]*?)===END===/);
-  const raw = (m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, '');
-  return JSON.parse(raw);
+// Reads the strategy JSON from Claude's reply: between the markers, in a ```json fence, or the
+// outermost {...} block, in that order.
+export function parseJson(text: string) {
+  const tries: string[] = [];
+  const m = text.match(/===JSON===([\s\S]*?)(?:===END===|$)/);
+  if (m) tries.push(m[1]);
+  const f = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (f) tries.push(f[1]);
+  const a = text.indexOf('{');
+  const b = text.lastIndexOf('}');
+  if (a >= 0 && b > a) tries.push(text.slice(a, b + 1));
+  let lastErr: any = new Error('No JSON found in the reply');
+  for (const t of tries) {
+    try {
+      const v = JSON.parse(t.trim().replace(/^```(?:json)?/, '').replace(/```$/, '').trim());
+      if (v && typeof v === 'object') return v;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
 }
 
 const TAGS = (t) => (Array.isArray(t) ? t.filter((x) => CHANNELS.includes(x)) : []);
@@ -308,13 +325,36 @@ export async function generateStrategy({ window = strategyWindow(), actor = 'Mon
   };
   const messages = [{ role: 'user', content: `Build the strategy for the 30 days from ${window.start} to ${window.end} (${period}). Targets are for these 30 days. Data (JSON):\n${JSON.stringify(payload).slice(0, 180000)}` }];
   const opts = { maxUses: STRATEGY_SEARCHES(), effort: 'max', model: STRATEGY_MODEL(), feature: 'strategy' };
-  const { text, assistantMessages } = await callClaude(systemPrompt(siteUrl), messages, signal, opts);
+  const { text } = await callClaude(systemPrompt(siteUrl), messages, signal, opts);
   let ai;
   try {
     ai = parseJson(text);
-  } catch (err: any) {
-    const retry = await callClaude(systemPrompt(siteUrl), [...messages, ...assistantMessages, { role: 'user', content: `Not valid JSON (${err.message}). Return the same strategy as valid JSON between ===JSON=== and ===END===.` }], signal, { ...opts, maxUses: 1 });
-    ai = parseJson(retry.text);
+  } catch {
+    // The research is done but the reply was not readable JSON (for example cut off or written as
+    // prose). Keep the research and only ask for it to be written out as JSON, without new web
+    // searches, so the research credits are not spent again. Up to two attempts.
+    let lastErr: any;
+    for (let attempt = 1; attempt <= 2 && !ai; attempt++) {
+      await checkpoint();
+      onProgress?.(`Turning the research into the strategy format (attempt ${attempt})`, 80);
+      const convert = await callClaude(
+        systemPrompt(siteUrl),
+        [
+          {
+            role: 'user',
+            content: `${messages[0].content}\n\nYOUR RESEARCH NOTES FROM THE PREVIOUS STEP (use them, do not research again):\n${text.slice(-120000)}\n\nNow return ONLY the strategy as valid JSON between ===JSON=== and ===END===, in the exact shape from the instructions. No other text.`,
+          },
+        ],
+        signal,
+        { ...opts, maxUses: 1, effort: 'high' }
+      );
+      try {
+        ai = parseJson(convert.text);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!ai) throw new Error(`Claude finished the research but did not return the strategy in the required format (${lastErr?.message}). Click Generate to try again.`);
   }
 
   await checkpoint();
