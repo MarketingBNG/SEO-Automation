@@ -180,12 +180,32 @@ source, still list it and leave source name/URL as "NONE - could not verify".>
 // timeouts), resumes when a long search pauses the turn, and returns the text plus the exact
 // assistant messages, so a repair round can send the turn back unchanged (the current models
 // reject edited history).
-async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high' }: any = {}) {
+// batch: true sends the turn through the Message Batches API instead (50% cheaper, but it can take
+// minutes to hours to come back, and refusal fallbacks are not allowed there). Only for unattended
+// jobs nobody is waiting on.
+async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
   const assistantMessages: any[] = [];
 
   for (let part = 0; part < 6; part++) {
+    if (batch) {
+      const response = await runBatchTurn(client, {
+        model: MODEL,
+        max_tokens: 32000,
+        output_config: { effort },
+        system: systemPrompt,
+        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxUses }],
+        messages: conversation,
+      }, signal);
+      if (response.stop_reason === 'refusal') throw new Error('The AI declined this request.');
+      const message = { role: 'assistant', content: response.content };
+      assistantMessages.push(message);
+      conversation.push(message);
+      if (response.stop_reason !== 'pause_turn') break;
+      continue;
+    }
+
     const stream = client.beta.messages.stream(
       {
         model: MODEL,
@@ -214,6 +234,35 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
     .map((b) => b.text)
     .join('\n');
   return { text, assistantMessages };
+}
+
+const BATCH_POLL_MS = 30_000;
+const BATCH_MAX_WAIT_MS = 25 * 60 * 60 * 1000; // batches expire after 24h
+
+// Submits one request as a single-item batch, waits for it to end and returns its message.
+async function runBatchTurn(client, params, signal) {
+  const created = await client.messages.batches
+    .create({ requests: [{ custom_id: 'turn', params }] })
+    .catch((err: any) => rethrowFriendly(err, signal));
+  const started = Date.now();
+  let status = created.processing_status;
+  while (status !== 'ended') {
+    if (signal?.aborted) {
+      await client.messages.batches.cancel(created.id).catch(() => {});
+      throw Object.assign(new Error('Request was aborted.'), { name: 'AbortError' });
+    }
+    if (Date.now() - started > BATCH_MAX_WAIT_MS) throw new Error(`Batch ${created.id} did not finish in time.`);
+    await new Promise((r) => setTimeout(r, BATCH_POLL_MS));
+    status = (await client.messages.batches.retrieve(created.id)).processing_status;
+  }
+
+  for await (const item of await client.messages.batches.results(created.id)) {
+    if (item.custom_id !== 'turn') continue;
+    if (item.result.type === 'succeeded') return item.result.message;
+    if (item.result.type === 'errored') throw new Error(`Batch request failed: ${item.result.error?.error?.message || item.result.error?.type || 'unknown error'}`);
+    throw new Error(`Batch request ${item.result.type}.`);
+  }
+  throw new Error(`Batch ${created.id} returned no result.`);
 }
 
 function parseBlogResponse(text) {
@@ -586,7 +635,7 @@ corrected draft again in the exact same format (===TITLE=== through ===END===):\
 // produces/refreshes the self-updating content-writing skill. Runs without human approval (it
 // only shapes future drafts, never publishes) but every version is kept in writing_skills for
 // audit/rollback.
-async function generateContentSkill() {
+async function generateContentSkill({ batch = false }: any = {}) {
   const previous = await prisma.writing_skills.findFirst({ where: { status: 'active' }, orderBy: { id: 'desc' } });
 
   let ownPerformanceNote = 'No GA4 data available this cycle.';
@@ -649,7 +698,7 @@ writer follows, not a report about the research.>
     systemPrompt,
     [{ role: 'user', content: "Research and produce this cycle's content-writing skill update." }],
     undefined,
-    { maxUses: 10 }
+    { maxUses: 10, batch }
   );
 
   const get = (start, end) => {

@@ -311,7 +311,7 @@ function finalizePlan(result, analysis) {
   };
 }
 
-async function generateSeoStrategy(snapshot, period, { signal, onProgress }: any = {}) {
+async function generateSeoStrategy(snapshot, period, { signal, onProgress, batch = false }: any = {}) {
   onProgress?.('Researching competitors and writing the plan…', 55);
   const messages = [
     {
@@ -319,7 +319,7 @@ async function generateSeoStrategy(snapshot, period, { signal, onProgress }: any
       content: `Period: ${period}. Today is ${new Date().toISOString().slice(0, 10)}.\n\nThis month's data (JSON):\n${buildInput(snapshot)}\n\nProduce the strategy for this period.`,
     },
   ];
-  const { text, assistantMessages } = await callClaude(systemPrompt(), messages, signal, { maxUses: 10 });
+  const { text, assistantMessages } = await callClaude(systemPrompt(), messages, signal, { maxUses: 10, batch });
   let parsed: any;
   try {
     parsed = parseJsonBlock(text);
@@ -330,7 +330,7 @@ async function generateSeoStrategy(snapshot, period, { signal, onProgress }: any
       systemPrompt(),
       [...messages, ...assistantMessages, { role: 'user', content: `That was not valid JSON (${err.message}). Return the same strategy again as valid JSON between ===JSON=== and ===END===, nothing else.` }],
       signal,
-      { maxUses: 1, effort: 'medium' }
+      { maxUses: 1, effort: 'medium', batch }
     );
     parsed = parseJsonBlock(retry.text);
   }
@@ -362,12 +362,12 @@ function currentPeriod(now = new Date()) {
 }
 
 // Gathers every source, writes the plan and stores it for review.
-async function createStrategy({ period = currentPeriod(), signal, onProgress, actor }: any = {}) {
+async function createStrategy({ period = currentPeriod(), signal, onProgress, actor, batch = false }: any = {}) {
   onProgress?.('Collecting data from Search Console, GA4, SE Ranking, SERPHouse, WordPress and the crawl…', 5);
   const snapshot = await gatherSnapshot({ onStep: (label, fraction) => onProgress?.(`${label}…`, Math.round(5 + 45 * fraction)) });
   if (signal?.aborted) throw Object.assign(new Error('Request was aborted.'), { name: 'AbortError' });
 
-  const result = await generateSeoStrategy(snapshot, period, { signal, onProgress });
+  const result = await generateSeoStrategy(snapshot, period, { signal, onProgress, batch });
   onProgress?.('Saving the plan…', 95);
 
   const r = await prisma.seo_strategies.create({
