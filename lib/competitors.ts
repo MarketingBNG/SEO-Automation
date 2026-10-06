@@ -5,6 +5,7 @@
 // Saved in settings (competitor_domains_auto) and refreshed each time a strategy is built.
 import * as settings from './settings';
 import { callClaude } from './anthropic';
+import { liveSearch } from './serphouse';
 
 // Sites that rank for everything but never compete for clients.
 const NOT_COMPETITORS = /(\.gov(\.\w+)?|\.gov\.in|\.nic\.in|\.edu|wikipedia\.org|reddit\.com|quora\.com|youtube\.com|linkedin\.com|facebook\.com|instagram\.com|x\.com|twitter\.com|medium\.com|forbes\.com|investopedia\.com|nerdwallet\.com|cleartax\.in|economictimes\.indiatimes\.com|livemint\.com|business-standard\.com|moneycontrol\.com|thehindu\.com|hindustantimes\.com|google\.com|amazon\.com|indeed\.com|glassdoor\.\w+|github\.com|stackexchange\.com)$/i;
@@ -49,4 +50,25 @@ export async function competitorList() {
   if (typed.length) return { domains: typed, source: 'Settings' };
   const auto = String((await settings.get('competitor_domains_auto')) || '').split(/[\s,]+/).filter(Boolean);
   return { domains: auto, source: auto.length ? `detected automatically on ${(await settings.get('competitor_domains_auto_at')) || 'an earlier run'}` : 'none' };
+}
+
+// Quick check without a full strategy run: who is in Google's top 5 for our main keywords
+// (SERPHouse, US results, a few keywords only). Returns rows shaped like the site analysis output.
+export async function searchCompetitorsFromSerp(keywords: string[], ourHost: string, { search = liveSearch } = {}) {
+  const counts: Record<string, number> = {};
+  for (const q of keywords.slice(0, 8)) {
+    try {
+      const json: any = await search({ q, loc: 'United States', timeoutMs: 90000 });
+      for (const r of (json.results?.results?.organic || []).slice(0, 5)) {
+        let h = '';
+        try {
+          h = new URL(r.link).hostname.replace(/^www\./, '');
+        } catch {}
+        if (h && !h.endsWith(ourHost)) counts[h] = (counts[h] || 0) + 1;
+      }
+    } catch {
+      // One failed search does not stop the others.
+    }
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([domain, top5Appearances]) => ({ domain, top5Appearances }));
 }
