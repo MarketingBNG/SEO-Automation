@@ -205,7 +205,7 @@ function StrategyProgress({ id, approved }: { id: number; approved: boolean }) {
               <div className="flex items-center justify-between"><span className="font-medium">Overall</span><span className="tabular-nums">{d.percent}%</span></div>
               <div className="mt-1 h-3 w-full overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${d.percent}%` }} /></div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <div className="rounded-lg border p-3">
                 <div className="font-medium">Blogs: {d.blogs.published} of {d.blogs.total} published</div>
                 <div className="text-xs text-muted-foreground">{d.blogs.inReview} in review, {d.blogs.drafting} being written, {d.blogs.planned} planned, {d.blogs.held} held</div>
@@ -216,6 +216,16 @@ function StrategyProgress({ id, approved }: { id: number; approved: boolean }) {
                 <div className="text-xs text-muted-foreground">Outreach runs automatically through Smartlead (up to 5 a day). Done means SE Ranking found the link. Only directory listings need a person; tick those off when done.</div>
                 <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${d.backlinks.total ? (d.backlinks.done / d.backlinks.total) * 100 : 0}%` }} /></div>
               </div>
+              {d.fixes?.total > 0 && (
+                <div className="rounded-lg border p-3">
+                  <div className="font-medium">Technical fixes: {d.fixes.applied} of {d.fixes.total} done</div>
+                  <div className="text-xs text-muted-foreground">
+                    {d.fixes.planned} waiting, {d.fixes.manual} need a person, {d.fixes.failed} failed. Up to 20 a day.
+                    {d.fixes.lastRun ? ` Last run ${fmtDate(d.fixes.lastRun)}.` : ' Not started yet.'}
+                  </div>
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${(d.fixes.applied / d.fixes.total) * 100}%` }} /></div>
+                </div>
+              )}
             </div>
             {d.backlinks.tasks.length > 0 && (
               <details>
