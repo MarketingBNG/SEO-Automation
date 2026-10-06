@@ -67,6 +67,9 @@ One strategy per month, one approval, then the month runs automatically.
   rule gates, then IndexNow, sitemap resubmit, SE Ranking tracking and internal links; once a day,
   a rank check with a 5+ position drop alert.
 - **Weekly** (`/api/cron/weekly`, Mondays): plan vs actual.
+- **AI visibility (GEO and AEO):** pulled from SE Ranking with the existing `SERANKING_API_KEY`: AI Search
+  (link presence and position in ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode, US and India) and
+  the AI Results Tracker (brand mentions in the project's tracked prompts). Live view: `/api/seranking/ai-visibility`.
 - Settings keys: `focus_services` (one per line or `;`), `competitor_domains`, `posting_days`
   (default `Tue,Thu`), `posting_time_ist` (default `10:00`).
 - Tests: `npm test` (rules) and `DATABASE_URL=... npm run test:e2e` (real Postgres, stubbed APIs).

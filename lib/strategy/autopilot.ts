@@ -12,6 +12,7 @@ import { getTermsForKeyword } from '../surfer';
 import { submitIndexNow, resubmitSitemap } from '../indexing';
 import { notify } from '../notify';
 import * as settings from '../settings';
+import { gatherAiVisibility } from '../aiVisibility';
 import { scheduleAction, factsGate, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh } from './core';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
@@ -251,18 +252,32 @@ export async function runWeekly(now = new Date()) {
   const due = blogs.filter((b) => b.publish_at <= nowText);
   const links = await prisma.backlink_tasks.findMany({ where: { strategy_id: s.id } });
   const today = now.toISOString().slice(0, 10);
-  const result = {
+  const result: any = {
     period: s.period,
     blogs: { plannedToDate: due.length, published: due.filter((b) => b.status === 'published').length, held: blogs.filter((b) => b.status === 'held').map((b) => b.title) },
     backlinks: { dueToDate: links.filter((l) => l.send_date <= today).length, done: links.filter((l) => l.status === 'done').length },
     autoApproved: blogs.filter((b) => b.approval_mode === 'auto').length,
     reviewed: blogs.filter((b) => b.approval_mode === 'reviewed').length,
   };
+  // AI visibility vs the GEO and AEO targets (SE Ranking AI Search and AI Results Tracker).
+  try {
+    const ai = await gatherAiVisibility(SITE().replace(/^https?:\/\//, '').replace(/^www\./, ''));
+    const plan = JSON.parse(s.plan_json);
+    const target = (kpi) => plan.targets?.find((t) => t.kpi === kpi)?.target ?? null;
+    result.ai = {
+      chatMentions: { actual: ai.totals.chatMentions, target: target('AI chat mentions') },
+      chatLinks: { actual: ai.totals.chatLinks.current, target: target('AI chat answers linking to us') },
+      googleAiLinks: { actual: ai.totals.googleAiLinks.current, target: target('AI Overview citations') },
+      errors: ai.errors,
+    };
+  } catch (e: any) {
+    result.ai = { error: e.message };
+  }
   await prisma.plan_checks.create({ data: { strategy_id: s.id, week_of: today, result: JSON.stringify(result) } });
   const behind = result.blogs.published < result.blogs.plannedToDate || result.backlinks.done < result.backlinks.dueToDate;
   await notify(
     `Weekly plan vs actual (${s.period})${behind ? ': behind plan' : ''}`,
-    `Blogs: ${result.blogs.published} of ${result.blogs.plannedToDate} published. Held: ${result.blogs.held.join('; ') || 'none'}. Backlink tasks: ${result.backlinks.done} of ${result.backlinks.dueToDate} done.`,
+    `Blogs: ${result.blogs.published} of ${result.blogs.plannedToDate} published. Held: ${result.blogs.held.join('; ') || 'none'}. Backlink tasks: ${result.backlinks.done} of ${result.backlinks.dueToDate} done.${result.ai?.chatLinks ? ` AI chat answers linking to us: ${result.ai.chatLinks.actual ?? 'DATA MISSING'} (target ${result.ai.chatLinks.target ?? 'not set'}). AI chat mentions: ${result.ai.chatMentions.actual ?? 'DATA MISSING'} (target ${result.ai.chatMentions.target ?? 'not set'}).` : ''}`,
     { action: 'check.plan_vs_actual' }
   );
   return result;

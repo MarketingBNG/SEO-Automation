@@ -66,7 +66,7 @@ Return ONLY JSON between ===JSON=== and ===END=== with this shape:
  "backlinks": [ { "targetSite": "", "method": "", "ourPage": "", "tags": [] } ],
  "technical": { "fixes": [ { "url": "", "issue": "", "fix": "", "tags": [] } ] },
  "targets": { "SEO": { "clicks": 0, "impressions": 0, "top3": 0, "top10": 0, "referringDomains": 0 },
-   "AEO": { "featuredSnippets": 0, "paa": 0, "aiOverview": 0 }, "GEO": { "aiMentions": 0 } }
+   "AEO": { "featuredSnippets": 0, "paa": 0, "aiOverview": 0 }, "GEO": { "aiMentions": 0, "aiLinks": 0 } }
 }`;
 }
 
@@ -193,6 +193,7 @@ export async function buildPlan(ai, inputs, period) {
     tg('AEO', 'PAA appearances', L.AEO.paa, t.AEO?.paa),
     tg('AEO', 'AI Overview citations', L.AEO.aiOverview, t.AEO?.aiOverview),
     tg('GEO', 'AI chat mentions', L.GEO.aiMentions, t.GEO?.aiMentions),
+    tg('GEO', 'AI chat answers linking to us', L.GEO.aiLinks, t.GEO?.aiLinks),
     { channel: 'Signal', kpi: 'Organic leads (Zoho CRM)', lastMonth: L.Signal.organicLeads, target: null },
   ];
 
@@ -233,6 +234,7 @@ export async function buildPlan(ai, inputs, period) {
       { platform: 'Website CMS (WordPress)', what: 'Adds internal links from 2 to 3 older related posts', when: 'Right after publishing' },
       { platform: 'Surfer', what: 'Content score check (75+ required)', when: 'Before each publish' },
       { platform: 'SERPHouse', what: 'Featured snippet, PAA and AI Overview checks', when: 'Weekly plan vs actual' },
+      { platform: 'SE Ranking AI Search and AI Results Tracker', what: 'ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode mentions and links', when: 'Each strategy run and weekly plan vs actual' },
       { platform: 'Screaming Frog', what: 'Crawl upload parsed into Section 8 fixes', when: 'On each upload (required before approval)' },
     ],
     technical: {

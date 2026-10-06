@@ -10,6 +10,7 @@ import { liveSearch } from '../serphouse';
 import { getLeadSourceBreakdown } from '../zoho';
 import { hasStoredTokens } from '../zohoAuth';
 import * as settings from '../settings';
+import { gatherAiVisibility } from '../aiVisibility';
 import { metric, keywordKey, CRAWL_MAX_AGE_DAYS } from './core';
 
 const SITE_HOST = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '');
@@ -101,6 +102,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
     GEO: 'AI assistant visits change in the month-end report',
   };
   out.lastMonthTrend = { SEO: seoClicks.changePct, AEO: aeoQ.changePct, GEO: geoAi.changePct };
+  // (GEO is replaced below by SE Ranking AI data when available.)
 
   // SE Ranking: tracked keywords and positions.
   onStep?.('Reading SE Ranking positions', 0.15);
@@ -154,6 +156,22 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   out.serpFeatures = serp;
   const serpRange = `live SERP check on ${today}, ${serp?.checked || 0} keyword-market pairs`;
 
+  // SE Ranking AI visibility: ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode.
+  onStep?.('Reading SE Ranking AI visibility (ChatGPT, Perplexity, Gemini, AI Overviews)', 0.4);
+  let ai: any = null;
+  try {
+    ai = await gatherAiVisibility(SITE_HOST(), perf ? { from: perf.ranges.current.startDate, to: perf.ranges.current.endDate } : {});
+    for (const e of ai.errors) out.missing.push(e);
+  } catch (e: any) {
+    out.missing.push(`SE Ranking AI visibility (${e.message})`);
+  }
+  out.aiVisibility = ai;
+  const aiRange = 'SE Ranking AI Search, latest monthly update';
+  const chatNow = ai?.totals?.chatLinks?.current ?? null;
+  const chatBefore = ai?.totals?.chatLinks?.previous ?? null;
+  // GEO trend from AI answers linking to us when SE Ranking has it; else AI assistant visits (GA4).
+  const geoTrend = typeof chatNow === 'number' && typeof chatBefore === 'number' && chatBefore > 0 ? Math.round(((chatNow - chatBefore) / chatBefore) * 1000) / 10 : null;
+
   // Zoho organic leads: signal only.
   let leads = null;
   try {
@@ -176,12 +194,25 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
     AEO: {
       featuredSnippets: metric(serp?.featuredSnippets, 'SERPHouse', serpRange, 'featured snippets'),
       paa: metric(serp?.paaAppearances, 'SERPHouse', serpRange, 'PAA appearances'),
-      aiOverview: metric(serp?.aiOverviewCitations, 'SERPHouse', serpRange, 'AI Overview citations'),
+      // SE Ranking AI Search (AI Overviews + AI Mode) when available, else the live SERPHouse check.
+      aiOverview:
+        typeof ai?.totals?.googleAiLinks?.current === 'number'
+          ? metric(ai.totals.googleAiLinks.current, 'SE Ranking AI Search (AI Overviews and AI Mode, US and India)', aiRange, 'AI Overview citations')
+          : metric(serp?.aiOverviewCitations, 'SERPHouse', serpRange, 'AI Overview citations'),
     },
     // No connected tool counts unclicked mentions inside ChatGPT, Perplexity or Gemini answers.
-    GEO: { aiMentions: metric(null, 'No connected source', range, 'AI chat mentions'), aiVisits: geoAi.now },
+    GEO: {
+      aiMentions: metric(ai?.totals?.chatMentions, 'SE Ranking AI Results Tracker (tracked prompts)', range, 'AI chat mentions'),
+      aiLinks: metric(chatNow, 'SE Ranking AI Search (ChatGPT, Perplexity, Gemini, US and India)', aiRange, 'AI chat answers linking to us'),
+      aiVisits: geoAi.now,
+    },
     Signal: { organicLeads: metric(leads, 'Zoho CRM', 'all leads returned by Zoho (up to 1000)', 'organic leads') },
   };
+
+  if (geoTrend !== null) {
+    out.lastMonthTrend.GEO = geoTrend;
+    out.trendSources.GEO = 'Change in AI chat answers linking to us (SE Ranking AI Search)';
+  }
 
   // Latest Screaming Frog crawl (Section 8).
   const crawl = await prisma.technical_crawls.findFirst({ orderBy: { id: 'desc' } });

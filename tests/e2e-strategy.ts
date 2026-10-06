@@ -43,7 +43,7 @@ async function main() {
     aeoGeo: { items: [{ type: 'AI Overview', target: 'fbar deadline', page: '/fbar', tags: ['AEO', 'GEO'] }] },
     backlinks: [{ targetSite: 'example.org', method: 'Unlinked brand mention', ourPage: '/', tags: ['SEO', 'GEO'] }],
     technical: { fixes: [] },
-    targets: { SEO: { clicks: 1200, impressions: 60000, top3: 12, top10: 40, referringDomains: 210 }, AEO: { featuredSnippets: 3, paa: 6, aiOverview: 4 }, GEO: { aiMentions: 5 } },
+    targets: { SEO: { clicks: 1200, impressions: 60000, top3: 12, top10: 40, referringDomains: 210 }, AEO: { featuredSnippets: 3, paa: 6, aiOverview: 4 }, GEO: { aiMentions: 5, aiLinks: 9 } },
   };
   const metric = (v: any) => ({ value: v, source: 'test', range: 'Oct' });
   const inputs = {
@@ -55,7 +55,7 @@ async function main() {
     lastMonth: {
       SEO: { clicks: metric(1000), impressions: metric(50000), top3: metric(10), top10: metric(35), referringDomains: metric(200) },
       AEO: { featuredSnippets: metric(2), paa: metric(5), aiOverview: metric(3) },
-      GEO: { aiMentions: { value: null, source: 'none', range: 'Oct', missing: 'DATA MISSING: AI chat mentions' } },
+      GEO: { aiMentions: { value: null, source: 'none', range: 'Oct', missing: 'DATA MISSING: AI chat mentions' }, aiLinks: metric(7) },
       Signal: { organicLeads: metric(14) },
     },
     crawl: null,

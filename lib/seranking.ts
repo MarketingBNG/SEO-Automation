@@ -150,4 +150,48 @@ async function addTrackedKeyword(keyword: string) {
   return true;
 }
 
-export { getSubscription, listSites, getSiteRankings, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword };
+// ---------- AI visibility (GEO / AEO). Paths and fields follow SE Ranking's own n8n integration
+// (github.com/seranking/n8n-nodes-seranking). ----------
+
+export const AI_ENGINES = ['chatgpt', 'perplexity', 'gemini', 'ai-overview', 'ai-mode'] as const;
+
+// Data API "AI Search": a domain's presence in one engine's answers, refreshed monthly by SE Ranking.
+// summary.link_presence / average_position / ai_opportunity_traffic each carry current and previous.
+async function getAiSearchOverview(domain: string, engine: string, source = 'us') {
+  const q = new URLSearchParams({ target: domain, engine, source, scope: 'base_domain' });
+  const json: any = await get(`/ai-search/overview/by-engine/time-series?${q}`);
+  const s = json?.summary || {};
+  const num = (v: any) => (typeof v === 'number' ? v : v === undefined || v === null || v === '' ? null : Number(v));
+  return {
+    engine,
+    source,
+    linkPresence: { current: num(s.link_presence?.current), previous: num(s.link_presence?.previous) },
+    averagePosition: { current: num(s.average_position?.current), previous: num(s.average_position?.previous) },
+    aiTraffic: { current: num(s.ai_opportunity_traffic?.current), previous: num(s.ai_opportunity_traffic?.previous) },
+    raw: json,
+  };
+}
+
+// Project API "AI Results Tracker": the prompts tracked in the SE Ranking project.
+async function listAiTrackerEngines(siteId: number) {
+  const json: any = await get(`/project-management/airt/llm?site_id=${siteId}`);
+  return Array.isArray(json) ? json : json?.items || json?.data || [];
+}
+
+async function getAiTrackerStatistics(siteId: number, llmId: number, from?: string, to?: string) {
+  const q = new URLSearchParams({ site_id: String(siteId), llm_id: String(llmId) });
+  if (from) q.set('from', from);
+  if (to) q.set('to', to);
+  return get(`/project-management/airt/llm/statistics?${q}`);
+}
+
+// Per-group time series with mention_presence and link_presence as percentages.
+async function getAiTrackerPresence(siteId: number, llmId: number, dateFrom: string, dateTo: string) {
+  const q = new URLSearchParams({ site_id: String(siteId), llm_id: String(llmId), date_from: dateFrom, date_to: dateTo, mode: 'groups' });
+  return get(`/project-management/airt/prompts/rankings?${q}`);
+}
+
+export {
+  getSubscription, listSites, getSiteRankings, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword,
+  getAiSearchOverview, listAiTrackerEngines, getAiTrackerStatistics, getAiTrackerPresence,
+};
