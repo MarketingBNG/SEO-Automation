@@ -50,14 +50,17 @@ them only for the general question/pain point, never the individual case:\n` +
       approvedInsights.map((i) => `- ${i.overview}`).join('\n')
     : '';
 
-  const activeStrategy = await prisma.seo_strategies.findFirst({ where: { status: 'approved' }, orderBy: { id: 'desc' } });
+  const activeStrategy = await prisma.seo_strategies.findFirst({ where: { status: 'approved', plan_json: { not: null } }, orderBy: { id: 'desc' } });
+  const activePlan = activeStrategy?.plan_json ? JSON.parse(activeStrategy.plan_json) : null;
 
-  const strategyReference = activeStrategy
-    ? `\n\nCURRENT APPROVED SEO STRATEGY (${activeStrategy.period || 'active'}): the team has
-approved this as the operating strategy. Prioritize keywords and angles that match it:\n` +
-      `Summary: ${activeStrategy.summary}\n` +
-      `Keyword priorities: ${JSON.parse(activeStrategy.keyword_priorities || '[]').join('; ')}\n` +
-      `Content priorities: ${JSON.parse(activeStrategy.content_recommendations || '[]').join('; ')}`
+  const strategyReference = activePlan
+    ? `\n\nCURRENT APPROVED SEO / AEO / GEO STRATEGY (${activeStrategy.period}): ${activePlan.coreObjective?.motive || ''}
+Focus this month: ${activePlan.summary?.focus || ''}
+Every article must help USAIndiaCFO, its landing pages and service pages rank at the top in Google and
+Bing (SEO), win snippets, People Also Ask and AI Overviews (AEO), and be cited by ChatGPT, Perplexity and
+Gemini (GEO): direct 40-60 word answers under each question heading, a real FAQ, citable specific facts,
+and links to the relevant service page.
+Planned topics: ${(activePlan.blogPlan?.calendar || []).map((b) => `${b.title} [${(b.tags || []).join('/')}]`).join('; ')}`
     : '';
 
   const playbook = getWriterPlaybook();
@@ -106,6 +109,15 @@ VOICE (USAIndiaCFO blog house style): ${voiceGuidelines}
   relevant ones exist), each answered directly in about 40-60 words, not repeating the body. When PAA
   is thin, fill from approved real client questions below, then the question searches in the brief.
   Keep Google's wording (fix only grammar) and use only questions that genuinely fit the topic.
+- HOOK AND ENGAGEMENT: right after the direct answer, add a short hook paragraph (2-3 sentences)
+  that makes the stakes concrete for this reader: a real deadline, a real penalty amount, a common
+  costly mistake, or a specific scenario (e.g. "An NRI who sells a Pune flat in 2026 ..."). Use only
+  verified facts in the hook. Keep every section earning its place: open sections with the point,
+  use short paragraphs, concrete numbers, worked examples and tables, and end with a clear next step.
+  Write like a senior practitioner talking to a client, not like a textbook.
+- RESEARCH DEPTH: read widely before writing. Check every page currently ranking in the top 10 in
+  the US and India for this keyword, the AI Overview, People Also Ask, and the primary sources. Cover
+  every sub-question they cover and the ones they miss. Research has no search budget limit.
 - No AI filler or hype vocabulary ("delve", "unlock", "seamless", "robust", "game-changer",
   "navigate the landscape", "unprecedented", "in today's fast-paced world", canned hooks like
   "Here's what nobody tells you", empty closers like "The future is bright"). No em dashes.
@@ -183,7 +195,7 @@ source, still list it and leave source name/URL as "NONE - could not verify".>
 // batch: true sends the turn through the Message Batches API instead (50% cheaper, but it can take
 // minutes to hours to come back, and refusal fallbacks are not allowed there). Only for unattended
 // jobs nobody is waiting on.
-async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false }: any = {}) {
+async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
   const assistantMessages: any[] = [];
@@ -191,7 +203,7 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
   for (let part = 0; part < 6; part++) {
     if (batch) {
       const response = await runBatchTurn(client, {
-        model: MODEL,
+        model,
         max_tokens: 32000,
         output_config: { effort },
         system: systemPrompt,
@@ -208,7 +220,7 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
 
     const stream = client.beta.messages.stream(
       {
-        model: MODEL,
+        model,
         max_tokens: 32000,
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
@@ -307,6 +319,35 @@ function parseBlogResponse(text) {
   return { title, meta, content, researchNotes, facts, raw: text };
 }
 
+const WRITER_SEARCHES = () => Number(process.env.WRITER_MAX_SEARCHES) || 40;
+// The fact checker can run on a different (stronger) model than the writer. Default: the same top model.
+const FACT_CHECK_MODEL = () => process.env.FACT_CHECK_MODEL || MODEL;
+
+// Re-verifies every hard claim in a draft (numbers, rates, thresholds, deadlines, sections, forms,
+// "new" rules) against primary sources with web search, independently of the writer.
+async function factCheckDraft(result, signal) {
+  const system = `You are a senior US-India tax fact checker. You did not write this article. Find every hard
+claim in it (a number, rate, threshold, deadline, statute or section, form number, or "new" rule) and
+verify each one against a primary source (irs.gov, treasury.gov, fincen.gov, incometax.gov.in,
+incometaxindia.gov.in, cbic-gst.gov.in, rbi.org.in, sebi.gov.in, mca.gov.in, the treaty text) as of
+today, ${new Date().toISOString().slice(0, 10)}. Use web search for every claim; there is no search budget.
+verdict is "correct" only when a primary source confirms it as currently applicable. Otherwise
+"incorrect" (give the correction) or "unverifiable". Return ONLY JSON between ===JSON=== and ===END===:
+{"checks":[{"claim":"exact sentence or phrase","verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}]}`;
+  const user = `Title: ${result.title}\nMeta: ${result.meta}\n\nArticle HTML:\n${result.content}\n\nWriter's Facts Register:\n${result.facts
+    .map((f) => `${f.fact_id} | ${f.claim} | ${f.source_url}`)
+    .join('\n')}`;
+  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 60, effort: 'max', model: FACT_CHECK_MODEL() });
+  const m = text.match(/===JSON===([\s\S]*?)===END===/);
+  try {
+    const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
+    return { checks: Array.isArray(parsed.checks) ? parsed.checks : [], model: FACT_CHECK_MODEL() };
+  } catch {
+    // An unreadable check never lets a draft through as checked.
+    return { checks: [{ claim: 'Fact check output could not be read', verdict: 'unverifiable', correction: '', source_url: '' }], model: FACT_CHECK_MODEL() };
+  }
+}
+
 // Runs the full "select+research -> draft+optimize -> validate+package" pipeline for one
 // keyword, auto-repairing up to MAX_REPAIR_ATTEMPTS times, per the Frozen Playbook.
 async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any = {}) {
@@ -341,7 +382,7 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
       attempt === 0 ? 'Researching sources & writing the draft…' : `Repairing draft, attempt ${attempt}…`,
       18 + attempt * 22
     );
-    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages, signal);
+    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages, signal, { maxUses: WRITER_SEARCHES(), effort: 'max' });
 
     onProgress?.('Validating draft & fact-checking claims…', 30 + attempt * 22);
     result = parseBlogResponse(rawText);
@@ -354,6 +395,22 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
       paaQuestions: brief.peopleAlsoAsk,
       keywordPlan,
     });
+
+    // Independent fact check: a separate maximum-effort pass (FACT_CHECK_MODEL) re-verifies every
+    // hard claim against primary sources. Any wrong or unverifiable claim sends the draft back.
+    if (validation.passed) {
+      onProgress?.('Independent fact check against primary sources…', 34 + attempt * 22);
+      const check = await factCheckDraft(result, signal);
+      result.factCheck = check;
+      const bad = check.checks.filter((c) => c.verdict !== 'correct');
+      if (bad.length) {
+        validation.passed = false;
+        validation.issues = [
+          ...validation.issues,
+          ...bad.map((c) => `Fact check (${c.verdict}): "${c.claim}". ${c.correction ? `Correct version: ${c.correction}. ` : ''}${c.source_url ? `Source: ${c.source_url}` : 'Remove it if it cannot be verified.'}`),
+        ];
+      }
+    }
 
     if (validation.passed) break;
     if (attempt === MAX_REPAIR_ATTEMPTS) break;
@@ -607,6 +664,22 @@ ${content.slice(0, 20000)}`;
     const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages);
     result = parseBlogResponse(rawText);
     validation = await validateDraft({ title: result.title, meta: result.meta, content: result.content, facts: result.facts, paaQuestions });
+
+    // Independent fact check: a separate maximum-effort pass (FACT_CHECK_MODEL) re-verifies every
+    // hard claim against primary sources. Any wrong or unverifiable claim sends the draft back.
+    if (validation.passed) {
+      onProgress?.('Independent fact check against primary sources…', 34 + attempt * 22);
+      const check = await factCheckDraft(result, signal);
+      result.factCheck = check;
+      const bad = check.checks.filter((c) => c.verdict !== 'correct');
+      if (bad.length) {
+        validation.passed = false;
+        validation.issues = [
+          ...validation.issues,
+          ...bad.map((c) => `Fact check (${c.verdict}): "${c.claim}". ${c.correction ? `Correct version: ${c.correction}. ` : ''}${c.source_url ? `Source: ${c.source_url}` : 'Remove it if it cannot be verified.'}`),
+        ];
+      }
+    }
 
     if (validation.passed) break;
     if (attempt === MAX_REPAIR_ATTEMPTS) break;

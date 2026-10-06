@@ -103,4 +103,51 @@ async function researchKeywords(type, seed, { source = 'us', limit = 30 }: any =
   return json.keywords || [];
 }
 
-export { getSubscription, listSites, getSiteRankings, researchKeywords };
+// ---------- Backlinks (SE Ranking Data API). Replaces any competitor / backlink research that
+// used to be planned for other tools: SE Ranking is the only backlink source. ----------
+
+// Total referring domains pointing at a domain.
+async function getReferringDomainsCount(domain: string) {
+  const json: any = await get(`/backlinks/summary?target=${encodeURIComponent(domain)}&mode=domain`);
+  const s = Array.isArray(json?.summary) ? json.summary[0] : json?.summary || json;
+  const n = s?.refdomains ?? s?.referring_domains ?? null;
+  if (typeof n !== 'number') throw new Error('SE Ranking returned no referring-domain count');
+  return n;
+}
+
+async function listReferringDomains(domain: string, limit = 500) {
+  const json: any = await get(`/backlinks/refdomains?target=${encodeURIComponent(domain)}&mode=domain&limit=${limit}`);
+  const rows = json?.refdomains || json?.data || json || [];
+  return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.refdomain || r.domain || '').toLowerCase()).filter(Boolean);
+}
+
+// Sites that link to two or more competitors but not to us: the outreach list for the backlink plan.
+async function getBacklinkGap(ourDomain: string, competitors: string[], limit = 40) {
+  const ours = new Set(await listReferringDomains(ourDomain));
+  const counts = new Map<string, string[]>();
+  for (const c of competitors) {
+    for (const d of await listReferringDomains(c)) {
+      if (ours.has(d)) continue;
+      counts.set(d, [...(counts.get(d) || []), c]);
+    }
+  }
+  return [...counts.entries()]
+    .map(([domain, linksTo]) => ({ domain, linksTo }))
+    .sort((a, b) => b.linksTo.length - a.linksTo.length)
+    .slice(0, limit);
+}
+
+// Adds a keyword to rank tracking in the first SE Ranking project (after a blog is published).
+async function addTrackedKeyword(keyword: string) {
+  const sites: any = await listSites();
+  if (!sites?.length) throw new Error('No SE Ranking project found');
+  const res = await throttledFetch(`${BASE_URL}/project-management/sites/${sites[0].id}/keywords`, {
+    method: 'POST',
+    headers: { Authorization: `Token ${getApiKey()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keywords: [{ keyword }] }),
+  });
+  if (!res.ok) throw new Error(`SE Ranking add keyword failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  return true;
+}
+
+export { getSubscription, listSites, getSiteRankings, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword };

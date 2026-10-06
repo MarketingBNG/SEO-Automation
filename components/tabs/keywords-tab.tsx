@@ -9,7 +9,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { DataTable, NativeSelect, TD, TD_MUTED } from '@/components/shared/content-ui';
-import { StrategyPlanCard } from '@/components/shared/strategy-plan-card';
 
 export default function KeywordsTab() {
   const [keywords, setKeywords] = useState<any[]>([]);
@@ -157,7 +156,6 @@ export default function KeywordsTab() {
 
   return (
     <div className="space-y-4">
-      <StrategyPlanCard onQueued={load} />
 
       <Card>
         <CardHeader>

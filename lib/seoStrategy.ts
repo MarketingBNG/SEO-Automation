@@ -11,7 +11,7 @@ import { hasStoredTokens } from './zohoAuth';
 // Pulls a snapshot from every currently-connected tool for the monthly SEO strategy. Each
 // source fails independently (a not-yet-connected or temporarily-down tool just gets skipped
 // with a note) so one missing integration never blocks the whole report. New tools added later
-// (Ahrefs, Zoho, etc.) plug in here the same way.
+// plug in here the same way.
 async function gatherSnapshot({ onStep }: any = {}) {
   const snapshot: any = {};
 

@@ -10,7 +10,9 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "migrate:sqlite": "tsx scripts/migrate-sqlite.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/strategy.test.ts",
+    "test:e2e": "tsx tests/e2e-strategy.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.130.0",

@@ -17,9 +17,9 @@ This report pulls together nine research areas: Google's quality rules, spam pen
 
 **For competitive, evergreen keywords, no.** Nobody can honestly promise it.
 
-- Ahrefs' May 2025 study tracked 2 million new pages. Only 1.74% reached Google's top 10 within a year.
+- Most new pages never reach Google's top 10 for competitive keywords, and the pages that do usually hold their rank for years.
 - The average #1 page is now about 5 years old, and 72.9% of top-10 pages are more than 3 years old. (Sources give different figures for the 2017 baseline, so rely only on the current number.)
-- Of the few new pages that did reach the top 10, 40.82% got there within a month. Ahrefs does not say those were news or freshness queries, so read this as "the winners tend to win early", not as a promise.
+- New pages that do reach the top 10 tend to get there early, so read early movement as a signal, not as a promise.
 - Google says crawling a new page takes "a few days to a few weeks". Pressing "Request indexing" more than once does not speed it up. The sitemap ping stopped working in late 2023. The Indexing API is only for job postings and livestreams. IndexNow reaches Bing but not Google.
 
 **Where speed is possible.** When the CBDT, RBI or IRS announces something new, Google's freshness systems can surface a new page quickly. In our live checks, though, government pages and their official social posts held most top slots for the bare announcement query. A September 2026 study found IRS.gov cited in 76% of AI answers to federal tax questions. So aim at the follow-up questions ("what the CBDT extension means for NRIs") within 24-48 hours. A same-week page-1 result on those is realistic but low confidence. A same-week #1 on the announcement itself is unlikely.
@@ -39,7 +39,7 @@ Review each post at 30, 90 and 180 days. If a post is still outside the top 10 a
 - **Principles stayed the same, but enforcement changed.** In March 2024 Google folded "helpful content" into core ranking and added spam policies against scaled content abuse, site reputation abuse and expired domains. In November 2024 it ruled that a host's own editorial oversight no longer excuses third-party sponsored sections. In 2026 there were core updates in March-April and May-June, a Discover-only core update in February (US English first), and spam updates that started on 24 March, 24 June, 18 August and 24 September.
 - **Tax content is judged strictly.** Google's rater guidelines class tax and financial advice as YMYL (your money or your life), where trust counts most. They rate "typical" pages on a topic as only Medium quality. To score higher, a post needs visible credentialed review, primary-source accuracy and something the top results lack.
 - **Official and first-party sources gained in 2026.** In Amsive's analysis of 2,076 finance domains, IRS.gov gained visibility in the March 2026 update while NerdWallet fell about 15.9% and Credit Karma about 34.2%.
-- **AI assistance is not what gets penalized. Unedited volume is.** Ahrefs found AI text in 86.5% of top-ranking pages, with essentially no link between AI share and position. Glenn Gabe (GSQi) documented a site that had 850,000 AI-written pages removed from Google. Separately, Lily Ray's May 2026 review of 220+ AI-platform sites found a repeated grow-then-crash pattern. Our human approval step protects us only if the approver adds real expertise. For that reason the approval step is now a hard publishing gate.
+- **AI assistance is not what gets penalized. Unedited volume is.** Google judges quality, not how content was made. Glenn Gabe (GSQi) documented a site that had 850,000 AI-written pages removed from Google. Separately, Lily Ray's May 2026 review of 220+ AI-platform sites found a repeated grow-then-crash pattern. Our protection is the monthly strategy approval, the 24-hour reviewer window before every post, an independent fact check, and the Facts Register gate that holds any post stating an unverified tax figure, rate or deadline.
 
 ## 3. People Also Ask and FAQs (your request)
 
@@ -48,7 +48,7 @@ We ran our own test through SERPHouse on 30 September 2026: 15 live Google resul
 - **PAA appeared on all 15, with exactly 4 questions each time.** That included very long-tail queries. SERPHouse returns only the question text: no answers, no source links and no nested questions. Mobile results store the question in a different field, and our code currently drops it. We have noted this for a fix.
 - **Country matters a lot.** For the same query, the US and India lists shared only 1-2 of 4 questions. City (New York vs Los Angeles, Delhi vs Mumbai) made no difference. So we pull PAA once per country and tag each question with its market.
 - **Searching a PAA question as its own query gives 3-4 more questions.** That is how we expand the list.
-- **PAA answers are now AI Overviews.** AlsoAsked found that 97% of PAA answers were AI-generated in the first week of September 2026, up from 12.6% in July 2025. Only 37.9% of the pages AI Overviews cite rank in Google's top 10 (Ahrefs, March 2026). Complete, specific answers now matter more than rank.
+- **PAA answers are now AI Overviews.** AlsoAsked found that 97% of PAA answers were AI-generated in the first week of September 2026, up from 12.6% in July 2025. Many pages AI Overviews cite do not rank in Google's top 10. Complete, specific answers now matter more than rank.
 - **FAQ rich results ended on 7 May 2026.** FAQ schema no longer earns extra space on Google, but visible FAQ sections still feed PAA, AI answers and voice.
 - **How common PAA is depends on the sample.** Semrush Sensor shows it on about 68-70% of US results (July 2026). No study covers India or low-volume finance queries, so we will measure our own keywords monthly.
 
@@ -57,8 +57,8 @@ We ran our own test through SERPHouse on 30 September 2026: 15 live Google resul
 ## 4. Getting cited by AI answer engines
 
 - **The GEO study (Aggarwal et al., KDD 2024) tested a simulated engine built on GPT-3.5, not Google.** On that engine, adding quotations raised visibility about 44%, statistics about 34%, fluent writing about 30% and source citations about 29%. Keyword stuffing lowered it about 8%. On live Perplexity the gains were smaller (quotations +21%, statistics +9%). Treat these numbers as direction, not promises.
-- **What correlates with AI citations:** mentions of the brand on other websites (the strongest factor, r=0.66 in Ahrefs' 75,000-brand study, with YouTube mentions even higher), content updated within 3 months, expert quotes, and sections of 120-180 words (SE Ranking). LinkedIn is the most-cited domain for professional queries (Profound, March 2026).
-- **What does not help:** llms.txt files (no effect across 300,000 domains, and Google says it ignores them), schema added as an AI lever (no uplift in Ahrefs' controlled test), and chopping content into tiny chunks.
+- **What correlates with AI citations:** mentions of the brand on other websites (the strongest factor), content updated within 3 months, expert quotes, and sections of 120-180 words (SE Ranking). LinkedIn is the most-cited domain for professional queries (Profound, March 2026).
+- **What does not help:** llms.txt files (no effect across 300,000 domains, and Google says it ignores them), schema added only as an AI lever, and chopping content into tiny chunks.
 - **Search indexes feed the chatbots.** Bing powers Copilot. OpenAI has not published ChatGPT's full list of search providers; Bing is widely reported, and a 2025 test suggested Google results are used too. We keep the site open to Bing, OpenAI's search crawler and Perplexity.
 - **Fewer clicks per ranking.** Pew found people click a result on 8% of searches that show an AI summary, versus 15% without one. We will track impressions, citations, branded searches and consultations as well as clicks.
 
@@ -301,7 +301,7 @@ Gate 3. Expert accountability and approval record
   - A "Reviewed by" line with a credentialed reviewer on tax, compliance or FEMA posts.
   - The byline links to an author page listing credentials, experience, jurisdictions and a professional profile link.
   - JSON-LD author is @type Person, author.name holds the plain name only, and author.url resolves with HTTP 200 (not a redirect to the homepage).
-  - The dashboard holds an approval record (approver name, credential, timestamp later than the last content edit).
+  - The dashboard holds an approval record: the approved monthly strategy (approver name, date and version) plus the post's 24-hour review result (reviewed by a named reviewer, or auto-approved after 24 hours with the independent fact check and Facts Register gate passed).
 - FAIL: the author is missing, "Admin", "Team" or an AI tool; a YMYL post has no credential; there is no approval record; or any bracketed placeholder ([AUTHOR NAME...], [REVIEWER NAME...], [PRACTITIONER NOTE NEEDED], [VISUAL SUGGESTION...]) or the word UNVERIFIED is visible on the page.
 - WARN: no reviewer; credentials inside author.name; a cross-border post whose credentials do not cover both countries; or the approved version differs from the AI draft by less than 2% of words.
 
@@ -460,7 +460,7 @@ The dashboard enforces the reliable ones in code (lib/validation.js). "block" se
 | Every draft comes with a Facts Register listing each hard claim with a primary-source URL. | block | Register present, at least 1 row, 100% of rows with a URL; verified rows on allowlisted domains |
 | The Facts Register covers the figures used in the body. | warn | At least 90% of distinct tokens covered |
 | The Facts Register and FAQ source list never appear in the published page. | block | 0 matches |
-| Publishing requires a recorded, substantive human approval. | block | All three fields present and approved_at not earlier than the last edit |
+| Publishing requires an approved monthly strategy, a completed 24-hour review window, a passed fact check and a passed Facts Register gate. | block | Strategy approval recorded; review window elapsed or reviewer sign-off; no held sentences |
 | Flags YMYL posts approved with almost no human edits. | warn | Warn if less than 2% of tokens changed |
 | No em dashes or dash substitutes in the title, meta, slug or body. | block | 0 occurrences |
 | The rendered Yoast title, og:title and twitter:title contain no en or em dash. | warn | 0 occurrences |
@@ -527,7 +527,7 @@ The dashboard enforces the reliable ones in code (lib/validation.js). "block" se
 
 - Word-count cap. Google says it has no preferred word count, and its 2026 AI guide says there is no ideal length, so the evidence does not support one cap for every page type. Keep 1,600 words as the default for standard posts and spoke answers, and make the cap configurable by post type. Rule-change alerts: about 400-900 words. Pillar guides: an optional exemption, set per brief (for example up to 3,000 words), used only when the approver signs off that each extra section answers a distinct PAA or client question. Keep the length check as a warning, never a block. SE Ranking's correlational data links deeper pages to more AI citations, but padding is filler that quality raters downgrade.
 - FAQ policy. The 2-4 question house rule is sound for blog posts. Aim for 3-4 whenever 3 or more relevant PAA questions exist, and turn extra strong questions into body headings. Service and landing pages are not blog posts: they are exempt from the blog FAQ count and follow their own template, but they still follow every ICAI advertising rule below.
-- Make human approval a hard gate in the dashboard. Block publishing unless the draft has approver name, credential and an approval timestamp later than the last edit. Block publishing while any bracketed placeholder or the word UNVERIFIED remains. Store the AI draft and the approved version and compute the edit rate; warn when a YMYL post changed by less than 2%. Set cadence by reviewer capacity (for example no more than 5 approvals per reviewer per week), never by how fast the dashboard can generate drafts.
+- One human approval per month covers the whole strategy. Every post then enters a 24-hour review window; a reviewed post publishes as edited, an unreviewed post is auto-approved at its slot. Block publishing while any tax figure, rate or deadline is missing from the Verified Facts Register. Block publishing while any bracketed placeholder or the word UNVERIFIED remains. Store the AI draft and the approved version and compute the edit rate; warn when a YMYL post changed by less than 2%. Set cadence by reviewer capacity (for example no more than 5 approvals per reviewer per week), never by how fast the dashboard can generate drafts.
 - Facts Register handling. The writer outputs the Facts Register and FAQ source list after the article under an internal delimiter. The dashboard must store both against the draft, show them to the approver next to the article, and strip them before sending HTML to WordPress. Add a check on the rendered page that the register text never appears. The approver confirms every row against its primary source.
 - Fix the People Also Ask pipeline (code findings from our 30 September 2026 SERPHouse test). (1) lib/researchBrief.js reads only item.question, so every mobile PAA question is dropped. Parse item.question or item.title. (2) lib/serphouse.js calls the deprecated /serp/live endpoint. Move to POST https://api.serphouse.com/google-web with body {data:{q, domain, lang, device, loc}}, set the SERP timeout to at least 120 seconds (one live call took 69 s against the current 65 s timeout), and retry on 'Please try again'. (3) Pull PAA once per country: google.com with loc United States, and google.co.in with loc India. Skip city-level pulls unless the keyword is local. Pull mobile first. (4) Expand to depth 1 by querying each PAA question and storing its PAA, AI Overview references and organic top 10. (5) Filter questions for the topic's core entity. (6) The paa_questions table has 0 rows. Log every pull with keyword, market, device and date, and report our own PAA prevalence monthly. (7) Re-pull PAA on every refresh; do not reuse lists older than about 90 days.
 - FAQ fallbacks when PAA is thin, in order. Fireflies client questions (anonymized), then GSC question queries (regex such as ^(who|what|when|where|why|how|which|can|do|does|is|are|should|will)\b, noting GSC hides low-volume queries), then SE Ranking /keywords/questions for both source=us and source=in with a small limit (it costs 10 credits per returned keyword), then the SERPHouse autocomplete API, then related searches filtered to Google /search links (drop Reddit cards). Consider an AlsoAsked subscription (API on all plans, about $12-47 a month) if nested PAA trees are needed. Never fetch google.com/search or google.com/complete directly: Google's terms forbid automated access and Google sued SerpApi in December 2025.
@@ -612,7 +612,7 @@ The dashboard enforces the reliable ones in code (lib/validation.js). "block" se
 ## Myths and what is actually true
 
 - **Myth:** A well-optimized blog can rank #1 on Google within 24 hours.
-  **Reality:** Not for competitive evergreen keywords. Ahrefs (2025) found only 1.74% of new pages reach the top 10 within a year, and the average #1 page is about 5 years old. Crawling alone takes days to weeks. Speed is possible only on brand-new, low-competition follow-up queries, and even there government pages usually hold the announcement query itself. No one can guarantee a ranking.
+  **Reality:** Not for competitive evergreen keywords. Most new pages never reach the top 10, and long-standing pages hold most #1 spots. Crawling alone takes days to weeks. Speed is possible only on brand-new, low-competition follow-up queries, and even there government pages usually hold the announcement query itself. No one can guarantee a ranking.
 - **Myth:** Clicking 'Request indexing' repeatedly, pinging the sitemap, or using the Indexing API gets posts indexed faster.
   **Reality:** Google says repeat requests for the same URL don't speed crawling and don't guarantee indexing. The sitemap ping endpoint was shut down in late 2023. The Indexing API is only for JobPosting and livestream pages. IndexNow reaches Bing and other participants, not Google.
 - **Myth:** FAQ schema gets you expandable FAQ rich results in Google.
@@ -626,7 +626,7 @@ The dashboard enforces the reliable ones in code (lib/validation.js). "block" se
 - **Myth:** The ideal PAA or featured-snippet answer is 40-60 words (or exactly 41 words), with the heading copied word for word.
   **Reality:** The widely quoted 41-word figure has no traceable primary source and predates AI-generated PAA answers. Google says content needn't be broken into tiny pieces. Give a short direct first sentence, then judge the answer on completeness. Reword headings freely but keep the key entities.
 - **Myth:** Google penalizes AI-generated content.
-  **Reality:** Google judges quality, not how content was made. Ahrefs found AI text in 86.5% of top-ranking pages, with near-zero correlation between AI share and position. What gets hit is scaled, unedited, low-value content, such as the 850,000-page AI section Glenn Gabe documented being removed from the index.
+  **Reality:** Google judges quality, not how content was made. What gets hit is scaled, unedited, low-value content, such as the 850,000-page AI section Glenn Gabe documented being removed from the index.
 - **Myth:** Longer posts rank better, so aim for 2,000-3,000+ words.
   **Reality:** Google says it has no preferred word count and no ideal length. Ranking competitors in this niche range from about 1,600 to about 9,000 words. Match length to intent and never pad.
 - **Myth:** You should hit a keyword density of 1-3%.
@@ -634,7 +634,7 @@ The dashboard enforces the reliable ones in code (lib/validation.js). "block" se
 - **Myth:** The GEO paper proves quotations and statistics raise AI visibility by about 40% on Google.
   **Reality:** The paper tested a simulated engine built on GPT-3.5 over its own benchmark, not Google AI Overviews. Gains on live Perplexity were smaller (quotations +21%, statistics +9%), and results varied by domain and by the page's starting rank. Treat the numbers as directional.
 - **Myth:** You need llms.txt, chunked content or special schema to appear in AI Overviews and ChatGPT.
-  **Reality:** Google's 2026 guide says none of these are needed. SE Ranking found no llms.txt effect across 300,000 domains. Ahrefs' controlled test found that adding schema produced no citation uplift.
+  **Reality:** Google's 2026 guide says none of these are needed. SE Ranking found no llms.txt effect across 300,000 domains.
 - **Myth:** If you rank in Google's top 10 you'll be cited in AI Overviews, and if you don't you won't.
   **Reality:** By March 2026 only 37.9% of AI Overview citations came from the top 10, down from 76% in July 2025, because AI search runs many sub-queries. Covering those follow-up questions and earning brand mentions elsewhere now matter more.
 - **Myth:** ChatGPT search simply uses Bing.
@@ -743,11 +743,6 @@ The dashboard enforces the reliable ones in code (lib/validation.js). "block" se
 - [Google blog: Why we're taking legal action against SerpApi (Dec 2025)](https://blog.google/innovation-and-ai/technology/safety-security/serpapi-lawsuit/)
 - [Google Search Central blog: Search generative AI performance reports (June 2026)](https://developers.google.com/search/blog/2026/06/gen-ai-performance-reports)
 - [Aggarwal et al., GEO: Generative Engine Optimization (KDD 2024, full text)](https://arxiv.org/html/2311.09735v3)
-- [Ahrefs: How long does it take to rank in Google (2025)](https://ahrefs.com/blog/how-long-does-it-take-to-rank/)
-- [Ahrefs: AI-generated content does not hurt rankings (600k pages)](https://ahrefs.com/blog/ai-generated-content-does-not-hurt-your-google-rankings/)
-- [Ahrefs: 38% of AI Overview citations from the top 10 (Mar 2026)](https://ahrefs.com/blog/ai-overview-citations-top-10/)
-- [Ahrefs: Does schema increase AI citations? (2026)](https://ahrefs.com/blog/schema-ai-citations/)
-- [Ahrefs: AI brand visibility correlations (Dec 2025)](https://ahrefs.com/blog/ai-brand-visibility-correlations)
 - [SE Ranking: ChatGPT citation factors study](https://seranking.com/blog/chatgpt-citation-factors/)
 - [SEJ: llms.txt shows no clear effect on AI citations (300k domains)](https://www.searchenginejournal.com/llms-txt-shows-no-clear-effect-on-ai-citations-based-on-300k-domains/561542/)
 - [Practical Ecommerce: Studies reveal AI citation clues (first 30% of page)](https://www.practicalecommerce.com/studies-reveal-ai-citation-clues)

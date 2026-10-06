@@ -179,6 +179,13 @@ model seo_strategies {
   created_at                String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
   decided_at                String?
   report_json               String? // JSON
+  // Strategy v2 (11-section monthly plan). plan_json holds the sections; version goes up on every edit.
+  plan_json                 String? // JSON
+  version                   Int     @default(1)
+  validation                String? // JSON { errors: [], warnings: [] }
+  approved_by               String?
+  approved_at               String?
+  approved_version          Int?
 }
 
 model writing_skills {
@@ -201,6 +208,11 @@ model technical_crawls {
   missing_meta_count    Int?
   thin_content_count    Int?
   problem_urls          String? // JSON
+  // Screaming Frog upload gate: the stored file, who uploaded it, and link-level findings.
+  file_key              String?
+  uploaded_by           String?
+  links_count           Int?
+  link_issues           String? // JSON
   created_at            String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }
 
@@ -244,4 +256,109 @@ model oauth_tokens {
   provider   String @id
   data       String
   updated_at String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+// Every edit a reviewer makes to a strategy section (audit log).
+model strategy_edits {
+  id          Int    @id @default(autoincrement())
+  strategy_id Int
+  reviewer    String
+  section     String
+  old_value   String?
+  new_value   String?
+  version     Int
+  created_at  String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([strategy_id])
+}
+
+// Mid-month changes to an approved strategy.
+model strategy_changes {
+  id          Int    @id @default(autoincrement())
+  strategy_id Int
+  what        String
+  why         String
+  approved_by String
+  created_at  String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([strategy_id])
+}
+
+// One main keyword per blog, never reused across months.
+model strategy_keywords {
+  id          Int    @id @default(autoincrement())
+  keyword_key String @unique
+  keyword     String
+  period      String
+  strategy_id Int
+  created_at  String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+// Verified Facts Register: tax figures, rates and deadlines that blogs may state.
+model verified_facts {
+  id          Int     @id @default(autoincrement())
+  value       String // the figure as written, e.g. "30%", "April 15", "Rs 7 lakh"
+  claim       String
+  source_url  String?
+  verified_by String?
+  created_at  String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+// The month's blog calendar after approval; drives the 24-hour review window.
+model blog_schedule {
+  id               Int     @id @default(autoincrement())
+  strategy_id      Int
+  publish_at       String // UTC 'YYYY-MM-DD HH:MM:SS'
+  title            String
+  main_keyword     String
+  cluster          String?
+  tags             String // JSON array of SEO/AEO/GEO
+  refresh_url      String?
+  keyword_id       Int?
+  draft_id         Int?
+  // planned | drafting | in_review | held | published | failed
+  status           String  @default("planned")
+  review_started   String?
+  reviewed_by      String?
+  reviewed_at      String?
+  approval_mode    String? // reviewed | auto
+  hold_reasons     String? // JSON
+  wp_post_url      String?
+  post_publish_log String? // JSON
+  created_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  updated_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([status])
+}
+
+model backlink_tasks {
+  id          Int    @id @default(autoincrement())
+  strategy_id Int
+  target_site String
+  method      String
+  our_page    String
+  send_date   String
+  tags        String // JSON
+  status      String @default("planned")
+  created_at  String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+// Daily rank snapshot per priority keyword, used for the 5+ position drop alert.
+model rank_snapshots {
+  id         Int     @id @default(autoincrement())
+  keyword    String
+  position   Int?
+  checked_on String // YYYY-MM-DD
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@unique([keyword, checked_on])
+}
+
+// Weekly plan vs actual check results.
+model plan_checks {
+  id          Int    @id @default(autoincrement())
+  strategy_id Int
+  week_of     String
+  result      String // JSON
+  created_at  String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }

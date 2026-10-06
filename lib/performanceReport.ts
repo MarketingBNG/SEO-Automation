@@ -280,7 +280,7 @@ async function gatherPerformance(days = 28) {
   const sources = Object.entries(bySource).map(([source, sessions]) => ({ source, sessions })).sort((a, b) => b.sessions - a.sessions);
   const sourceNames = [...new Set(ai.map((r) => r.source))];
   const strat = await prisma.seo_strategies.findFirst({
-    where: { report_json: { not: null }, status: { not: 'rejected' } },
+    where: { OR: [{ report_json: { not: null } }, { plan_json: { not: null } }], status: { not: 'rejected' } },
     select: { created_at: true, data_snapshot: true },
     orderBy: { id: 'desc' },
   });

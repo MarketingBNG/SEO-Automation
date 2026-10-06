@@ -39,3 +39,27 @@ Cron requests are authorised with `CRON_SECRET`; everything else requires a sign
 - `prisma/` - schema and migrations · `scripts/migrate-sqlite.ts` - one-off import from the old SQLite app
 - `skills/seo-blog-playbook/SKILL.md` - writing playbook injected into prompts
 - `wordpress/yoast-rest-fields.php` - snippet the WordPress site needs so Yoast meta can be set via REST
+
+## Monthly Strategy (SEO, AEO, GEO)
+
+One strategy per month, one approval, then the month runs automatically.
+
+- **Generate:** `/api/strategy/auto-check` runs at 03:30 UTC on the 1st and builds next month's
+  strategy (Claude at maximum effort with web research; every number filled in code from SE
+  Ranking, Search Console, GA4, SERPHouse, Zoho and the month-end report, else `DATA MISSING`).
+- **Approve gate:** a Screaming Frog export (CSV/XLSX) uploaded in the last 7 days plus zero
+  validation errors (tags on every item, growth targets, 40% priority for a falling channel, intent
+  mix, focus services, no repeated keywords, safe backlink methods).
+- **Daily** (`/api/cron/daily`, 04:30 UTC = 10:00 IST): drafts blogs 48h ahead, opens the 24-hour
+  review window, publishes reviewed or auto-approved blogs behind the Facts Register and writing
+  rule gates, then IndexNow, sitemap resubmit, SE Ranking tracking and internal links; rank check
+  with a 5+ position drop alert.
+- **Weekly** (`/api/cron/weekly`, Mondays): plan vs actual.
+- Settings keys: `focus_services` (one per line or `;`), `competitor_domains`, `posting_days`
+  (default `Tue,Thu`), `posting_time_ist` (default `10:00`).
+- Tests: `npm test` (rules) and `DATABASE_URL=... npm run test:e2e` (real Postgres, stubbed APIs).
+
+New environment variables: `INDEXNOW_KEY` (and the key file at `https://<site>/<key>.txt`, or
+`INDEXNOW_KEY_LOCATION`), `REVIEW_NOTIFY_EMAILS` + `RESEND_API_KEY` (+ optional
+`NOTIFY_FROM_EMAIL`) and/or `SLACK_WEBHOOK_URL`, optional `SITEMAP_URL`, `STRATEGY_MODEL`,
+`FACT_CHECK_MODEL`, `STRATEGY_MAX_SEARCHES`, `WRITER_MAX_SEARCHES`.
