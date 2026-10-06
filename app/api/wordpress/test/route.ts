@@ -7,7 +7,21 @@ export const runtime = 'nodejs';
 async function handler() {
   try {
     const user: any = await testConnection();
-    return NextResponse.json({ ok: true, connectedAs: user.name }, { status: 200 });
+    const roles: string[] = Array.isArray(user.roles) ? user.roles : [];
+    const caps = user.capabilities || {};
+    return NextResponse.json(
+      {
+        ok: true,
+        connectedAs: user.name,
+        roles,
+        isAdministrator: roles.includes('administrator'),
+        // What the automatic fixes need: plugins (Redirection, Cache Enabler), media uploads, page edits.
+        canInstallPlugins: Boolean(caps.install_plugins && caps.activate_plugins),
+        canUploadMedia: Boolean(caps.upload_files),
+        canEditPages: Boolean(caps.edit_others_posts && caps.edit_pages),
+      },
+      { status: 200 }
+    );
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
   }

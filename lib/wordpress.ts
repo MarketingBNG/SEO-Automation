@@ -16,7 +16,8 @@ function getConfig() {
 
 async function testConnection() {
   const { siteUrl, authHeader } = getConfig();
-  const res = await fetch(`${siteUrl}/wp-json/wp/v2/users/me`, {
+  // context=edit adds the user's roles and capabilities (used to show whether plugins can be installed).
+  const res = await fetch(`${siteUrl}/wp-json/wp/v2/users/me?context=edit`, {
     headers: { Authorization: authHeader },
   });
   if (!res.ok) {
