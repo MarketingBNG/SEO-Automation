@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  priorityScore, validatePlan, approvalBlockers, crawlIsFresh, scheduleAction, factsGate, writingRuleIssues, faqSchema, nextPeriod,
+  priorityScore, validatePlan, approvalBlockers, crawlIsFresh, scheduleAction, extractClaims, writingRuleIssues, faqSchema, nextPeriod,
 } from '../lib/strategy/core';
 
 const m = (value: number | null) => ({ value, source: 'test', range: 'test' });
@@ -111,13 +111,12 @@ test('24-hour review window: opens 24h before, publishes at the slot', () => {
   assert.equal(scheduleAction({ ...row, status: 'published' }, new Date('2026-11-04T04:30:00Z')), 'wait');
 });
 
-test('Facts Register gate holds unverified figures and releases verified ones', () => {
+test('every sentence with a tax figure, rate or deadline is found for the fact check', () => {
   const html = '<p>The TDS rate on rent is 10% under Section 194-I.</p><p>FBAR is due April 15 each year.</p><p>We help founders.</p>';
-  const held = factsGate(html, []);
-  assert.equal(held.length, 2);
-  assert.ok(held[0].sentence.includes('TDS rate on rent is 10%'));
-  assert.deepEqual(factsGate(html, [{ value: '10%' }, { value: 'April 15' }]), []);
-  assert.equal(factsGate(html, [{ value: '10%' }]).length, 1);
+  const claims = extractClaims(html);
+  assert.equal(claims.length, 2);
+  assert.ok(claims[0].sentence.includes('TDS rate on rent is 10%'));
+  assert.deepEqual(claims[1].figures, ['April 15']);
 });
 
 test('writing rules', () => {
@@ -134,7 +133,7 @@ test('next period', () => {
   assert.equal(nextPeriod(new Date('2026-12-01T03:30:00Z')), 'January 2027');
 });
 
-test('a flagged sentence never spans paragraphs', () => {
-  const held = factsGate('<p>The FBAR is due April 15.</p><p>Other text here</p><h2>FAQ</h2>', []);
-  assert.equal(held[0].sentence, 'The FBAR is due April 15.');
+test('a figure sentence never spans paragraphs', () => {
+  const claims = extractClaims('<p>The FBAR is due April 15.</p><p>Other text here</p><h2>FAQ</h2>');
+  assert.equal(claims[0].sentence, 'The FBAR is due April 15.');
 });

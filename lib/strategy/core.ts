@@ -45,7 +45,7 @@ const BANNED_LINK_WORDS = /\b(paid|buy|sponsored link|link farm|pbn|private blog
 export const SAFEGUARDS = [
   { name: 'Daily rank check', rule: 'Every priority keyword is checked daily. An alert is raised when one drops 5 or more positions.' },
   { name: 'Weekly plan vs actual', rule: 'Every Monday the published blogs, backlink tasks and fixes are compared with the plan.' },
-  { name: 'Facts Register gate', rule: 'A blog that states a tax figure, rate or deadline not in the Verified Facts Register is held and the sentence is flagged.' },
+  { name: 'Automatic fact check', rule: 'Every claim in every blog is checked against official sources, corrected, and checked again until two checks in a row are clean (up to 50 rounds). A blog that cannot be fully verified is held, never published.' },
   { name: 'Crawl and indexing pause', rule: 'Auto-publishing pauses while the latest crawl shows server errors or the site is not indexable.' },
 ];
 
@@ -231,7 +231,7 @@ export function scheduleAction(row: { status: string; publish_at: string }, now 
   return 'wait';
 }
 
-// ---------- Facts Register gate ----------
+// ---------- Figure sentences (each must be covered by the fact check) ----------
 // Sentences that state a tax figure, rate or deadline: a percentage, a currency amount, a dated
 // deadline, or a section/form number next to tax words.
 const FIGURE = /(\d+(?:\.\d+)?\s?%|(?:₹|rs\.?|inr|\$|usd)\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:lakh|crore|million|billion|k))?|\d[\d,]*(?:\.\d+)?\s?(?:lakh|crore)|\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}\b|\b\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\b)/gi;
@@ -253,19 +253,6 @@ export function extractClaims(html: string): { sentence: string; figures: string
     if (figs.length) out.push({ sentence: s.trim(), figures: figs });
   }
   return out;
-}
-
-const normFig = (f: string) => f.toLowerCase().replace(/(rs\.?|inr|₹)\s?/g, 'rs ').replace(/(usd|\$)\s?/g, '$').replace(/[,\s]+/g, '');
-
-// Returns the sentences whose figures are not all in the register. Empty means the blog may publish.
-export function factsGate(html: string, register: { value: string }[]): { sentence: string; missing: string[] }[] {
-  const known = new Set(register.map((r) => normFig(r.value)));
-  const held: { sentence: string; missing: string[] }[] = [];
-  for (const c of extractClaims(html)) {
-    const missing = c.figures.filter((f) => !known.has(normFig(f)));
-    if (missing.length) held.push({ sentence: c.sentence, missing });
-  }
-  return held;
 }
 
 // ---------- Writing rules (checked before auto-publish) ----------
