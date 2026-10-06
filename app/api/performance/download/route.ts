@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import HTMLtoDOCX from 'html-to-docx';
+import { htmlToDocx } from '@/lib/docx';
 import { cachedPerformance } from '@/lib/performanceReport';
 import { renderPerformanceHtml } from '@/lib/performanceDoc';
 import { methodNotAllowed } from '../../_lib/http';
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const days = Math.min(90, Math.max(7, parseInt(req.nextUrl.searchParams.get('days') as any, 10) || 28));
   try {
     const perf: any = await cachedPerformance(days);
-    const buffer: any = await (HTMLtoDOCX as any)(await renderPerformanceHtml(perf), null, {
+    const buffer: any = await htmlToDocx(await renderPerformanceHtml(perf), {
       title: 'SEO, AEO and GEO performance',
       margins: { top: 720, bottom: 720, left: 720, right: 720 },
     });

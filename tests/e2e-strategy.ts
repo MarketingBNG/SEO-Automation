@@ -183,6 +183,19 @@ async function main() {
   assert.ok(JSON.parse(r!.hold_reasons!).some((x: string) => x.startsWith('Fact check could not confirm')));
   console.log('PASS unverifiable blog held, not published');
 
+  // Strategy progress and cost estimate.
+  const { strategyProgress } = await import('../lib/strategy/progress');
+  let pr: any = await strategyProgress(row.id);
+  assert.equal(pr.blogs.published, 2);
+  assert.equal(pr.blogs.total, 5);
+  const bl = (await prisma.backlink_tasks.findFirst({ where: { strategy_id: row.id } }))!;
+  await prisma.backlink_tasks.update({ where: { id: bl.id }, data: { status: 'done' } });
+  pr = await strategyProgress(row.id);
+  assert.equal(pr.backlinks.done, 1);
+  assert.equal(pr.percent, Math.round((3 / 6) * 100));
+  assert.ok(pr.cost.estimate > 0 && pr.cost.lines.length === 4);
+  console.log(`PASS strategy progress ${pr.percent}% (2 of 5 blogs, 1 of 1 backlink), estimated AI cost $${pr.cost.estimate.toFixed(2)} (${pr.cost.basis})`);
+
   // Meeting insights: cleaned and auto-approved, or held when something identifying is left.
   const { autoReview } = await import('../lib/clientInsights');
   const ins = await prisma.client_insights.create({ data: { title: 'Canada incorporation (Amit Agarwal)', overview: 'Pricing starts at USD 1,450. Ontario chosen.', status: 'pending_review' } });
