@@ -51,6 +51,14 @@ function Section({ title, description, children }: { title: ReactNode; descripti
   );
 }
 
+const TASK_STATUS: Record<string, string> = {
+  planned: 'Automatic, waiting for its date',
+  sent: 'In Smartlead',
+  duplicate: 'Already in Smartlead',
+  no_contact: 'No contact found',
+  skipped: 'Skipped',
+};
+
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
 // Mirrors lib/strategy/fixer.ts fixKind: what the automatic fixer will do with each issue.
@@ -205,7 +213,7 @@ function StrategyProgress({ id, approved }: { id: number; approved: boolean }) {
               </div>
               <div className="rounded-lg border p-3">
                 <div className="font-medium">Backlink tasks: {d.backlinks.done} of {d.backlinks.total} done</div>
-                <div className="text-xs text-muted-foreground">Outreach is done by a person; tick each one off below when it is done.</div>
+                <div className="text-xs text-muted-foreground">Outreach runs automatically through Smartlead (up to 5 a day). Done means SE Ranking found the link. Only directory listings need a person; tick those off when done.</div>
                 <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${d.backlinks.total ? (d.backlinks.done / d.backlinks.total) * 100 : 0}%` }} /></div>
               </div>
             </div>
@@ -214,9 +222,17 @@ function StrategyProgress({ id, approved }: { id: number; approved: boolean }) {
                 <summary className="cursor-pointer">Backlink tasks ({d.backlinks.tasks.length})</summary>
                 <ul className="mt-2 space-y-1">
                   {d.backlinks.tasks.map((t: any) => (
-                    <li key={t.id} className="flex items-center gap-2">
-                      <input type="checkbox" checked={t.status === 'done'} onChange={() => toggle(t)} />
-                      <span>{t.send_date} {t.method}: <strong>{t.target_site}</strong>{t.our_page ? ` for ${t.our_page}` : ''}</span>
+                    <li key={t.id} className="flex items-start gap-2">
+                      {t.status === 'manual' || t.status === 'done' ? (
+                        <input type="checkbox" className="mt-1" checked={t.status === 'done'} onChange={() => toggle(t)} title="Tick when done by a person" />
+                      ) : (
+                        <span className="mt-0.5 shrink-0 rounded border px-1.5 text-[11px] text-muted-foreground">{TASK_STATUS[t.status] || t.status}</span>
+                      )}
+                      <span>
+                        {t.send_date} {t.method}: <strong>{t.target_site}</strong>{t.our_page ? ` for ${t.our_page}` : ''}
+                        {t.status === 'manual' && <span className="ml-1 rounded border px-1.5 text-[11px] text-muted-foreground">Needs a person</span>}
+                        {t.note && <span className="block text-xs text-muted-foreground">{t.note}</span>}
+                      </span>
                     </li>
                   ))}
                 </ul>

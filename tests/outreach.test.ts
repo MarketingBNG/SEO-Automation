@@ -46,3 +46,12 @@ test('the Smartlead key is sent only as the query parameter and never appears in
     delete process.env.SMARTLEAD_CAMPAIGN_ID;
   }
 });
+
+test('a description is not treated as a website; a domain is', async () => {
+  const { isRealSite } = await load();
+  assert.equal(isRealSite('examplecpa.com'), true);
+  assert.equal(isRealSite('https://www.examplecpa.co.in/blog'), true);
+  assert.equal(isRealSite('Clutch (company profile for a virtual CFO and accounting firm)'), false);
+  assert.equal(isRealSite('Pages on startup and NRI resource sites that link to dead ITIN or EIN guides'), false);
+  assert.equal(isRealSite('DATA MISSING: SE Ranking backlink gap list'), false);
+});
