@@ -76,6 +76,6 @@ One strategy per month, one approval, then the month runs automatically.
 - Tests: `npm test` (rules) and `DATABASE_URL=... npm run test:e2e` (real Postgres, stubbed APIs).
 
 New environment variables: `INDEXNOW_KEY` (and the key file at `https://<site>/<key>.txt`, or
-`INDEXNOW_KEY_LOCATION`), `REVIEW_NOTIFY_EMAILS` + `RESEND_API_KEY` (+ optional
-`NOTIFY_FROM_EMAIL`) and/or `SLACK_WEBHOOK_URL`, optional `SITEMAP_URL`, `STRATEGY_MODEL`,
+`INDEXNOW_KEY_LOCATION`), `SLACK_WEBHOOK_URL` (alerts), `SMARTLEAD_API_KEY` + `SMARTLEAD_CAMPAIGN_ID`
+(+ optional `OUTREACH_DAILY_LIMIT`, default 5) for backlink outreach, optional `SITEMAP_URL`, `STRATEGY_MODEL`,
 `FACT_CHECK_MODEL`, `FACT_CHECK_ROUNDS`, `STRATEGY_MAX_SEARCHES`, `WRITER_MAX_SEARCHES`.

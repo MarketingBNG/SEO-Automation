@@ -417,7 +417,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
       </Section>
 
       {/* 6 */}
-      <Section title="6. Backlink plan" description="Safe methods only: SE Ranking backlink gap outreach, unlinked brand mentions, broken link replacement, directory and citation listings, automatic internal linking. Never paid links, link farms, comment spam or private blog networks.">
+      <Section title="6. Backlink plan" description="Safe methods only: SE Ranking backlink gap outreach, unlinked brand mentions, broken link replacement, directory and citation listings, automatic internal linking. Never paid links, link farms, comment spam or private blog networks. After approval the dashboard finds each site's contact email and adds it to the Smartlead outreach campaign on its date (up to 5 a day, no duplicates); Smartlead sends the emails and follow-ups. A task is marked done when SE Ranking finds the link. Directory listings need a person.">
         <EditTable
           rows={p.backlinks}
           editing={editing}
