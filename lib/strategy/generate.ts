@@ -136,6 +136,7 @@ export const AUTOMATION = [
   { platform: 'SE Ranking AI Search and AI Results Tracker', what: 'ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode mentions and links', when: 'Each strategy run and weekly plan vs actual' },
   { platform: 'Screaming Frog', what: 'Crawl upload parsed into Section 8 fixes', when: 'On each upload (required before approval)' },
   { platform: 'Website CMS (WordPress)', what: 'Applies the ticked Section 8 fixes (titles, meta descriptions, broken links, 301 redirects, FAQs for thin pages), saving the old value for undo', when: 'A few per run after approval' },
+  { platform: 'Website CMS (WordPress) and PageSpeed', what: 'Speed: adds a page cache plugin if none is active (removed again if PageSpeed drops), and converts large images to WebP on every page that uses them, keeping the originals', when: 'Daily, a few images per day' },
   { platform: 'Smartlead', what: 'Each backlink target is added as a lead to the outreach campaign with a personalised opening line; Smartlead sends the emails and follow-ups', when: 'Daily, up to 5 leads, from each task send date' },
   { platform: 'SE Ranking', what: 'Competitors found from Google results for our keywords; backlink gap built from them; new links verified', when: 'Each strategy run or update; daily link check' },
 ];

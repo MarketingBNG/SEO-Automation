@@ -160,11 +160,19 @@ export async function applyFix(task: any): Promise<{ status: 'applied' | 'manual
   return { status: 'manual', result: 'Unknown fix type' };
 }
 
+// At most this many fixes a day (env TECH_FIX_DAILY_LIMIT), so the site changes gradually and the
+// AI cost is spread over the month instead of landing on one day.
+export const FIX_DAILY_LIMIT = () => Number(process.env.TECH_FIX_DAILY_LIMIT || 20);
+
 // Runs a few planned fixes per scheduler run, so the site is never changed in one big burst.
-export async function runFixes({ max = 5 } = {}) {
+export async function runFixes({ max = 5, now = new Date() } = {}) {
   const out = { applied: 0, manual: 0, failed: 0 };
   const done: string[] = [];
-  const tasks = await prisma.technical_fix_tasks.findMany({ where: { status: 'planned' }, orderBy: { id: 'asc' }, take: max });
+  const today = now.toISOString().slice(0, 10);
+  const doneToday = await prisma.technical_fix_tasks.count({ where: { strategy_id: { not: 0 }, applied_at: { startsWith: today } } });
+  const take = Math.max(0, Math.min(max, FIX_DAILY_LIMIT() - doneToday));
+  if (!take) return out;
+  const tasks = await prisma.technical_fix_tasks.findMany({ where: { status: 'planned' }, orderBy: { id: 'asc' }, take });
   for (const t of tasks) {
     let r;
     try {
