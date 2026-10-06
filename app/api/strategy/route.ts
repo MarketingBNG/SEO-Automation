@@ -11,8 +11,8 @@ import { methodNotAllowed } from '../_lib/http';
 // Strategy v2. GET lists strategies (newest first) in the 11-section view.
 // POST generates one now (streamed progress); the monthly cron does the same on the 1st.
 export const runtime = 'nodejs';
-// Hobby plan limit is 300 seconds. Maximum-effort research runs need Vercel Pro: raise this to 800 there.
-export const maxDuration = 300;
+// Only applies on serverless hosts. On the self-hosted Coolify server there is no time limit.
+export const maxDuration = 800;
 
 export async function GET() {
   const rows = await prisma.seo_strategies.findMany({ where: { plan_json: { not: null } }, orderBy: { id: 'desc' }, take: 12 });

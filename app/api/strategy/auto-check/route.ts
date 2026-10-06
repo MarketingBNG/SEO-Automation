@@ -7,8 +7,8 @@ import { nextPeriod } from '@/lib/strategy/core';
 import { isCronRequest, methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
-// Hobby plan limit is 300 seconds. Maximum-effort research runs need Vercel Pro: raise this to 800 there.
-export const maxDuration = 300;
+// Only applies on serverless hosts. On the self-hosted Coolify server there is no time limit.
+export const maxDuration = 800;
 
 async function existing(period: string) {
   return prisma.seo_strategies.findFirst({ where: { period, plan_json: { not: null }, status: { in: ['pending_review', 'approved'] } }, select: { id: true } });

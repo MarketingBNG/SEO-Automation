@@ -220,8 +220,9 @@ const toMs = (s: string) => Date.parse(String(s).replace(' ', 'T') + (String(s).
 
 // What the scheduler should do with one calendar row right now.
 //   open_review: enter review (24h before slot)  publish: slot reached  wait: nothing yet
-// `graceMinutes` lets a once-a-day cron that fires a little early still publish today's slot.
-export function scheduleAction(row: { status: string; publish_at: string }, now = new Date(), graceMinutes = 90): 'open_review' | 'publish' | 'wait' {
+// The scheduler runs every 15 minutes, so a blog publishes within 15 minutes after its slot and
+// never before it. `graceMinutes` lets a less frequent scheduler publish slightly early instead.
+export function scheduleAction(row: { status: string; publish_at: string }, now = new Date(), graceMinutes = 0): 'open_review' | 'publish' | 'wait' {
   const slot = toMs(row.publish_at);
   const t = now.getTime();
   if (['published', 'failed'].includes(row.status)) return 'wait';

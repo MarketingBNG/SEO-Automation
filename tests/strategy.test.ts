@@ -99,10 +99,13 @@ test('24-hour review window: opens 24h before, publishes at the slot', () => {
   const row = { status: 'planned', publish_at: '2026-11-03 04:30:00' };
   assert.equal(scheduleAction(row, new Date('2026-11-01T04:30:00Z')), 'wait');
   assert.equal(scheduleAction(row, new Date('2026-11-02T04:35:00Z')), 'open_review');
+  assert.equal(scheduleAction(row, new Date('2026-11-02T04:15:00Z')), 'wait');
   // Nobody reviewed: at the slot the unreviewed blog is published (auto-approved).
   assert.equal(scheduleAction({ ...row, status: 'in_review' }, new Date('2026-11-03T04:30:00Z')), 'publish');
-  // A once-a-day cron firing 40 minutes early still publishes today's slot.
-  assert.equal(scheduleAction({ ...row, status: 'in_review' }, new Date('2026-11-03T03:50:00Z')), 'publish');
+  // Never published before its slot.
+  assert.equal(scheduleAction({ ...row, status: 'in_review' }, new Date('2026-11-03T04:15:00Z')), 'wait');
+  // A less frequent scheduler can opt into a grace window.
+  assert.equal(scheduleAction({ ...row, status: 'in_review' }, new Date('2026-11-03T03:50:00Z'), 90), 'publish');
   // Held blogs are retried every run (they publish once the fact is added).
   assert.equal(scheduleAction({ ...row, status: 'held' }, new Date('2026-11-04T04:30:00Z')), 'publish');
   assert.equal(scheduleAction({ ...row, status: 'published' }, new Date('2026-11-04T04:30:00Z')), 'wait');

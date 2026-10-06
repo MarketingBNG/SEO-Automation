@@ -11,6 +11,7 @@ import { listSites, getSiteRankings, addTrackedKeyword } from '../seranking';
 import { getTermsForKeyword } from '../surfer';
 import { submitIndexNow, resubmitSitemap } from '../indexing';
 import { notify } from '../notify';
+import * as settings from '../settings';
 import { scheduleAction, factsGate, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh } from './core';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
@@ -159,8 +160,22 @@ async function publishRow(row, now) {
   return 'published';
 }
 
-// The daily job (safe to run hourly too; every step is idempotent).
-export async function runDaily(now = new Date(), { maxDrafts = 1 } = {}) {
+// One server process runs the jobs, so an in-memory flag stops a scheduled call from overlapping a
+// run that is still writing a long maximum-effort draft.
+let running = false;
+
+// The scheduler job. Meant to run every 15 minutes; every step is idempotent.
+export async function runDaily(now = new Date(), opts: { maxDrafts?: number } = {}) {
+  if (running) return { skipped: 'A previous run is still in progress.' };
+  running = true;
+  try {
+    return await runDailyOnce(now, opts);
+  } finally {
+    running = false;
+  }
+}
+
+async function runDailyOnce(now: Date, { maxDrafts = 1 }: { maxDrafts?: number }) {
   const summary: any = { opened: 0, published: 0, held: 0, drafted: 0, errors: [] };
   const rows = await prisma.blog_schedule.findMany({ where: { status: { in: ['planned', 'drafting', 'in_review', 'held'] } }, orderBy: { publish_at: 'asc' } });
 
@@ -191,7 +206,12 @@ export async function runDaily(now = new Date(), { maxDrafts = 1 } = {}) {
     }
   }
 
-  summary.rankAlerts = await dailyRankCheck(now).catch((e) => ({ error: e.message }));
+  // Rank check once per day, even though the job runs every 15 minutes.
+  const today = now.toISOString().slice(0, 10);
+  if ((await settings.get('last_rank_check')) !== today) {
+    summary.rankAlerts = await dailyRankCheck(now).catch((e) => ({ error: e.message }));
+    if (!summary.rankAlerts?.error) await settings.set('last_rank_check', today);
+  }
   return summary;
 }
 
