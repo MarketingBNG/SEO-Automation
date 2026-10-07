@@ -5,8 +5,11 @@ import HTMLtoDOCX from 'html-to-docx';
 // jszip is html-to-docx's own zip library (installed with it).
 import JSZip from 'jszip';
 
-export async function htmlToDocx(html: string, options: Record<string, unknown> = {}): Promise<Buffer> {
-  const raw: any = await (HTMLtoDOCX as any)(html, null, options);
+export async function htmlToDocx(html: string, options: Record<string, any> = {}): Promise<Buffer> {
+  // html-to-docx writes w:header="undefined" and w:gutter="undefined" when only some margins are given,
+  // and Word refuses the file. Always pass every margin.
+  const margins = { top: 1440, right: 1800, bottom: 1440, left: 1800, header: 720, footer: 720, gutter: 0, ...(options.margins || {}) };
+  const raw: any = await (HTMLtoDOCX as any)(html, null, { ...options, margins });
   return fixDrawingIds(Buffer.from(raw));
 }
 
@@ -21,7 +24,10 @@ export async function fixDrawingIds(docx: Buffer): Promise<Buffer> {
     n += 1;
     return `<wp:docPr id="${n}"${between}<pic:cNvPr id="${n}"`;
   });
-  const out = fixTablePropsOrder(moveSectPrToEnd(fixed));
+  const out = fixParaPropsOrder(fixBorderOrder(fixTablePropsOrder(moveSectPrToEnd(fixed))))
+    .replace(/\s[\w:]+="undefined"/g, '')
+    // A table with <thead> and <tbody> gets a second grid after the header row; only one is allowed.
+    .replace(/(<\/w:tr>\s*)<w:tblGrid>[\s\S]*?<\/w:tblGrid>/g, '$1');
   if (out === xml) return docx;
   zip.file('word/document.xml', out);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
@@ -46,5 +52,35 @@ export function fixTablePropsOrder(xml: string): string {
     const rank = (n: string) => (TBL_ORDER.indexOf(n) < 0 ? 99 : TBL_ORDER.indexOf(n));
     parts.sort((a, b) => rank(a.name) - rank(b.name));
     return `<w:tblPr>${parts.map((x) => x.xml).join('')}</w:tblPr>`;
+  });
+}
+
+// Border and cell-margin elements must be in schema order (top, left/start, bottom, right/end, insideH, insideV);
+// html-to-docx writes top, bottom, left, right, which Word rejects.
+const BORDER_ORDER = ['top', 'left', 'start', 'bottom', 'right', 'end', 'insideH', 'insideV', 'tl2br', 'tr2bl', 'between', 'bar'];
+export function fixBorderOrder(xml: string): string {
+  return xml.replace(/<w:(tblBorders|tcBorders|pBdr|tblCellMar|tcMar)>([\s\S]*?)<\/w:\1>/g, (_m, tag, inner) => {
+    const parts: { name: string; xml: string }[] = [];
+    const re = /<w:(\w+)\b[^>]*?(?:\/>|>[\s\S]*?<\/w:\1>)/g;
+    let t;
+    while ((t = re.exec(inner))) parts.push({ name: t[1], xml: t[0] });
+    const rank = (n: string) => (BORDER_ORDER.indexOf(n) < 0 ? 99 : BORDER_ORDER.indexOf(n));
+    parts.sort((a, b) => rank(a.name) - rank(b.name));
+    return `<w:${tag}>${parts.map((x) => x.xml).join('')}</w:${tag}>`;
+  });
+}
+
+// Paragraph properties must also be in schema order (for example spacing before ind before jc);
+// html-to-docx writes ind and jc before spacing for indented text such as quotes.
+const PPR_ORDER = ['pStyle', 'keepNext', 'keepLines', 'pageBreakBefore', 'framePr', 'widowControl', 'numPr', 'suppressLineNumbers', 'pBdr', 'shd', 'tabs', 'suppressAutoHyphens', 'kinsoku', 'wordWrap', 'overflowPunct', 'topLinePunct', 'autoSpaceDE', 'autoSpaceDN', 'bidi', 'adjustRightInd', 'snapToGrid', 'spacing', 'ind', 'contextualSpacing', 'mirrorIndents', 'suppressOverlap', 'jc', 'textDirection', 'textAlignment', 'textboxTightWrap', 'outlineLvl', 'divId', 'cnfStyle', 'rPr', 'sectPr', 'pPrChange'];
+export function fixParaPropsOrder(xml: string): string {
+  return xml.replace(/<w:pPr>([\s\S]*?)<\/w:pPr>/g, (_m, inner) => {
+    const parts: { name: string; xml: string }[] = [];
+    const re = /<w:(\w+)\b[^>]*?(?:\/>|>[\s\S]*?<\/w:\1>)/g;
+    let t;
+    while ((t = re.exec(inner))) parts.push({ name: t[1], xml: t[0] });
+    const rank = (n: string) => (PPR_ORDER.indexOf(n) < 0 ? 99 : PPR_ORDER.indexOf(n));
+    parts.sort((a, b) => rank(a.name) - rank(b.name));
+    return `<w:pPr>${parts.map((x) => x.xml).join('')}</w:pPr>`;
   });
 }
