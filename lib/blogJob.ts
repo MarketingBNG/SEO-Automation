@@ -5,7 +5,7 @@
 // Stop button (its AbortController in blogRuns) does.
 import prisma from './prisma';
 import { researchAndWriteBlog } from './anthropic';
-import { startTimer, endTimer } from './jobTimer';
+import { startTimer, endTimer, setStage, timerFor } from './jobTimer';
 import * as activity from './activity';
 import { progressWriter } from './strategy/jobs';
 import { blogRuns } from './blogRuns';
@@ -18,26 +18,38 @@ export async function runBlogJob(keyword: any, controller: AbortController, send
   const saveProgress = progressWriter((stage, percent) =>
     prisma.keywords.update({ where: { id: keyword.id }, data: { progress_stage: stage, progress_percent: percent } })
   );
-  // Long steps (deep research, fact checks) can take many minutes with no new stage. Every
-  // 20 seconds: keep the connection alive and show the elapsed time, so it never looks stuck.
+  // Long steps (deep research, fact checks) report their real activity (searches done, words
+  // written). Every 20 seconds the heartbeat adds when the AI last sent anything, so the screen says
+  // "last reply 8 s ago" or "no reply for 3 min" instead of claiming "still working" blindly.
+  const timerKey = `blog-${keyword.id}`;
+  const idleMin = Math.round(Math.max(60000, Number(process.env.CLAUDE_IDLE_TIMEOUT_MS) || 5 * 60 * 1000) / 60000);
   let lastStage = 'Starting…';
   let lastPercent = 2;
   let stageSince = Date.now();
   const beat = setInterval(() => {
-    const mins = Math.floor((Date.now() - stageSince) / 60000);
-    const stage = mins >= 1 ? `${lastStage} (${mins} min so far, still working)` : lastStage;
+    const last = timerFor(timerKey)?.stage?.lastActivityAt;
+    let note = '';
+    if (last) {
+      const ago = Math.round((Date.now() - last) / 1000);
+      note = ago < 120 ? `last reply from the AI ${ago} s ago` : `no reply from the AI for ${Math.floor(ago / 60)} min; it reconnects on its own after ${idleMin} min of silence`;
+    } else {
+      const mins = Math.floor((Date.now() - stageSince) / 60000);
+      note = mins >= 1 ? `${mins} min on this step` : '';
+    }
+    const stage = note ? `${lastStage} (${note})` : lastStage;
     send({ stage, percent: lastPercent });
     saveProgress(stage, lastPercent);
   }, 20000);
 
-  startTimer(`blog-${keyword.id}`, 'blog', `Blog: ${keyword.keyword}`);
+  startTimer(timerKey, 'blog', `Blog: ${keyword.keyword}`);
   try {
     const result: any = await researchAndWriteBlog(keyword.keyword, keyword.notes, {
       signal: controller.signal,
-      onProgress: (stage: any, percent: any) => {
+      onProgress: (stage: any, percent: any, extra?: any) => {
         if (stage !== lastStage) stageSince = Date.now();
         lastStage = stage;
         lastPercent = percent;
+        if (extra?.key) setStage(timerKey, extra.key, { progress: extra.progress, round: extra.round, lastActivityAt: extra.lastActivityAt ?? null, label: stage });
         send({ stage, percent });
         saveProgress(stage, percent);
       },

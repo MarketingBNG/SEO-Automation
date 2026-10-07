@@ -454,15 +454,18 @@ export function reviewOverdue(row: ScheduleRow, now = new Date()): boolean {
 }
 
 // ---------- Time left for a running job ----------
-// Blends the job's own pace (time so far / percent done) with how long this kind of job usually
-// takes, so the countdown is sensible both at the start (little pace data) and near the end.
-export function etaSeconds({ elapsed, percent, typical }: { elapsed: number; percent: number; typical: number | null }): number {
-  const p = Math.max(0, Math.min(99, percent || 0));
-  const byPace = p >= 5 ? (elapsed / p) * (100 - p) : null;
-  const byHistory = typical ? Math.max(typical - elapsed, typical * 0.05) : null;
-  if (byPace === null && byHistory === null) return Math.max(60, 600 - elapsed);
-  if (byPace === null) return Math.round(byHistory as number);
-  if (byHistory === null) return Math.round(byPace);
-  const w = p / 100; // trust the pace more as the job goes on
-  return Math.round(byPace * w + (byHistory as number) * (1 - w));
+// Blends how long this kind of work usually takes with the run's own pace. The old formula weighted
+// pace and history so that the elapsed time cancelled out, which froze the estimate whenever the
+// percentage did not move; this one never freezes, and the caller flags a late step as overdue.
+export function blendEta({ elapsed, progress, typical }: { elapsed: number; progress: number; typical: number | null }): number {
+  const p = Math.max(0, Math.min(0.99, progress || 0));
+  const t = typical && typical > 0 ? typical : 600;
+  const byHistory = Math.max(t - elapsed, t * 0.1);
+  if (p < 0.02) return Math.round(byHistory);
+  // How much slower than usual this run is going, from the share done so far (0.5x to 3x), applied
+  // to the usual time for the rest; so a stuck step shows a growing number until "overdue" takes over.
+  const slowness = Math.max(0.5, Math.min(3, elapsed / p / t));
+  const byPace = t * (1 - p) * slowness;
+  return Math.round(0.6 * byPace + 0.4 * byHistory);
 }
+export const etaSeconds = ({ elapsed, percent, typical }: { elapsed: number; percent: number; typical: number | null }) => blendEta({ elapsed, progress: (percent || 0) / 100, typical });

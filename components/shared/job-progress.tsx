@@ -49,11 +49,11 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
             <span className="truncate font-medium">{j.label}</span>
             <span className="truncate text-muted-foreground">{j.stage}</span>
             <span className="ml-auto flex shrink-0 items-center gap-2 tabular-nums">
-              {!j.paused && <Countdown remaining={j.remaining} elapsed={j.elapsed} className="hidden sm:inline" />}
+              {!j.paused && <Countdown remaining={j.remaining} elapsed={j.elapsed} overdue={j.overdue} typical={j.typical} stageElapsed={j.stageElapsed} stageTypical={j.stageTypical} stageLabel={j.stageLabel} ifRepair={j.ifRepair} className="hidden sm:inline" />}
               {j.percent !== null && j.percent !== undefined && <span>{j.percent}%</span>}
             </span>
           </div>
-          {!j.paused && <Countdown remaining={j.remaining} elapsed={j.elapsed} className="block text-[11px] sm:hidden" />}
+          {!j.paused && <Countdown remaining={j.remaining} elapsed={j.elapsed} overdue={j.overdue} typical={j.typical} stageElapsed={j.stageElapsed} stageTypical={j.stageTypical} stageLabel={j.stageLabel} ifRepair={j.ifRepair} className="block text-[11px] sm:hidden" />}
           <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
             {j.percent !== null && j.percent !== undefined ? (
               <div className="h-full rounded-full bg-primary transition-all duration-700" style={{ width: `${Math.max(2, j.percent)}%` }} />
