@@ -14,11 +14,31 @@ import * as settings from '../settings';
 
 // SE Ranking tracks what the strategy targets: its keywords are added in the background right after
 // approval or an edit (no credits used; a missing SE Ranking key just skips it).
-function trackStrategyKeywords() {
-  if (!process.env.SERANKING_API_KEY) return;
+const g = globalThis as unknown as { __trackingSync?: boolean };
+export function trackStrategyKeywords(strategyId?: number) {
+  if (!process.env.SERANKING_API_KEY || g.__trackingSync) return;
+  g.__trackingSync = true;
   void import('../keywordTracking')
-    .then(({ syncStrategyKeywords }) => syncStrategyKeywords())
-    .catch((e) => console.error('Strategy keyword tracking failed:', e.message));
+    .then(async ({ syncStrategyKeywords, strategyTrackingStatus }) => {
+      await syncStrategyKeywords();
+      const s = strategyId ?? (await prisma.seo_strategies.findFirst({ where: { status: 'approved' }, orderBy: { id: 'desc' }, select: { id: true } }))?.id;
+      if (s) await strategyTrackingStatus(s);
+    })
+    .catch((e) => console.error('Strategy keyword tracking failed:', e.message))
+    .finally(() => (g.__trackingSync = false));
+}
+
+// The saved SE Ranking status of an approved strategy; when it is missing or over 6 hours old the
+// sync runs again in the background (so opening the page is enough to bring it up to date).
+async function trackingView(row) {
+  if (row.status !== 'approved') return null;
+  let s = null;
+  try {
+    s = JSON.parse((await settings.get('strategy_tracking_status')) || 'null');
+  } catch {}
+  const fresh = s && s.strategyId === row.id && Date.now() - Date.parse(s.checkedAt) < 6 * 3600000;
+  if (!fresh) trackStrategyKeywords(row.id);
+  return s && s.strategyId === row.id ? { ...s, syncing: Boolean(g.__trackingSync) } : { syncing: Boolean(process.env.SERANKING_API_KEY), notConnected: !process.env.SERANKING_API_KEY };
 }
 
 export async function latestCrawl() {
@@ -60,6 +80,7 @@ export async function strategyView(row) {
     blockers: row.status === 'approved' ? [] : approvalBlockers(plan, validation, crawl),
     edits,
     changes,
+    seRanking: await trackingView(row),
   };
 }
 
@@ -101,7 +122,7 @@ export async function editSection(id: number, section: string, value: any, revie
       if (section === 'backlinks') await syncBacklinks(tx, id, plan.backlinks || []);
     }
   });
-  if (approved && ['keywords', 'blogPlan', 'aeoGeo'].includes(section)) trackStrategyKeywords();
+  if (approved) trackStrategyKeywords(id);
   await activity.log(approved ? 'strategy.changed' : 'strategy.edited', { entityType: 'seo_strategy', entityId: id, details: `Section ${section}, version ${version}${approved ? `: ${why}` : ''}`, actor: reviewer });
   return strategyView(await prisma.seo_strategies.findUnique({ where: { id } }));
 }
@@ -204,7 +225,7 @@ export async function approveStrategy(id: number, approver: string) {
       await tx.technical_fix_tasks.create({ data: { strategy_id: id, url: f.url, issue: f.issue, fix: f.fix || '', kind: fixKind(f.issue) } });
     }
   });
-  trackStrategyKeywords();
+  trackStrategyKeywords(id);
   await activity.log('strategy.approved', {
     entityType: 'seo_strategy',
     entityId: id,

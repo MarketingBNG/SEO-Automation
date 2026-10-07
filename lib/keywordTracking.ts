@@ -111,3 +111,18 @@ export async function topUpTrackedKeywords({ add = addTrackedKeywords, strategyO
   await activity.log('seranking.keywords_added', { details: `${added} keyword(s) added to rank tracking (${strategyAdded} from the ${strategy.period || 'current'} strategy; ${tracked.size + added} tracked, target ${target})` });
   return { tracked: tracked.size + added, target, cap, added, strategyAdded, keywords: list, unitsLeft, researchSkipped: !canResearch };
 }
+
+// How the approved strategy's keywords stand in SE Ranking (reads the project list; no credits).
+// Saved in settings so the strategy page can show it without calling SE Ranking on every view.
+export async function strategyTrackingStatus(strategyId: number) {
+  const sites = await listSites();
+  if (!sites?.length) return { error: 'No SE Ranking project found' };
+  const names = await listProjectKeywords(sites[0].id).catch(async () => (await getSiteRankings(sites[0].id)).map((r) => r.keyword));
+  const tracked = new Set(names.map((k) => keywordKey(k)));
+  const { keywords } = await strategyTopics();
+  const missing = keywords.filter((k) => !tracked.has(keywordKey(k)));
+  const cap = Math.max(20, (Number(await settings.get('seranking_keyword_limit')) || 5000) - (Number(await settings.get('seranking_keyword_buffer')) || 500));
+  const status = { strategyId, strategyKeywords: keywords.length, trackedOfStrategy: keywords.length - missing.length, missing: missing.slice(0, 20), totalTracked: tracked.size, cap, checkedAt: new Date().toISOString() };
+  await settings.set('strategy_tracking_status', JSON.stringify(status));
+  return status;
+}
