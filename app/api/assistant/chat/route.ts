@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sendMessage } from '@/lib/assistant/engine';
 import { streamNdjson } from '@/lib/assistant/stream';
 import { getActor } from '@/lib/auth';
+import * as activity from '@/lib/activity';
 
 export const runtime = 'nodejs';
 // Vercel Hobby plan limit. On Pro, raise to 800 for long generations.
@@ -14,6 +15,7 @@ export async function POST(req: NextRequest) {
   }
   const ids = (imageIds || []).map(Number).filter(Number.isInteger);
   const actor = await getActor();
+  await activity.log('assistant.asked', { details: String(message || '(image)').replace(/<attached_document[\s\S]*$/, '').trim().slice(0, 160) || 'Sent a file', source: 'assistant' }).catch(() => {});
 
   return streamNdjson(req, (emit, signal) =>
     sendMessage({ conversationId: conversationId ? Number(conversationId) : null, text: message || '', imageIds: ids, actor }, emit, signal)

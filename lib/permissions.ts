@@ -7,9 +7,12 @@
 //  analyst  sees and downloads all reports, does all content work, sees AI credits (read only).
 //           Cannot approve strategy, change settings or manage the team.
 //  user     sees the strategy, asks the assistant, and does the manual tasks assigned to them.
+//  tester   for 48 hours: everything an admin can do except managing the team (roles, blocking).
+//           Then the person becomes a user again, unless the admin gives the role again.
 //
 // A blocked person can still look at the dashboard but cannot take any action.
-export const ROLES = ['admin', 'manager', 'analyst', 'user'] as const;
+export const ROLES = ['admin', 'manager', 'analyst', 'user', 'tester'] as const;
+export const TESTER_HOURS = 48;
 export type Role = (typeof ROLES)[number];
 
 export const OWNER_EMAIL = (process.env.ADMIN_EMAIL || 'abhuday@usaindiacfo.com').toLowerCase();
@@ -36,6 +39,7 @@ const CAN: Record<Role, Action[]> = {
   manager: ['credits.view', 'team.view', 'reports.view', 'strategy.approve', 'strategy.edit', 'content.work', 'website.change', 'manual.assign', 'manual.do', 'assistant.ask'],
   analyst: ['credits.view', 'reports.view', 'reports.download', 'content.work', 'website.change', 'manual.do', 'assistant.ask'],
   user: ['manual.do', 'assistant.ask'],
+  tester: ['settings.change', 'credits.view', 'credits.change', 'reports.view', 'reports.download', 'strategy.approve', 'strategy.edit', 'content.work', 'website.change', 'manual.assign', 'manual.do', 'assistant.ask'],
 };
 
 export function can(role: Role | undefined | null, action: Action): boolean {
@@ -47,6 +51,7 @@ export function canBlock(actor: Role, target: Role, targetEmail: string): boolea
   if (targetEmail.toLowerCase() === OWNER_EMAIL || target === 'admin') return false;
   if (actor === 'admin') return true;
   return actor === 'manager' && (target === 'user' || target === 'analyst');
+  // Testers cannot block anyone; only the admin can block a tester.
 }
 
 // The permission an API request needs, from its method and path. null = anyone signed in.

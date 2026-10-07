@@ -3,13 +3,16 @@ import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getMe } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
-import { OWNER_EMAIL, can, canBlock, isRole, type Role } from '@/lib/permissions';
+import { OWNER_EMAIL, TESTER_HOURS, can, canBlock, isRole, type Role } from '@/lib/permissions';
 import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
 
 // The team list (admin and managers).
 export async function GET() {
+  // Reading through memberFor ends any tester role whose 48 hours are over.
+  const { memberFor } = await import('@/lib/team');
+  for (const r of await prisma.team_members.findMany({ where: { role: 'tester' }, select: { email: true } })) await memberFor(r.email);
   const rows = await prisma.team_members.findMany({ orderBy: [{ role: 'asc' }, { email: 'asc' }] });
   return NextResponse.json(rows.map((r) => ({ ...r, owner: r.email === OWNER_EMAIL })));
 }
@@ -37,7 +40,9 @@ export async function POST(req: NextRequest) {
     if (!isRole(role)) return NextResponse.json({ error: 'Role must be admin, manager, analyst or user.' }, { status: 400 });
     if (email === OWNER_EMAIL && role !== 'admin') return NextResponse.json({ error: 'The owner always stays admin.' }, { status: 400 });
     data.role = role;
-    notes.push(`role ${role}`);
+    // Tester lasts 48 hours from now (giving it again renews it); other roles do not expire.
+    data.role_expires_at = role === 'tester' ? new Date(Date.now() + TESTER_HOURS * 3600000).toISOString().slice(0, 19).replace('T', ' ') : null;
+    notes.push(role === 'tester' ? `role tester until ${data.role_expires_at} UTC` : `role ${role}`);
   }
   if (body.name !== undefined && can(me.role, 'team.roles')) data.name = String(body.name).slice(0, 100) || null;
   if (body.blocked !== undefined) {
@@ -48,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   const row = existing
     ? await prisma.team_members.update({ where: { email }, data })
-    : await prisma.team_members.create({ data: { email, role: data.role || 'user', name: data.name || null, blocked: Boolean(data.blocked), updated_by: me.name } });
+    : await prisma.team_members.create({ data: { email, role: data.role || 'user', role_expires_at: data.role_expires_at || null, name: data.name || null, blocked: Boolean(data.blocked), updated_by: me.name } });
   await activity.log('team.changed', { details: `${email}: ${notes.join(', ') || 'updated'}`, actor: me.name });
   return NextResponse.json(row);
 }

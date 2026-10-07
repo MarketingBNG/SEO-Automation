@@ -30,7 +30,11 @@ export const authOptions: NextAuthOptions = {
     },
     // Role and block status travel in the session token, so every request can be checked on the
     // server without a database call. Refreshed whenever the session is read (every minute).
-    async jwt({ token }) {
+    async jwt({ token, account }) {
+      if (account && token.email) {
+        const { default: prisma } = await import('./prisma');
+        await prisma.activity_log.create({ data: { action: 'auth.signed_in', details: 'Signed in with Google', actor: token.name || token.email, actor_email: token.email.toLowerCase(), source: 'dashboard' } }).catch(() => {});
+      }
       if (token.email) {
         const { memberFor } = await import('./team');
         const m = await memberFor(token.email, token.name).catch(() => null);

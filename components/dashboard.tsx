@@ -58,6 +58,7 @@ const HIDDEN: Record<Role, string[]> = {
   admin: [],
   manager: [],
   analyst: ['team'],
+  tester: ['team'],
   user: ['keywords', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
 };
 

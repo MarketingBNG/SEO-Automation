@@ -104,6 +104,7 @@ async function recordChange(conv, toolName, change) {
     entityId: Number(change.targetId) || null,
     details: change.summary,
     actor: `Assistant (approved by ${await getActor()})`,
+    source: 'assistant',
   });
   return Number(r.id);
 }

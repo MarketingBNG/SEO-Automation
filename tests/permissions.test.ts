@@ -52,3 +52,13 @@ test('blocking: admin blocks anyone but the owner; managers block users and anal
   assert.equal(canBlock('manager', 'manager', 'm2@usaindiacfo.com'), false);
   assert.equal(canBlock('analyst', 'user', 'u@usaindiacfo.com'), false);
 });
+
+test('tester: everything except managing the team', () => {
+  assert.equal(allowed('tester', 'POST', '/api/settings'), true);
+  assert.equal(allowed('tester', 'POST', '/api/strategy/5/approve'), true);
+  assert.equal(allowed('tester', 'GET', '/api/performance/download'), true);
+  assert.equal(allowed('tester', 'GET', '/api/team'), false);
+  assert.equal(canBlock('tester', 'user', 'u@usaindiacfo.com'), false);
+  assert.equal(canBlock('admin', 'tester', 't@usaindiacfo.com'), true);
+  assert.equal(canBlock('manager', 'tester', 't@usaindiacfo.com'), false);
+});
