@@ -17,7 +17,7 @@ import { competitorList, detectCompetitors, searchCompetitorsFromSerp } from '..
 import { SAFEGUARDS } from './core';
 import { AUTOMATION, technicalFixesFromCrawl, calendarSlots, parseJson } from './generate';
 import { fixKind } from './fixer';
-import { strategyView, latestCrawl } from './service';
+import { strategyView, latestCrawl, trackStrategyKeywords } from './service';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
 const HOST = () => SITE().replace(/^https?:\/\//, '').replace(/^www\./, '');
@@ -133,6 +133,8 @@ export async function refreshStrategy(id: number, actor: string, { pick = assign
     ? (await prisma.ai_usage.aggregate({ _sum: { cost_usd: true }, where: { id: { gt: lastUsage.id }, feature: 'strategy-refresh' } }))._sum.cost_usd || 0
     : (await prisma.ai_usage.aggregate({ _sum: { cost_usd: true }, where: { feature: 'strategy-refresh' } }))._sum.cost_usd || 0;
 
+  // SE Ranking tracking is brought up to date on every refresh (no credits).
+  if (row.status === 'approved') trackStrategyKeywords(id);
   if (!changes.length) {
     return { view: await strategyView(row), changes, notes: notes.length ? notes : ['Already up to date. Nothing changed.'], cost };
   }

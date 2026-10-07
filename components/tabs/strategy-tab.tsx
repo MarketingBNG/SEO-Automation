@@ -459,6 +459,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
 
       {/* 3 */}
       <Section title="3. Keyword and topic plan" description="Priority score = (Business value x 3) + (Volume score x 2) + (Ease score x 2) + 5 if already ranking 11 to 20. One main keyword per blog, never repeated across months.">
+        {s.seRanking && <TrackingLine t={s.seRanking} />}
         <EditTable
           rows={p.keywords}
           editing={editing}
@@ -646,6 +647,23 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
 
 // The approved month's live blog calendar: fact check, 48-hour review (approve or reject with
 // feedback), auto-publish time, rewrite notes and the author each blog went out under.
+// SE Ranking tracking of this strategy's keywords (synced automatically on approval, edits,
+// refresh and when the page opens).
+function TrackingLine({ t }: { t: any }) {
+  if (t.notConnected) return <p className="mb-2 text-xs text-muted-foreground">SE Ranking is not connected, so these keywords are not tracked yet.</p>;
+  if (t.strategyKeywords === undefined) return <p className="mb-2 text-xs text-muted-foreground">Adding this strategy&apos;s keywords to SE Ranking tracking now. Refresh the page in a minute.</p>;
+  if (t.error) return <p className="mb-2 text-xs text-muted-foreground">SE Ranking tracking could not be checked: {t.error}</p>;
+  const all = t.trackedOfStrategy === t.strategyKeywords;
+  return (
+    <p className={`mb-2 rounded-md border p-2 text-xs ${all ? '' : 'border-amber-500/40 bg-amber-500/10'}`}>
+      <span className="font-medium">SE Ranking tracking: </span>
+      {t.trackedOfStrategy} of {t.strategyKeywords} strategy keywords are tracked. The project tracks {t.totalTracked} keywords in total (most {t.cap}, keeping 500 free). Checked {fmtDate(String(t.checkedAt).slice(0, 19).replace('T', ' '))}.
+      {!all && t.missing?.length > 0 && <> Not tracked yet: {t.missing.join(', ')}.</>}
+      {t.syncing && <> Updating now.</>}
+    </p>
+  );
+}
+
 function MonthRunning() {
   const [data, setData] = useState<any>(null);
   const [msg, setMsg] = useState<string | null>(null);
