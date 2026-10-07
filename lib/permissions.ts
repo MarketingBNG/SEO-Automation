@@ -70,6 +70,7 @@ export function actionFor(method: string, path: string): Action | null {
   }
 
   // Writing
+  if (/^\/api\/seranking\/topup/.test(p)) return 'settings.change';
   if (/^\/api\/assistant\/(chat|upload)/.test(p)) return 'assistant.ask';
   if (/^\/api\/assistant\/(decide|undo)/.test(p)) return 'website.change';
   if (/^\/api\/strategy\/manual|^\/api\/strategy\/backlinks\//.test(p)) return 'manual.do';
@@ -77,7 +78,7 @@ export function actionFor(method: string, path: string): Action | null {
   if (/^\/api\/strategy/.test(p)) return 'strategy.edit';
   if (/^\/api\/ai-credits/.test(p)) return 'credits.change';
   if (/^\/api\/team/.test(p)) return 'team.view'; // finer checks (roles, who can be blocked) in the route
-  if (/^\/api\/(settings|gsc|ga4|gbp|zoho|wordpress|fireflies|bing|surfer\/test|serphouse\/test|seranking\/test|seranking\/topup)/.test(p)) return 'settings.change';
+  if (/^\/api\/(settings|gsc|ga4|gbp|zoho|wordpress|fireflies|bing|surfer\/test|serphouse\/test|seranking\/test)/.test(p)) return 'settings.change';
   return 'content.work';
 }
 
