@@ -551,7 +551,7 @@ export default function SettingsTab() {
         </div>
       )}
       <AiCreditsCard />
-      <Section title="Blog rules" description="Reviewers, calls to action and keyword tracking.">
+      <Section title="Blog rules" description="Calls to action, keyword tracking and lessons learned.">
         <BlogRulesCard canChange={canChange} />
       </Section>
 

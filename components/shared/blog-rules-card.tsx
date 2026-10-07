@@ -1,7 +1,7 @@
 'use client';
 
-// Settings > Blog rules: the CA/CPA reviewers who sign off tax blogs, whether those blogs must wait
-// for them, the call to action for each service, and how many keywords SE Ranking should track.
+// Settings > Blog rules: the call to action for each service, how many keywords SE Ranking should
+// track, and what the dashboard has learned.
 import { useEffect, useState } from 'react';
 import { Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,10 +11,8 @@ import { DEFAULT_CTAS, type ServiceCta } from '@/lib/strategy/core';
 import { StartedCountdown } from './countdown';
 
 export function BlogRulesCard({ canChange }: { canChange: boolean }) {
-  const [reviewers, setReviewers] = useState('');
-  const [requireExpert, setRequireExpert] = useState(true);
   const [ctas, setCtas] = useState<ServiceCta[]>(DEFAULT_CTAS);
-  const [target, setTarget] = useState('400');
+  const [target, setTarget] = useState('1500');
   const [lessons, setLessons] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -44,9 +42,7 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
     fetch('/api/settings')
       .then((r) => r.json())
       .then((s) => {
-        setReviewers(s.expert_reviewers || s.byline_reviewer || '');
-        setRequireExpert(s.require_expert_review !== '0');
-        setTarget(s.tracked_keyword_target || '400');
+        setTarget(s.tracked_keyword_target || '1500');
         setLessons(s.writer_lessons || '');
         try {
           const list = JSON.parse(s.service_ctas || '[]');
@@ -65,7 +61,7 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expert_reviewers: reviewers.trim(), require_expert_review: requireExpert ? '1' : '0', service_ctas: JSON.stringify(ctas), tracked_keyword_target: String(Math.max(20, Math.min(2000, Number(target) || 400))) }),
+        body: JSON.stringify({ service_ctas: JSON.stringify(ctas), tracked_keyword_target: String(Math.max(20, Math.min(5000, Number(target) || 1500))) }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       setMsg('Saved.');
@@ -82,20 +78,10 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
     <Card className="xl:col-span-2">
       <CardHeader>
         <CardTitle>Blog rules</CardTitle>
-        <CardDescription>Who signs off tax blogs, the call to action for each service, and how many keywords are tracked.</CardDescription>
+        <CardDescription>The call to action for each service, how many keywords are tracked, and what the dashboard has learned.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-5 text-sm">
         <fieldset disabled={!canChange} className="grid gap-5">
-          <div className="grid gap-2">
-            <div className="font-semibold">CA/CPA reviewers</div>
-            <p className="text-muted-foreground">One per line, as &quot;Name, credential&quot; (for example &quot;Akshay Nahar, CA&quot;). Their name and the review date appear on every post they approve, with expert schema for Google.</p>
-            <textarea className="min-h-20 rounded-md border bg-background p-2" value={reviewers} onChange={(e) => setReviewers(e.target.value)} placeholder={'Akshay Nahar, CA\nName, CPA'} />
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={requireExpert} onChange={(e) => setRequireExpert(e.target.checked)} />
-              Tax, legal and compliance blogs wait for a reviewer&apos;s approval and never publish on their own
-            </label>
-          </div>
-
           <div className="grid gap-2">
             <div className="font-semibold">Call to action for each service</div>
             <p className="text-muted-foreground">Each blog gets the call to action of the service it is about (matched on the words in &quot;Matches&quot;). The writer turns the idea into a closing line written for that article, and the link carries UTM tags so Zoho shows which blog the lead came from.</p>
@@ -121,9 +107,9 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
 
           <div className="grid gap-2">
             <div className="font-semibold">Keywords tracked in SE Ranking</div>
-            <p className="text-muted-foreground">Every week the dashboard adds the most useful missing keywords (strategy keywords, Search Console queries and keyword research for the US and India) until the project tracks this many. More keywords use more SE Ranking credits.</p>
+            <p className="text-muted-foreground">Every week the dashboard adds up to 500 of the most useful missing keywords until the project tracks this many: strategy keywords and Search Console queries first (no credits), then keyword research for the US and India, which uses SE Ranking API credits only above the reserve kept for blog research. Your plan allows up to 5,000 tracked keywords.</p>
             <div className="flex flex-wrap items-center gap-2">
-              <Input className="h-8 w-32" type="number" min={20} max={2000} value={target} onChange={(e) => setTarget(e.target.value)} />
+              <Input className="h-8 w-32" type="number" min={20} max={5000} value={target} onChange={(e) => setTarget(e.target.value)} />
               <Button size="sm" variant="outline" disabled={!!running} onClick={() => runNow('topup')}>
                 {running === 'topup' && <Loader2 className="animate-spin" />} Add missing keywords now
               </Button>

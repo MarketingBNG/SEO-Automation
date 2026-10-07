@@ -211,21 +211,10 @@ async function main() {
   s = await runDaily(new Date('2026-11-03T04:30:00Z'), { verify: fixingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
   assert.equal(r!.status, 'in_review', 'reviewer still has the rest of the 48 hours');
-  // K2: an FBAR (tax) blog never publishes without a CA/CPA, even after 48 hours; a reminder goes out.
-  s = await runDaily(new Date('2026-11-04T04:40:00Z'), { verify: fixingVerify });
-  r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
-  assert.equal(r!.status, 'in_review', 'tax blog waits for a CA/CPA');
-  assert.ok(r!.reminded_at, 'overdue reminder sent');
-  assert.ok(await prisma.activity_log.findFirst({ where: { action: 'alert.review_overdue' } }));
-  console.log('PASS tax blog not auto-published without a CA/CPA; overdue reminder sent');
-
-  // With the expert rule off, the unreviewed blog is auto-approved after 48 hours.
-  const settingsMod = await import('../lib/settings');
-  await settingsMod.set('require_expert_review', '0');
+  // After 48 hours with no rejection the blog is auto-approved and published (no CA/CPA step).
   s = await runDaily(new Date('2026-11-04T04:45:00Z'), { verify: fixingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
   assert.equal(r!.status, 'published', JSON.stringify({ s, reasons: r!.hold_reasons }));
-  await settingsMod.set('require_expert_review', '1');
   assert.ok(['Harsh Jain', 'Naman Gangwal', 'Amit Agarwal', 'Akshay Nahar'].includes(r!.author!), `author ${r!.author}`);
   assert.ok((await prisma.drafts.findUnique({ where: { id: draft.id } }))!.featured_image_path, 'a cover image was made');
   assert.equal(r!.approval_mode, 'auto');
