@@ -42,6 +42,13 @@ async function tick() {
 
 export function startScheduler() {
   if (process.env.BUILTIN_SCHEDULER === 'off' || globalThis.__seoScheduler) return;
+  // Blog generations run inside this server process; any still marked as running from before a
+  // restart cannot finish, so they are marked failed (with a clear reason) to be generated again.
+  import('./prisma')
+    .then(({ default: prisma }) =>
+      prisma.keywords.updateMany({ where: { status: 'generating' }, data: { status: 'failed', error: 'Interrupted by a server restart or deploy. Click Generate again.', progress_stage: null, progress_percent: null } })
+    )
+    .catch(() => {});
   const run = () => tick().catch((e) => console.error('Scheduler error:', e?.message || e));
   // First run a minute after start, so the server is fully up.
   setTimeout(run, 60 * 1000);

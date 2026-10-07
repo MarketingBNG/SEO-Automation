@@ -86,7 +86,10 @@ export default function KeywordsTab() {
         setMessage('Stopped. The keyword is back in the pending queue.');
         load();
       } else {
-        setMessage('Error: ' + err.message);
+        // The connection dropped, but the blog keeps being written on the server; its progress
+        // shows in the bar at the top of every page and the draft appears in Drafts & Review.
+        setMessage('Lost the live connection, but the blog is still being written on the server. Watch the progress bar at the top; the draft will appear in Drafts & Review.');
+        load();
       }
     } finally {
       setGenerating(false);
@@ -95,7 +98,9 @@ export default function KeywordsTab() {
     }
   }
 
-  function stopGeneration() {
+  async function stopGeneration() {
+    // Stop the run on the server first (it no longer stops just because the page closes).
+    await fetch('/api/generate/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
     abortRef.current?.abort();
   }
 

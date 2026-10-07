@@ -4,6 +4,7 @@ import { researchAndWriteBlog } from '@/lib/anthropic';
 import * as activity from '@/lib/activity';
 import { progressWriter } from '@/lib/strategy/jobs';
 import { methodNotAllowed } from '../_lib/http';
+import { blogRuns } from '@/lib/blogRuns';
 
 // Streams newline-delimited JSON progress events over the same connection instead of a single
 // buffered response, so the UI can show real progress and the user can stop generation by simply
@@ -43,12 +44,10 @@ export async function POST(req: NextRequest) {
 
   if (!keyword) return NextResponse.json({ error: 'No pending keyword found' }, { status: 404 });
 
+  // The run belongs to the server, not to the browser tab: closing the tab, a dropped connection or a
+  // proxy timeout no longer stops it. Only the Stop button (POST /api/generate/stop) does.
   const controller = new AbortController();
-  let finished = false;
-  // The client going away (e.g. the Stop button aborted the fetch) signals stop.
-  req.signal.addEventListener('abort', () => {
-    if (!finished) controller.abort();
-  });
+  blogRuns.set(keyword.id, controller);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -69,11 +68,25 @@ export async function POST(req: NextRequest) {
         const saveProgress = progressWriter((stage, percent) =>
           prisma.keywords.update({ where: { id: keyword.id }, data: { progress_stage: stage, progress_percent: percent } })
         );
+        // Long steps (deep research, fact checks) can take many minutes with no new stage. Every
+        // 20 seconds: keep the connection alive and show the elapsed time, so it never looks stuck.
+        let lastStage = 'Starting…';
+        let lastPercent = 2;
+        let stageSince = Date.now();
+        const beat = setInterval(() => {
+          const mins = Math.floor((Date.now() - stageSince) / 60000);
+          const stage = mins >= 1 ? `${lastStage} (${mins} min so far, still working)` : lastStage;
+          send({ stage, percent: lastPercent });
+          saveProgress(stage, lastPercent);
+        }, 20000);
 
         try {
           const result: any = await researchAndWriteBlog(keyword.keyword, keyword.notes, {
             signal: controller.signal,
             onProgress: (stage: any, percent: any) => {
+              if (stage !== lastStage) stageSince = Date.now();
+              lastStage = stage;
+              lastPercent = percent;
               send({ stage, percent });
               saveProgress(stage, percent);
             },
@@ -155,7 +168,8 @@ export async function POST(req: NextRequest) {
             send({ status: 'error', stage: 'Failed', error: err.message });
           }
         } finally {
-          finished = true;
+          clearInterval(beat);
+          blogRuns.delete(keyword.id);
           if (!closed) {
             closed = true;
             try {
@@ -166,7 +180,7 @@ export async function POST(req: NextRequest) {
       })();
     },
     cancel() {
-      if (!finished) controller.abort();
+      // The browser stopped reading; the run carries on and saves its progress and draft.
     },
   });
 
