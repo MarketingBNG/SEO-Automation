@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
@@ -80,6 +80,14 @@ export default function Dashboard() {
   // The strategy tab mounts on first visit and then stays mounted, so a running generation keeps
   // its progress and Stop button when you look at another tab.
   const [strategyVisited, setStrategyVisited] = useState(initial === 'strategy');
+
+  // Links such as /?tab=drafts from inside a page switch the open page too.
+  const paramTab = params.get('tab');
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isTab(paramTab) && paramTab !== tab) setTabState(paramTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramTab]);
 
   function setTab(next: string) {
     if (!isTab(next)) return;

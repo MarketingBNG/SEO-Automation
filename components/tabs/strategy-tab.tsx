@@ -11,6 +11,7 @@ import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
 import { useManualTasks, ManualTasksBanner, ManualTaskList } from '@/components/shared/manual-tasks';
 import { useRole } from '@/hooks/use-role';
 import { cn } from 'cn';
+import Link from 'next/link';
 
 // Strategy section (v2): one monthly SEO / AEO / GEO strategy in 11 fixed sections, one approval,
 // then the month runs automatically. All UI text avoids em dashes by design.
@@ -136,7 +137,7 @@ function ImplementationStart({ plan, approved, approvedAt }: { plan: any; approv
   const blogDates = sorted((plan.blogPlan?.calendar || []).map((b: any) => b.publishDate));
   const firstBlog = blogDates[0];
   const lastBlog = blogDates[blogDates.length - 1];
-  const firstDraft = firstBlog ? new Date(Date.parse(firstBlog.replace(' ', 'T') + 'Z') - 48 * 3600000).toISOString().slice(0, 19).replace('T', ' ') : null;
+  const firstDraft = firstBlog ? new Date(Date.parse(firstBlog.replace(' ', 'T') + 'Z') - 72 * 3600000).toISOString().slice(0, 19).replace('T', ' ') : null;
   const emailLinks = (plan.backlinks || []).filter((b: any) => !/internal|directory|citation/i.test(b.method || ''));
   const linkDates = sorted(emailLinks.map((b: any) => b.sendDate));
   const day = (d?: string) => (d ? new Date(d.slice(0, 10) + 'T00:00:00Z').toLocaleDateString('en-IN', { dateStyle: 'medium', timeZone: 'UTC' }) : 'not planned');
@@ -147,7 +148,7 @@ function ImplementationStart({ plan, approved, approvedAt }: { plan: any; approv
     { phase: '1. Approval', when: approved ? fmtDate(approvedAt) : 'When you click Approve', what: 'Blog calendar, backlink tasks and ticked fixes are queued. Daily rank checks begin.', why: 'One approval starts everything; nothing runs before it.', time: 'Instant' },
     { phase: '2. Technical fixes', when: `From ${start}, every 15 minutes`, what: `${fixes} ticked fix(es): titles, meta descriptions, broken links, redirects, FAQs`, why: 'Small, safe changes first. Max 5 per run and 20 per day, so the site changes gradually and AI cost is spread out.', time: fixes ? `About ${Math.ceil(fixes / 20)} day(s)` : 'Nothing to fix' },
     { phase: '3. Speed', when: `First run after ${start}, then daily`, what: 'Page cache plugin (if none), then large images to WebP', why: 'No AI credits used. 5 images a day so every change can be checked; the cache is removed again if PageSpeed drops.', time: 'Cache: day 1. Images: 5 a day until done' },
-    { phase: '4. Blogs', when: firstBlog ? `${fmtDate(firstDraft)} to ${fmtDate(lastBlog)}` : 'Per calendar', what: `${blogDates.length} blog(s): deep research draft, fact check until two clean checks, 24-hour review, publish`, why: 'Precision work at full quality, one draft at a time, 48 hours ahead of each slot. Never rushed or batched.', time: blogDates.length ? `${blogDates.length} slot(s) across the 30 days` : '-' },
+    { phase: '4. Blogs', when: firstBlog ? `${fmtDate(firstDraft)} to ${fmtDate(lastBlog)}` : 'Per calendar', what: `${blogDates.length} blog(s): deep research draft, fact check until two clean checks, 48-hour review (approve or reject with feedback), publish under a partner\'s name`, why: 'Precision work at full quality, one draft at a time, written 72 hours ahead of each slot so the manager gets the full 48 hours. Never rushed or batched.', time: blogDates.length ? `${blogDates.length} slot(s) across the 30 days` : '-' },
     { phase: '5. Backlink outreach', when: linkDates.length ? `${day(linkDates[0])} to ${day(linkDates[linkDates.length - 1])}, weekdays` : 'Per send dates', what: `${emailLinks.length} site(s) added to the Smartlead campaign with a personal opening line`, why: 'Max 5 leads a day so outreach never looks like spam; Smartlead spaces the emails and follow-ups.', time: emailLinks.length ? `At least ${Math.ceil(emailLinks.length / 5)} working day(s)` : '-' },
     { phase: '6. Checks', when: 'Daily and every Monday', what: 'Daily rank check (alert on a 5+ drop); weekly plan vs actual; new links verified in SE Ranking', why: 'Catches problems early without extra AI cost.', time: 'Whole 30 days' },
   ];
@@ -480,7 +481,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
       </Section>
 
       {/* 4 */}
-      <Section title="4. Blog plan" description={`${p.blogPlan.newCount} new, ${p.blogPlan.refreshCount} refreshes. Posting days: ${(p.blogPlan.postingDays || []).join(', ')} at ${p.blogPlan.postingTime}. Each blog enters review 24 hours before its slot.`}>
+      <Section title="4. Blog plan" description={`${p.blogPlan.newCount} new, ${p.blogPlan.refreshCount} refreshes. Posting days: ${(p.blogPlan.postingDays || []).join(', ')} at ${p.blogPlan.postingTime}. Each blog enters a 48-hour review before its slot.`}>
         <EditTable
           rows={p.blogPlan.calendar}
           editing={editing}
@@ -643,10 +644,15 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
   );
 }
 
-// The approved month's live blog calendar, with each blog's automatic fact-check result.
+// The approved month's live blog calendar: fact check, 48-hour review (approve or reject with
+// feedback), auto-publish time, rewrite notes and the author each blog went out under.
 function MonthRunning() {
   const [data, setData] = useState<any>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState<number | null>(null);
+  const [feedback, setFeedback] = useState('');
+  const [busy, setBusy] = useState<number | null>(null);
+  const canReview = useRole().can('strategy.approve');
   const load = useCallback(async () => {
     setData(await fetch('/api/strategy/schedule').then((r) => r.json()).catch(() => null));
   }, []);
@@ -655,9 +661,15 @@ function MonthRunning() {
     load();
   }, [load]);
 
-  async function markReviewed(id: number) {
-    const res = await fetch(`/api/strategy/schedule/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reviewed' }) });
-    setMsg(res.ok ? 'Marked as reviewed. The reviewed version publishes at its slot.' : 'Could not mark as reviewed.');
+  async function decide(id: number, action: 'approve' | 'reject') {
+    setBusy(id);
+    const res = await fetch(`/api/strategy/schedule/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback }) });
+    const json = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) return setMsg(json.error || 'Could not save.');
+    setMsg(action === 'approve' ? 'Approved. It publishes at its slot.' : 'Rejected. It will be rewritten with your feedback and come back to you for review, with a note on what changed.');
+    setRejecting(null);
+    setFeedback('');
     load();
   }
 
@@ -670,6 +682,7 @@ function MonthRunning() {
       <span className="font-medium text-red-600 dark:text-red-400">Could not verify every claim ({fc.rounds} rounds). Held.</span>
     );
   };
+  const STATUS: Record<string, string> = { planned: 'Planned', drafting: 'Being written', in_review: 'In review', rejected: 'Rejected, rewrite queued', revising: 'Being rewritten', held: 'Held', published: 'Published', failed: 'Failed' };
 
   if (!data?.rows?.length) return null;
   return (
@@ -677,17 +690,53 @@ function MonthRunning() {
       {msg && <div className="rounded-lg border p-2 text-sm">{msg}</div>}
       <Section
         title="This month's blogs"
-        description="Every blog is fact-checked against official sources automatically: wrong claims are corrected and the blog is checked again until two checks in a row are clean. Blogs enter review 24 hours before their slot; unreviewed blogs are auto-approved and published on schedule. A blog that cannot be fully verified is never published."
+        description="Every blog is fact-checked against official sources automatically. A manager then has 48 hours to approve or reject it. If nobody rejects it, it is approved and published automatically under one of the partners' names, with its image. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
       >
-        <DataTable head={['Slot', 'Title', 'Fact check', 'Status', 'Held because', '']}>
+        <DataTable head={['Slot', 'Title', 'Fact check', 'Status', 'Review', '']}>
           {data.rows.map((r: any) => (
             <tr key={r.id}>
               <td className={TD_MUTED}>{fmtDate(r.publish_at)}</td>
-              <td className={TD}>{r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}</td>
+              <td className={TD}>
+                {r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}
+                {r.author && <div className="text-xs text-muted-foreground">By {r.author}</div>}
+              </td>
               <td className={TD}>{factCheck(r)}</td>
-              <td className={TD}>{r.status}{r.approval_mode ? ` (${r.approval_mode === 'auto' ? 'auto-approved' : `reviewed by ${r.reviewed_by || 'reviewer'}`})` : ''}</td>
-              <td className={TD}>{r.hold_reasons?.length ? <ul className="ml-4 list-disc text-xs">{r.hold_reasons.map((h: string, i: number) => <li key={i}>{h}</li>)}</ul> : ''}</td>
-              <td className={TD}>{r.status === 'in_review' && !r.reviewed_at && <Button size="sm" variant="outline" onClick={() => markReviewed(r.id)}>Mark reviewed</Button>}</td>
+              <td className={TD}>
+                {STATUS[r.status] || r.status}
+                {r.approval_mode ? ` (${r.approval_mode === 'auto' ? 'auto-approved' : `approved by ${r.reviewed_by || 'reviewer'}`})` : ''}
+                {r.hold_reasons?.length > 0 && <ul className="ml-4 list-disc text-xs">{r.hold_reasons.map((h: string, i: number) => <li key={i}>{h}</li>)}</ul>}
+              </td>
+              <td className={TD}>
+                {r.status === 'in_review' && (
+                  <div className="space-y-1 text-xs">
+                    {r.reviewed_at ? <div>Approved by {r.reviewed_by}</div> : r.auto_publish_at && <div className="text-muted-foreground">Auto-publishes {fmtDate(r.auto_publish_at.slice(0, 19).replace('T', ' '))} if nobody rejects it</div>}
+                    {r.revision_note?.length > 0 && (
+                      <details open>
+                        <summary className="cursor-pointer font-medium">Rewrite {r.revisions}: what you asked and what changed</summary>
+                        <ul className="mt-1 ml-4 list-disc">
+                          {r.revision_note.map((n: any, i: number) => <li key={i}><span className="text-muted-foreground">Asked:</span> {n.asked} <br /><span className="text-muted-foreground">Changed:</span> {n.changed}</li>)}
+                        </ul>
+                      </details>
+                    )}
+                    <Link className="underline" href="/?tab=drafts">Read the draft in Drafts &amp; Review</Link>
+                  </div>
+                )}
+                {r.status === 'rejected' && r.reject_feedback && <div className="text-xs text-muted-foreground">Feedback from {r.rejected_by}: {r.reject_feedback}</div>}
+              </td>
+              <td className={TD}>
+                {canReview && r.status === 'in_review' && !r.reviewed_at && (
+                  <div className="flex flex-col gap-1">
+                    <Button size="sm" disabled={busy === r.id} onClick={() => decide(r.id, 'approve')}>Approve</Button>
+                    <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => setRejecting(rejecting === r.id ? null : r.id)}>Reject</Button>
+                  </div>
+                )}
+                {rejecting === r.id && (
+                  <div className="mt-2 w-64 space-y-1">
+                    <textarea className="w-full rounded-md border bg-background p-2 text-xs" rows={4} placeholder="Why are you rejecting it? What should change?" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+                    <Button size="sm" variant="destructive" disabled={busy === r.id || feedback.trim().length < 10} onClick={() => decide(r.id, 'reject')}>Reject and rewrite</Button>
+                  </div>
+                )}
+              </td>
             </tr>
           ))}
         </DataTable>

@@ -95,20 +95,24 @@ test('approve is blocked without a Screaming Frog crawl from the last 7 days', (
   assert.ok(approvalBlockers(goodPlan(), { errors: ['x'], warnings: [], decliningChannels: [] }, { created_at: '2026-10-31 09:00:00' }, now)[0].includes('validation'));
 });
 
-test('24-hour review window: opens 24h before, publishes at the slot', () => {
+test('48-hour review window: approve publishes at the slot, silence publishes after 48 hours, reject waits', () => {
   const row = { status: 'planned', publish_at: '2026-11-03 04:30:00' };
-  assert.equal(scheduleAction(row, new Date('2026-11-01T04:30:00Z')), 'wait');
-  assert.equal(scheduleAction(row, new Date('2026-11-02T04:35:00Z')), 'open_review');
-  assert.equal(scheduleAction(row, new Date('2026-11-02T04:15:00Z')), 'wait');
-  // Nobody reviewed: at the slot the unreviewed blog is published (auto-approved).
-  assert.equal(scheduleAction({ ...row, status: 'in_review' }, new Date('2026-11-03T04:30:00Z')), 'publish');
-  // Never published before its slot.
-  assert.equal(scheduleAction({ ...row, status: 'in_review' }, new Date('2026-11-03T04:15:00Z')), 'wait');
-  // A less frequent scheduler can opt into a grace window.
-  assert.equal(scheduleAction({ ...row, status: 'in_review' }, new Date('2026-11-03T03:50:00Z'), 90), 'publish');
-  // Held blogs are retried every run (they publish once the fact is added).
+  assert.equal(scheduleAction(row, new Date('2026-10-31T04:30:00Z')), 'wait');
+  assert.equal(scheduleAction(row, new Date('2026-11-01T04:35:00Z')), 'open_review', 'opens 48 hours before the slot');
+  const review = { ...row, status: 'in_review', review_started: '2026-11-01 04:35:00' };
+  assert.equal(scheduleAction(review, new Date('2026-11-03T04:15:00Z')), 'wait', 'never before the slot');
+  assert.equal(scheduleAction(review, new Date('2026-11-03T04:40:00Z')), 'publish', 'nobody rejected within 48 hours');
+  // Review opened late (a rewrite): the reviewer still gets 48 hours, so it publishes after the slot.
+  const late = { ...row, status: 'in_review', review_started: '2026-11-02 10:00:00' };
+  assert.equal(scheduleAction(late, new Date('2026-11-03T04:40:00Z')), 'wait');
+  assert.equal(scheduleAction(late, new Date('2026-11-04T10:05:00Z')), 'publish');
+  // Approved by a reviewer: publishes at the slot even if 48 hours have not passed.
+  assert.equal(scheduleAction({ ...late, reviewed_at: '2026-11-02 12:00:00' }, new Date('2026-11-03T04:40:00Z')), 'publish');
+  // Rejected: waits for the rewrite, never publishes on its own.
+  assert.equal(scheduleAction({ ...row, status: 'rejected' }, new Date('2026-11-09T04:30:00Z')), 'wait');
   assert.equal(scheduleAction({ ...row, status: 'held' }, new Date('2026-11-04T04:30:00Z')), 'publish');
   assert.equal(scheduleAction({ ...row, status: 'published' }, new Date('2026-11-04T04:30:00Z')), 'wait');
+  assert.equal(scheduleAction({ ...review, status: 'in_review' }, new Date('2026-11-03T03:50:00Z'), 90), 'publish', 'grace window');
 });
 
 test('every sentence with a tax figure, rate or deadline is found for the fact check', () => {
