@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
+import { actionFor, can, deniedMessage, isRole } from '@/lib/permissions';
 
 // Replaces the old middleware.js Basic Auth: every page and API route needs a signed-in
 // @usaindiacfo.com Google account. Vercel Cron calls carry `Authorization: Bearer CRON_SECRET`.
@@ -21,7 +22,19 @@ export async function proxy(req: NextRequest) {
   const secureCookie =
     (process.env.NEXTAUTH_URL || '').startsWith('https://') || req.headers.get('x-forwarded-proto') === 'https';
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET, secureCookie });
-  if (token) return NextResponse.next();
+  if (token) {
+    // Role rules, checked on the server for every API call (hiding buttons alone is not enough).
+    if (pathname.startsWith('/api/')) {
+      const role = isRole(token.role) ? token.role : 'user';
+      const write = req.method !== 'GET' && req.method !== 'HEAD';
+      if (write && token.blocked) {
+        return NextResponse.json({ error: 'Your account is blocked from taking actions. Ask an admin or your manager.' }, { status: 403 });
+      }
+      const action = actionFor(req.method, pathname);
+      if (action && !can(role, action)) return NextResponse.json({ error: deniedMessage(action) }, { status: 403 });
+    }
+    return NextResponse.next();
+  }
 
   if (pathname.startsWith('/api/')) {
     return NextResponse.json({ error: 'Not signed in' }, { status: 401 });

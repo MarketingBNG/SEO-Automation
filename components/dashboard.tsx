@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
   Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, KeyRound,
-  LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, Sparkles, Users,
+  LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
@@ -29,6 +29,9 @@ import TrainingTab from '@/components/tabs/training-tab';
 import MeetingsTab from '@/components/tabs/meetings-tab';
 import ActivityTab from '@/components/tabs/activity-tab';
 import SettingsTab from '@/components/tabs/settings-tab';
+import TeamTab from '@/components/tabs/team-tab';
+import { useRole } from '@/hooks/use-role';
+import type { Role } from '@/lib/permissions';
 
 // Same 14 tabs, same order and keys as the original dashboard.
 const TABS = [
@@ -45,8 +48,18 @@ const TABS = [
   { key: 'training', label: 'Training', icon: BrainCircuit, group: 'Workspace' },
   { key: 'meetings', label: 'Meetings', icon: Users, group: 'Workspace' },
   { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Workspace' },
+  { key: 'team', label: 'Team', icon: ShieldCheck, group: 'Workspace' },
   { key: 'settings', label: 'Settings', icon: Settings, group: 'Workspace' },
 ] as const;
+
+// Pages each role sees. Users only see the strategy and the assistant; the team page is for admins
+// and managers. (The server enforces the same rules on every action.)
+const HIDDEN: Record<Role, string[]> = {
+  admin: [],
+  manager: [],
+  analyst: ['team'],
+  user: ['keywords', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
+};
 
 type TabKey = (typeof TABS)[number]['key'];
 const GROUPS = ['Content', 'Performance', 'Workspace'] as const;
@@ -83,7 +96,11 @@ export default function Dashboard() {
     setAssistantSeed({ text, nonce: Date.now() });
   }
 
-  const current = TABS.find((t) => t.key === tab)!;
+  const who = useRole();
+  const visible = (key: string) => !HIDDEN[who.role].includes(key);
+  // A page the role cannot see (for example from an old link) falls back to the assistant.
+  const shown: TabKey = who.loaded && !visible(tab) ? 'assistant' : tab;
+  const current = TABS.find((t) => t.key === shown)!;
 
   return (
     <SidebarProvider>
@@ -104,9 +121,9 @@ export default function Dashboard() {
               <SidebarGroupLabel>{g}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {TABS.filter((t) => t.group === g).map((t) => (
+                  {TABS.filter((t) => t.group === g && visible(t.key)).map((t) => (
                     <SidebarMenuItem key={t.key}>
-                      <SidebarMenuButton isActive={tab === t.key} tooltip={t.label} onClick={() => setTab(t.key)}>
+                      <SidebarMenuButton isActive={shown === t.key} tooltip={t.label} onClick={() => setTab(t.key)}>
                         <t.icon />
                         <span>{t.label}</span>
                       </SidebarMenuButton>
@@ -164,28 +181,34 @@ export default function Dashboard() {
         <JobProgress key={`jobs-${reloadKey}`} onOpen={(kind) => setTab(kind === 'strategy' ? 'strategy' : kind === 'settings' ? 'settings' : 'keywords')} />
 
         <main className="min-w-0 flex-1 p-3 sm:p-6">
+          {who.blocked && (
+            <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm font-medium">
+              Your account is blocked from taking actions. You can still look around. Ask an admin or your manager to unblock you.
+            </div>
+          )}
           {/* Kept mounted (just hidden) so a running conversation keeps streaming while you look at other tabs. */}
-          <div className={tab === 'assistant' ? 'block' : 'hidden'}>
+          <div className={shown === 'assistant' ? 'block' : 'hidden'}>
             <AssistantTab seed={assistantSeed} />
           </div>
           {/* Everything except the Assistant reloads when Refresh is pressed. */}
           <div key={`tabs-${reloadKey}`} className="contents">
-          {tab === 'keywords' && <KeywordsTab />}
-          {tab === 'drafts' && <DraftsTab />}
-          {tab === 'audit' && <AuditTab />}
-          {tab === 'renewal' && <RenewalTab />}
-          {(strategyVisited || tab === 'strategy') && (
-            <div className={tab === 'strategy' ? 'block' : 'hidden'}>
-              <StrategyTab active={tab === 'strategy'} />
+          {shown === 'keywords' && <KeywordsTab />}
+          {shown === 'drafts' && <DraftsTab />}
+          {shown === 'audit' && <AuditTab />}
+          {shown === 'renewal' && <RenewalTab />}
+          {(strategyVisited || shown === 'strategy') && (
+            <div className={shown === 'strategy' ? 'block' : 'hidden'}>
+              <StrategyTab active={shown === 'strategy'} />
             </div>
           )}
-          {PERFORMANCE_VIEWS.includes(tab) && (
-            <PerformanceTab key={tab} view={tab as 'overall' | 'seo' | 'aeo' | 'geo'} onOpen={setTab} />
+          {PERFORMANCE_VIEWS.includes(shown) && (
+            <PerformanceTab key={shown} view={shown as 'overall' | 'seo' | 'aeo' | 'geo'} onOpen={setTab} />
           )}
-          {tab === 'training' && <TrainingTab />}
-          {tab === 'meetings' && <MeetingsTab />}
-          {tab === 'activity' && <ActivityTab />}
-          {tab === 'settings' && <SettingsTab />}
+          {shown === 'training' && <TrainingTab />}
+          {shown === 'meetings' && <MeetingsTab />}
+          {shown === 'activity' && <ActivityTab />}
+          {shown === 'settings' && <SettingsTab />}
+          {shown === 'team' && <TeamTab />}
           </div>
         </main>
       </SidebarInset>

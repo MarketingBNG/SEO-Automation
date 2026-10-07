@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ClipboardCheck, Copy, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useRole } from '@/hooks/use-role';
 
 type Guide = {
   summary?: string;
@@ -18,30 +19,37 @@ type Guide = {
   check?: string;
   ifStuck?: string;
 };
-type Task = { kind: 'backlink' | 'fix'; id: number; title: string; detail: string; date: string | null; done: boolean; guide: Guide | null };
+type Task = { kind: 'backlink' | 'fix'; id: number; title: string; detail: string; date: string | null; done: boolean; guide: Guide | null; assignedTo: string | null };
 
 export function useManualTasks(strategyId: number, enabled: boolean) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [team, setTeam] = useState<{ email: string; name: string | null; role: string }[]>([]);
+  const canAssign = useRole().can('manual.assign');
   const load = useCallback(async () => {
     if (!enabled) return;
     const res = await fetch(`/api/strategy/${strategyId}/manual`).catch(() => null);
     const json = res && res.ok ? await res.json() : { tasks: [] };
     setTasks(json.tasks || []);
     setLoaded(true);
-  }, [strategyId, enabled]);
+    if (canAssign) {
+      const t = await fetch('/api/team').catch(() => null);
+      if (t?.ok) setTeam(await t.json());
+    }
+  }, [strategyId, enabled, canAssign]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
-  const act = async (t: Task, action: 'guide' | 'done' | 'undo', regenerate = false) => {
-    const res = await fetch('/api/strategy/manual', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: t.kind, id: t.id, action, regenerate }) });
+  const act = async (t: Task, action: 'guide' | 'done' | 'undo' | 'assign', regenerate = false, email?: string | null) => {
+    const res = await fetch('/api/strategy/manual', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: t.kind, id: t.id, action, regenerate, email }) });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
     if (action === 'guide') setTasks((ts) => ts.map((x) => (x.kind === t.kind && x.id === t.id ? { ...x, guide: json.guide } : x)));
+    else if (action === 'assign') setTasks((ts) => ts.map((x) => (x.kind === t.kind && x.id === t.id ? { ...x, assignedTo: email || null } : x)));
     else setTasks((ts) => ts.map((x) => (x.kind === t.kind && x.id === t.id ? { ...x, done: action === 'done' } : x)));
   };
-  return { tasks, loaded, pending: tasks.filter((t) => !t.done), reload: load, act };
+  return { tasks, loaded, pending: tasks.filter((t) => !t.done), reload: load, act, team, canAssign };
 }
 
 type M = ReturnType<typeof useManualTasks>;
@@ -137,11 +145,11 @@ function TaskRow({ t, m }: { t: Task; m: M }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const run = async (action: 'guide' | 'done' | 'undo', regenerate = false) => {
+  const run = async (action: 'guide' | 'done' | 'undo' | 'assign', regenerate = false, email?: string | null) => {
     setBusy(action);
     setErr(null);
     try {
-      await m.act(t, action, regenerate);
+      await m.act(t, action, regenerate, email);
       if (action === 'guide') setOpen(true);
     } catch (e: any) {
       setErr(e.message);
@@ -158,6 +166,25 @@ function TaskRow({ t, m }: { t: Task; m: M }) {
           <div className="text-xs text-muted-foreground">
             {t.kind === 'fix' ? 'Website fix for a developer or WordPress admin' : 'Profile or listing to create'}
             {t.date ? `, planned ${t.date.slice(0, 10)}` : ''}. {t.detail}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+            {m.canAssign ? (
+              <label className="flex items-center gap-1">
+                <span className="text-muted-foreground">Assigned to</span>
+                <select
+                  className="h-7 rounded-md border bg-background px-1"
+                  value={t.assignedTo || ''}
+                  onChange={(e) => run('assign', false, e.target.value || null)}
+                >
+                  <option value="">Nobody yet</option>
+                  {m.team.map((p) => (
+                    <option key={p.email} value={p.email}>{p.name || p.email} ({p.role})</option>
+                  ))}
+                </select>
+              </label>
+            ) : t.assignedTo ? (
+              <span className="text-muted-foreground">Assigned to {t.assignedTo}</span>
+            ) : null}
           </div>
         </div>
         {t.guide ? (

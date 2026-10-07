@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import { Download, FileSearch, Loader2, Wand2, X } from 'lucide-react';
+import { useRole } from '@/hooks/use-role';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardAction } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -261,6 +262,7 @@ export function WhyTheseChanges({ issues, suggestions, suggestionsLabel }: { iss
 }
 
 export default function AuditTab() {
+  const canDownload = useRole().can('reports.download');
   const [mode, setMode] = useState('upload'); // 'upload' | 'paste' | 'url'
   const [title, setTitle] = useState('');
   const [contentHtml, setContentHtml] = useState('');
@@ -586,9 +588,11 @@ export default function AuditTab() {
                   label={'Google "People also ask" questions (✓ = used in the rewritten FAQ)'}
                 />
                 <div className="mt-2.5">
+                  {canDownload && (
                   <a href={`/api/audit/${open.id}/download`} className={buttonVariants({ variant: 'outline' })}>
                     <Download /> Download as Word (.docx)
                   </a>
+                  )}
                 </div>
                 <RewritePublishControls
                   key={open.id}

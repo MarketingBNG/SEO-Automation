@@ -7,7 +7,8 @@ import { Toaster } from '@/components/ui/sonner';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <SessionProvider>
+    // Refreshed every minute so a new role or a block takes effect quickly.
+    <SessionProvider refetchInterval={60}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         <TooltipProvider>
           {children}

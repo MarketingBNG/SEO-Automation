@@ -375,6 +375,7 @@ model backlink_tasks {
   verified_at   String?
   note          String?
   guide         String? // JSON: step-by-step guide for a person, written on demand
+  assigned_to   String? // email of the person who should do it (manual tasks)
   created_at  String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }
 
@@ -390,6 +391,7 @@ model technical_fix_tasks {
   result      String?
   applied_at  String?
   guide       String? // JSON: step-by-step guide for a person, written on demand
+  assigned_to String? // email of the person who should do it (manual tasks)
   created_at  String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 
   @@index([strategy_id])
@@ -429,4 +431,17 @@ model ai_usage {
   created_at         String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 
   @@index([created_at])
+}
+
+// People who can sign in, their role (admin, manager, analyst, user) and whether they are blocked.
+// Anyone with a company Google account is added as "user" on first sign-in.
+model team_members {
+  id         Int     @id @default(autoincrement())
+  email      String  @unique
+  name       String?
+  role       String  @default("user")
+  blocked    Boolean @default(false)
+  updated_by String?
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  updated_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }
