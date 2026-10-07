@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { JobProgress } from '@/components/shared/job-progress';
+import { PeekingOctopus } from '@/components/shared/peeking-octopus';
 
 import AssistantTab from '@/components/tabs/assistant-tab';
 import KeywordsTab from '@/components/tabs/keywords-tab';
@@ -188,6 +189,8 @@ export default function Dashboard() {
           </div>
         </main>
       </SidebarInset>
+      {/* The assistant's octopus peeks in from a screen edge now and then, on every page. */}
+      {tab !== 'assistant' && <PeekingOctopus onClick={() => setTab('assistant')} />}
     </SidebarProvider>
   );
 }
