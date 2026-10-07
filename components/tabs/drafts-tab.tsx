@@ -115,6 +115,14 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   const [message, setMessage] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [wpStatus, setWpStatus] = useState('draft');
+  const [reviewer, setReviewer] = useState('');
+  const [reviewers, setReviewers] = useState<string[]>([]);
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((s: any) => setReviewers(String(s.expert_reviewers || s.byline_reviewer || '').split(/\n|;/).map((x) => x.trim()).filter(Boolean)))
+      .catch(() => {});
+  }, []);
 
   // resetFields=false refreshes the draft's status, facts and image but keeps whatever is typed in
   // the Title / Meta / Content boxes, so marking a fact or uploading a creative never drops edits.
@@ -230,7 +238,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
       const res = await fetch(`/api/drafts/${draft.id}/publish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wpStatus }),
+        body: JSON.stringify({ wpStatus, reviewer }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
@@ -323,6 +331,18 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           </div>
         )}
 
+        {draft.linkedin_post && (
+          <div>
+            <div className="mb-1 text-sm text-muted-foreground">LinkedIn post for this blog (copy it after publishing; the link is filled in once it is live):</div>
+            <div className={`${PREVIEW_BOX} whitespace-pre-wrap`} style={{ maxHeight: 180 }}>
+              {draft.linkedin_post}
+            </div>
+            <Button size="sm" variant="outline" className="mt-1" onClick={() => navigator.clipboard.writeText(draft.linkedin_post).catch(() => {})}>
+              Copy LinkedIn post
+            </Button>
+          </div>
+        )}
+
         {draft.research_notes && (
           <div>
             <div className="mb-1 text-sm text-muted-foreground">Research notes (for your review only, not published):</div>
@@ -407,6 +427,10 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           <NativeSelect value={wpStatus} onChange={(e) => setWpStatus(e.target.value)}>
             <option value="draft">Send to WordPress as Draft</option>
             <option value="publish">Publish live immediately</option>
+          </NativeSelect>
+          <NativeSelect value={reviewer} onChange={(e) => setReviewer(e.target.value)} aria-label="Reviewed by">
+            <option value="">Reviewed by (CA/CPA, needed for tax topics)</option>
+            {reviewers.map((r) => <option key={r} value={r}>{r}</option>)}
           </NativeSelect>
           <Button onClick={publish} disabled={saving || draft.status !== 'approved' || dirty}>
             <Send />

@@ -51,6 +51,8 @@ model drafts {
   validation_warnings String? // JSON
   people_also_ask     String? // JSON
   keyword_plan        String? // JSON
+  linkedin_post       String? // ready-to-post LinkedIn text for the blog
+  length_target       String? // JSON { min, max, median, basedOn } from the pages ranking now
   keyword             keywords       @relation(fields: [keyword_id], references: [id])
   facts               facts[]
   draft_images        draft_images[]
@@ -326,9 +328,12 @@ model strategy_keywords {
 model verified_facts {
   id          Int     @id @default(autoincrement())
   value       String // the figure as written, e.g. "30%", "April 15", "Rs 7 lakh"
-  claim       String
+  claim       String  @unique
   source_url  String?
   verified_by String?
+  jurisdiction    String?
+  times_used      Int     @default(0)
+  last_checked_at String?
   created_at  String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }
 
@@ -360,6 +365,9 @@ model blog_schedule {
   rejected_by      String?
   revision_note    String? // JSON [{ asked, changed }] shown to the reviewer after a rewrite
   revisions        Int     @default(0)
+  expert_reviewer  String? // the CA/CPA who approved it (tax, legal and compliance topics)
+  reminded_at      String? // last overdue-review reminder
+  cta              String? // JSON { service, text, url } chosen for this blog
   created_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
   updated_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 

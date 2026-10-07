@@ -147,7 +147,7 @@ export default function KeywordsTab() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setMessage(`${json.inserted} keyword(s) added to the pipeline.`);
+      setMessage(`${json.inserted} keyword(s) added to the pipeline.${json.rejected?.length ? ` Not added (duplicate topics): ${json.rejected.join(' ')}` : ''}`);
       setSelectedKeywords(new Set());
       load();
     } catch (err: any) {

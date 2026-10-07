@@ -1,5 +1,6 @@
 'use client';
 
+import { BusinessResults } from '@/components/shared/business-results';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { CartesianGrid, Line, LineChart as ReLineChart, ReferenceLine, XAxis, YAxis } from 'recharts';
 import { Download, Loader2, RefreshCcw } from 'lucide-react';
@@ -373,6 +374,7 @@ export default function PerformanceTab({ view, onOpen }: { view: string; onOpen?
 
       {p && view === 'overall' && (
         <>
+          <BusinessResults days={days} />
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { guideFor, setManualDone, assignTask, assignedTo } from '@/lib/strategy/manual';
+import { timed } from '@/lib/jobTimer';
 import { getMe } from '@/lib/auth';
 import { can } from '@/lib/permissions';
 import { methodNotAllowed } from '../../_lib/http';
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
     if (me.role === 'user' && (await assignedTo(kind, Number(id))) !== me.email) {
       return NextResponse.json({ error: 'This task is not assigned to you.' }, { status: 403 });
     }
-    if (action === 'guide') return NextResponse.json({ guide: await guideFor(kind, Number(id), { regenerate: Boolean(regenerate) }) });
+    if (action === 'guide') return NextResponse.json({ guide: await timed(`guide-${kind}-${id}`, 'guide', 'Writing a step-by-step guide', () => guideFor(kind, Number(id), { regenerate: Boolean(regenerate) })) });
     if (action === 'done' || action === 'undo') return NextResponse.json(await setManualDone(kind, Number(id), action === 'done', me.name));
     return NextResponse.json({ error: 'action must be guide, done, undo or assign' }, { status: 400 });
   } catch (err: any) {

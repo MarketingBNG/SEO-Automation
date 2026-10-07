@@ -157,8 +157,10 @@ export function validatePlan(
   for (const b of blogs) {
     const k = keywordKey(b.mainKeyword);
     if (!k) { errors.push(`Blog "${b.title}" has no main keyword.`); continue; }
-    if (seen.has(k)) errors.push(`Main keyword "${b.mainKeyword}" is used by more than one blog.`);
-    if (usedKeywords.has(k)) errors.push(`Main keyword "${b.mainKeyword}" was already used in an earlier month.`);
+    const twin = [...seen].find((s) => sameTopic(s, k));
+    if (twin) errors.push(`Main keyword "${b.mainKeyword}" repeats the topic "${twin}" of another blog in this plan.`);
+    const used = usedKeywords.has(k) ? k : [...usedKeywords].find((u) => sameTopic(u, k));
+    if (used) errors.push(`Main keyword "${b.mainKeyword}" repeats "${used}", already used in an earlier month or published.`);
     seen.add(k);
   }
 
@@ -218,7 +220,7 @@ export function approvalBlockers(plan: any, validation: ValidationResult | null,
 export const REVIEW_HOURS = 48;
 const toMs = (s: string) => Date.parse(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z'));
 
-type ScheduleRow = { status: string; publish_at: string; review_started?: string | null; reviewed_at?: string | null };
+type ScheduleRow = { status: string; publish_at: string; review_started?: string | null; reviewed_at?: string | null; main_keyword?: string | null; title?: string | null };
 
 // When a blog in review publishes: at its slot if a reviewer approved it; otherwise at its slot or
 // when its 48-hour review window ends, whichever is later, so a reviewer always gets the full 48 hours
@@ -233,12 +235,17 @@ export function autoPublishAt(row: ScheduleRow): number {
 //   open_review: enter the 48-hour review  publish: time to publish  wait: nothing yet
 // Rejected blogs wait for their rewrite (handled separately); they never publish on their own.
 // The scheduler runs every 15 minutes; `graceMinutes` lets a less frequent scheduler publish early.
-export function scheduleAction(row: ScheduleRow, now = new Date(), graceMinutes = 0): 'open_review' | 'publish' | 'wait' {
+// With requireExpert, a tax, legal or compliance blog never publishes on its own: it waits in review
+// until a named CA/CPA reviewer approves it (then it publishes at its slot).
+export function scheduleAction(row: ScheduleRow, now = new Date(), graceMinutes = 0, { requireExpert = false }: { requireExpert?: boolean } = {}): 'open_review' | 'publish' | 'wait' {
   const slot = toMs(row.publish_at);
   const t = now.getTime();
   const grace = graceMinutes * 60000;
   if (['published', 'failed', 'rejected', 'revising'].includes(row.status)) return 'wait';
-  if (row.status === 'in_review') return t >= autoPublishAt(row) - grace ? 'publish' : 'wait';
+  if (row.status === 'in_review') {
+    if (requireExpert && !row.reviewed_at && needsExpertReview(row.main_keyword, row.title)) return 'wait';
+    return t >= autoPublishAt(row) - grace ? 'publish' : 'wait';
+  }
   if (t >= slot - grace && ['held', 'drafting', 'planned'].includes(row.status)) return 'publish';
   if (t >= slot - REVIEW_HOURS * 3600000 - grace && ['planned', 'drafting'].includes(row.status)) return 'open_review';
   return 'wait';
@@ -287,6 +294,7 @@ export function writingRuleIssues({ title, meta, html, surferScore, siteHost }: 
   }
   if (typeof surferScore === 'number' && surferScore < 75) issues.push(`Surfer score is ${surferScore}; it must be 75 or more.`);
   if (/[\u2014]/.test(html + title + meta)) issues.push('Contains an em dash.');
+  issues.push(...aiLeftovers(title, meta, html));
   return issues;
 }
 
@@ -335,4 +343,126 @@ export function windowOf(planOrPeriod: any): StrategyWindow {
   const s = periodStart(period);
   const e = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + 1, 0));
   return { start: ymd(s), end: ymd(e), label: period };
+}
+
+// ---------- Leftover AI text (K1) ----------
+// Lines the writer meant for us, not for readers ("Here is your soft CTA section..."), chat closers,
+// and template placeholders. Any match blocks approval and publishing.
+const AI_LEFTOVER: [RegExp, string][] = [
+  [/\bhere(?:'s| is) (?:your|the) (?:\w+ ){0,4}(?:section|draft|article|blog|post|cta|paragraph|version|faq|outline|intro|conclusion)\b/i, 'an instruction line ("Here is your ...")'],
+  [/\b(?:below|above) is (?:your|the) (?:\w+ ){0,3}(?:section|draft|article|blog|post|cta|version)\b/i, 'an instruction line ("Below is the ...")'],
+  [/\b(?:as an ai|as a language model|i hope this helps|let me know if you(?:'d| would)? like|feel free to (?:adjust|modify|tweak)|i(?:'ve| have) (?:written|drafted|created) (?:the|this|your))\b/i, 'chat text from the AI'],
+  [/\b(?:soft|hard) cta\b|\bcta section\b|\bmeta description:|\bfocus keyword:|\bword count:/i, 'a writing note (CTA section, meta or keyword label)'],
+  [/\[(?:insert|add|your|company|client|name|date|link|todo|tbd|placeholder)[^\]]*\]|\{\{[^}]*\}\}|<<[^>]*>>|\blorem ipsum\b|\bTODO\b|\bTBD\b|\bXX+%/i, 'a placeholder'],
+];
+
+export function aiLeftovers(...texts: (string | null | undefined)[]): string[] {
+  const plain = texts.map((t) => String(t || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')).join('\n');
+  const out: string[] = [];
+  for (const [re, what] of AI_LEFTOVER) {
+    const m = plain.match(re);
+    if (m) out.push(`Remove ${what}: "${m[0].trim().slice(0, 80)}".`);
+  }
+  return out;
+}
+
+// ---------- Expert review (K2, K3) ----------
+// Tax, legal and compliance topics need a named CA/CPA reviewer before they publish.
+const EXPERT_TOPIC = /\b(tax|taxes|taxation|tds|tcs|gst|itr|irs|cbdt|fema|rbi|lrs|fbar|fatca|boi|fincen|dtaa|treaty|section \d|form \d|ein|itin|llc|c-?corp|s-?corp|incorporat|company (?:registration|formation)|us company|subsidiar|entity|odi|fdi|ecb|private limited|pvt ltd|stamp duty|visa|compliance|legal|law|act\b|penalt|audit|nri|oci|repatriat|withholding|dividend|capital gains?|transfer pricing|roc|mca|filing|return|deduction|exemption)/i;
+export const needsExpertReview = (...texts: (string | null | undefined)[]) => EXPERT_TOPIC.test(texts.filter(Boolean).join(' '));
+
+// ---------- Official sources (K4) ----------
+const OFFICIAL_HOST = /(^|\.)((irs|treasury|fincen|ssa|uscis|state|sec|ftc|dol|sba|congress|ecfr|federalregister)\.gov|[a-z.]*\.gov|gov\.in|nic\.in|rbi\.org\.in|sebi\.gov\.in|incometax\.gov\.in|incometaxindia\.gov\.in|cbic-gst\.gov\.in|gst\.gov\.in|mca\.gov\.in|egazette\.gov\.in|indiacode\.nic\.in|oecd\.org|law\.cornell\.edu|uscode\.house\.gov|icai\.org|aicpa\.org)$/i;
+export function isOfficialSource(url: string | null | undefined): boolean {
+  try {
+    return OFFICIAL_HOST.test(new URL(String(url)).hostname.replace(/^www\./, ''));
+  } catch {
+    return false;
+  }
+}
+
+// ---------- Calls to action per service (rule 9, K7) ----------
+export type ServiceCta = { service: string; match: string; text: string; url: string };
+export const DEFAULT_CTAS: ServiceCta[] = [
+  { service: 'ITIN', match: 'itin|w-7|individual taxpayer', text: 'Need an ITIN without mailing your original passport? Our Certified Acceptance Agent team can handle the W-7 for you.', url: 'https://usaindiacfo.com/contact-us/' },
+  { service: 'EIN', match: '\\bein\\b|employer identification|ss-4', text: 'Get your EIN without the back-and-forth with the IRS. Talk to our team about your company.', url: 'https://usaindiacfo.com/contact-us/' },
+  { service: 'US company formation', match: 'llc|c-?corp|delaware|wyoming|incorporat|company (?:registration|formation)|register a (?:us )?company|boi', text: 'Planning a US company from India? Book a call to pick the right state and entity before you file.', url: 'https://usaindiacfo.com/contact-us/' },
+  { service: 'US tax filing', match: '1040|1120|5472|fbar|fatca|us tax return|irs|state tax|sales tax', text: 'Get your US returns and FBAR filed on time by a team that handles both sides of the border.', url: 'https://usaindiacfo.com/contact-us/' },
+  { service: 'NRI and India tax', match: 'nri|itr|tds|dtaa|capital gains|lower deduction|section 197|repatriat|fema|lrs|oci|dividend', text: 'NRI with income or property in India? Talk to our CA team about TDS, DTAA relief and your return.', url: 'https://usaindiacfo.com/contact-us/' },
+  { service: 'GST and India compliance', match: 'gst|roc|mca|india compliance|private limited|pvt ltd', text: 'Keep your Indian entity compliant. Our team handles GST, ROC and annual filings for cross-border groups.', url: 'https://usaindiacfo.com/contact-us/' },
+  { service: 'Virtual CFO', match: 'cfo|bookkeeping|accounting|us gaap|fundrais|valuation|transfer pricing|financial', text: 'Need finance help across the US and India? See how our virtual CFO team works with founders like you.', url: 'https://usaindiacfo.com/contact-us/' },
+];
+
+export function pickCta(ctas: ServiceCta[], ...texts: (string | null | undefined)[]): ServiceCta | null {
+  const hay = texts.filter(Boolean).join(' ').toLowerCase();
+  let best: ServiceCta | null = null;
+  let bestScore = 0;
+  for (const c of ctas) {
+    let re: RegExp;
+    try {
+      re = new RegExp(c.match, 'gi');
+    } catch {
+      continue;
+    }
+    const score = (hay.match(re) || []).length;
+    if (score > bestScore) [best, bestScore] = [c, score];
+  }
+  return best;
+}
+
+// Adds UTM tags so Zoho can show which blog and service a lead came from.
+export function withUtm(url: string, { campaign, content, medium = 'blog' }: { campaign: string; content?: string; medium?: string }): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.set('utm_source', 'usaindiacfo_blog');
+    u.searchParams.set('utm_medium', medium);
+    u.searchParams.set('utm_campaign', campaign);
+    if (content) u.searchParams.set('utm_content', content);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+// ---------- Length fits the topic (rule 8) ----------
+// The target is set from the word counts of the pages that rank now (median, with room either side).
+export function lengthTarget(counts: number[], fallback = 1600): { min: number; max: number; median: number | null; basedOn: number } {
+  const ok = counts.filter((n) => Number.isFinite(n) && n >= 300 && n <= 12000).sort((a, b) => a - b);
+  if (ok.length < 2) return { min: Math.round(fallback * 0.7), max: Math.round(fallback * 1.4), median: null, basedOn: ok.length };
+  const median = ok[Math.floor(ok.length / 2)];
+  return { min: Math.max(600, Math.round(median * 0.8)), max: Math.min(5000, Math.round(median * 1.3)), median, basedOn: ok.length };
+}
+
+// ---------- Duplicate topics (K10) ----------
+const STOP = new Set(['a', 'an', 'the', 'and', 'or', 'for', 'to', 'of', 'in', 'on', 'with', 'from', 'your', 'how', 'what', 'is', 'are', 'vs', 'best', 'guide', '2025', '2026', '2027']);
+const tokens = (s: string) => new Set(keywordKey(s).replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter((w) => w && !STOP.has(w)).map((w) => w.replace(/ies$/, 'y').replace(/(?<=ss)es$/, '').replace(/(?<!s)s$/, '')));
+export function sameTopic(a: string, b: string): boolean {
+  if (keywordKey(a) === keywordKey(b)) return true;
+  const x = tokens(a);
+  const y = tokens(b);
+  if (!x.size || !y.size) return false;
+  const inter = [...x].filter((t) => y.has(t)).length;
+  return inter / new Set([...x, ...y]).size >= 0.75;
+}
+export function duplicateOf(keyword: string, existing: { keyword: string; where: string }[]): { keyword: string; where: string } | null {
+  return existing.find((e) => sameTopic(keyword, e.keyword)) || null;
+}
+
+// ---------- Overdue reviews (K9) ----------
+export function reviewOverdue(row: ScheduleRow, now = new Date()): boolean {
+  return row.status === 'in_review' && !row.reviewed_at && !!row.review_started && now.getTime() > toMs(row.review_started) + REVIEW_HOURS * 3600000;
+}
+
+// ---------- Time left for a running job ----------
+// Blends the job's own pace (time so far / percent done) with how long this kind of job usually
+// takes, so the countdown is sensible both at the start (little pace data) and near the end.
+export function etaSeconds({ elapsed, percent, typical }: { elapsed: number; percent: number; typical: number | null }): number {
+  const p = Math.max(0, Math.min(99, percent || 0));
+  const byPace = p >= 5 ? (elapsed / p) * (100 - p) : null;
+  const byHistory = typical ? Math.max(typical - elapsed, typical * 0.05) : null;
+  if (byPace === null && byHistory === null) return Math.max(60, 600 - elapsed);
+  if (byPace === null) return Math.round(byHistory as number);
+  if (byHistory === null) return Math.round(byPace);
+  const w = p / 100; // trust the pace more as the job goes on
+  return Math.round(byPace * w + (byHistory as number) * (1 - w));
 }

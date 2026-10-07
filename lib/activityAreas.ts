@@ -26,6 +26,10 @@ export const AREAS: Record<string, string> = {
   serphouse: 'Settings and connections',
   research: 'Research',
   notify: 'Alerts',
+  alert: 'Alerts',
+  check: 'Alerts',
+  lessons: 'Training',
+  seranking: 'Settings and connections',
   wordpress_plugin: 'Website',
 };
 export const areaOf = (action: string) => AREAS[action.split('.')[0]] || 'Other';

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
+import { existingTopics, duplicateReason } from '@/lib/duplicates';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../../_lib/http';
 
@@ -19,6 +20,16 @@ export async function POST(req: NextRequest) {
     data.push({ batch_name: batchName || 'SE Ranking research', keyword, notes: row.notes || '', status: 'pending' });
   }
   // Was a db.transaction of single INSERTs; createMany is one atomic statement that keeps insert order.
+  // K10: duplicate topics are rejected with a reason before they enter the pipeline.
+  const known = await existingTopics();
+  const rejected: string[] = [];
+  for (let i = data.length - 1; i >= 0; i--) {
+    const why = await duplicateReason(data[i].keyword, [...known, ...data.slice(0, i).map((d) => ({ keyword: d.keyword, where: 'repeated in this list' }))]);
+    if (why) {
+      rejected.unshift(why);
+      data.splice(i, 1);
+    }
+  }
   if (data.length) await prisma.keywords.createMany({ data });
   const inserted = data.length;
 
@@ -28,6 +39,6 @@ export async function POST(req: NextRequest) {
     actor: await getActor(),
   });
 
-  return NextResponse.json({ inserted }, { status: 200 });
+  return NextResponse.json({ inserted, rejected }, { status: 200 });
 }
 export { methodNotAllowed as GET, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

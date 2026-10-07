@@ -8,6 +8,7 @@ import { ClipboardCheck, Copy, ExternalLink, Loader2, RefreshCw } from 'lucide-r
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useRole } from '@/hooks/use-role';
+import { StartedCountdown } from './countdown';
 
 type Guide = {
   summary?: string;
@@ -195,7 +196,11 @@ function TaskRow({ t, m }: { t: Task; m: M }) {
           </Button>
         )}
       </div>
-      {busy === 'guide' && <p className="text-xs text-muted-foreground">Writing the guide (checks the official site and our website, about 1 minute)...</p>}
+      {busy === 'guide' && (
+        <p className="text-xs text-muted-foreground">
+          Writing the guide (checks the official site and our website): <StartedCountdown seconds={75} />
+        </p>
+      )}
       {err && <p className="text-xs text-red-500">{err}</p>}
       {open && t.guide && (
         <>

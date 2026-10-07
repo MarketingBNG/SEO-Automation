@@ -10,6 +10,16 @@ export const DEFAULTS: Record<string, string> = {
   byline_reviewer: '',
   cta_text: 'Talk to the USAIndiaCFO cross-border team about your situation',
   cta_url: 'https://usaindiacfo.com/contact-us/',
+  // Tax, legal and compliance blogs wait for a named CA/CPA reviewer instead of publishing on their own.
+  require_expert_review: '1',
+  // One reviewer per line: "Name, credential" (for example "Akshay Nahar, CA").
+  expert_reviewers: '',
+  // JSON list of { service, match (regex), text, url }; empty means the built-in list in strategy/core.
+  service_ctas: '',
+  // How many keywords SE Ranking should track (US and India); the weekly job tops the project up.
+  tracked_keyword_target: '400',
+  // Lessons the dashboard learned from reviews, holds, corrections and results (written weekly).
+  writer_lessons: '',
 };
 
 export async function get(key) {

@@ -108,4 +108,4 @@ async function getLeadSourceBreakdown() {
   };
 }
 
-export { testConnection, getPipelineSummary, getLeadSourceBreakdown };
+export { testConnection, getPipelineSummary, getLeadSourceBreakdown, zohoGet };

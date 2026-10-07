@@ -153,6 +153,24 @@ async function addTrackedKeyword(keyword: string) {
   return true;
 }
 
+// Adds many keywords to rank tracking in the first project, 50 per request.
+async function addTrackedKeywords(keywords: string[]) {
+  const sites: any = await listSites();
+  if (!sites?.length) throw new Error('No SE Ranking project found');
+  let added = 0;
+  for (let i = 0; i < keywords.length; i += 50) {
+    const batch = keywords.slice(i, i + 50);
+    const res = await throttledFetch(`${BASE_URL}/project-management/sites/${sites[0].id}/keywords`, {
+      method: 'POST',
+      headers: { Authorization: `Token ${getApiKey()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keywords: batch.map((keyword) => ({ keyword })) }),
+    });
+    if (!res.ok) throw new Error(`SE Ranking add keywords failed after ${added} (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    added += batch.length;
+  }
+  return added;
+}
+
 // ---------- AI visibility (GEO / AEO). Paths and fields follow SE Ranking's own n8n integration
 // (github.com/seranking/n8n-nodes-seranking). ----------
 
@@ -195,6 +213,6 @@ async function getAiTrackerPresence(siteId: number, llmId: number, dateFrom: str
 }
 
 export {
-  getSubscription, listSites, getSiteRankings, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword,
+  getSubscription, listSites, getSiteRankings, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword, addTrackedKeywords,
   getAiSearchOverview, listAiTrackerEngines, getAiTrackerStatistics, getAiTrackerPresence,
 };

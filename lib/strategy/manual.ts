@@ -101,7 +101,8 @@ export async function guideFor(kind: string, id: number, { regenerate = false, w
     kind === 'backlink'
       ? `Task: ${row.method}. Target: ${row.target_site}. Our page to link to: ${row.our_page || SITE()}.`
       : `Task: ${row.issue} on ${row.url}. Suggested fix: ${row.fix}. Why it was not done automatically: ${row.result || 'needs a person'}.`;
-  const { text } = await write(guidePrompt(kind), [{ role: 'user', content: task }], undefined, { maxUses: 8, effort: 'medium', feature: 'manual-guide' });
+  const { lessonsBlock } = await import('../lessons');
+  const { text } = await write(guidePrompt(kind) + (await lessonsBlock()), [{ role: 'user', content: task }], undefined, { maxUses: 8, effort: 'medium', feature: 'manual-guide' });
   const guide = parseJson(text);
   if (!guide || !Array.isArray(guide.steps)) throw new Error('Could not write the guide. Try again.');
   const json = JSON.stringify(guide).replace(/—/g, ',');

@@ -11,6 +11,7 @@ import * as activity from '../activity';
 import { generateStrategy } from './generate';
 import { strategyWindow, type StrategyWindow } from './core';
 import { assertCredits } from '../aiCredits';
+import { recordDuration } from '../jobTimer';
 
 // Writes progress at most every 2 seconds (and always for 100%).
 export function progressWriter(write: (stage: string, percent: number) => Promise<unknown>) {
@@ -31,6 +32,9 @@ const ACTIVE = ['generating', 'paused', 'stopping'];
 // every route (each may load its own copy of this module) sees the same list.
 const g = globalThis as unknown as { __strategyRuns?: Map<number, AbortController> };
 const running = (g.__strategyRuns ||= new Map<number, AbortController>());
+// When each run started in this server process (for the time-left estimate).
+const gs = globalThis as unknown as { __strategyStarted?: Map<number, number> };
+export const strategyStarted = (gs.__strategyStarted ||= new Map<number, number>());
 
 const stopError = () => Object.assign(new Error('Stopped by user'), { name: 'AbortError' });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -49,11 +53,14 @@ async function checkpointFor(id: number, controller: AbortController) {
 function run(id: number, window: StrategyWindow, actor: string) {
   const controller = new AbortController();
   running.set(id, controller);
+  strategyStarted.set(id, Date.now());
   const onProgress = progressWriter((stage, percent) =>
     prisma.seo_strategies.updateMany({ where: { id, status: { in: ['generating', 'paused'] } }, data: { progress_stage: stage, progress_percent: percent } })
   );
   // Detached on purpose: the self-hosted server keeps running it after the request returns.
+  const began = Date.now();
   void generateStrategy({ window, actor, rowId: id, onProgress, signal: controller.signal, checkpoint: () => checkpointFor(id, controller) })
+    .then(() => recordDuration('strategy', (Date.now() - began) / 1000))
     .catch(async (err: any) => {
       // Credits ran low: keep the run paused (not failed) so Resume starts it again after a top-up.
       if (err?.name === 'CreditPausedError' || /out of credit|credit balance is too low/i.test(err?.message || '')) {

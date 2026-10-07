@@ -5,6 +5,10 @@ import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
 import { methodNotAllowed, toId } from '../../../_lib/http';
+import { aiLeftovers, needsExpertReview, faqSchema } from '@/lib/strategy/core';
+import { CREDENTIAL, expertReviewers, requireExpert } from '@/lib/reviewers';
+import { withByline, expertSchema } from '@/lib/byline';
+import { authorNames, pickAuthor, wpAuthorId } from '@/lib/authors';
 
 export const runtime = 'nodejs';
 
@@ -21,8 +25,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'The draft still has a reviewer placeholder ([AUTHOR NAME], [REVIEWER NAME], [PRACTITIONER NOTE NEEDED], [VISUAL SUGGESTION] or [VERIFY]). Replace or remove it before publishing.' }, { status: 400 });
   }
 
+  const leftovers = aiLeftovers(draft.title, draft.meta_description, draft.content_html);
+  if (leftovers.length) return NextResponse.json({ error: `Remove the AI notes first. ${leftovers.join(' ')}` }, { status: 400 });
+
   const body: any = await req.json().catch(() => ({}));
   const wpStatus = (body && body.wpStatus) || 'draft'; // 'draft' or 'publish'
+  const reviewer = String(body?.reviewer || '').trim();
+  const kw = (await prisma.keywords.findUnique({ where: { id: draft.keyword_id }, select: { keyword: true } }))?.keyword;
+  if (wpStatus === 'publish' && (await requireExpert()) && needsExpertReview(kw, draft.title)) {
+    const known = await expertReviewers();
+    if (!reviewer || (!known.includes(reviewer) && !CREDENTIAL.test(reviewer))) {
+      return NextResponse.json({ error: 'This is a tax, legal or compliance blog. Name the CA/CPA who reviewed it (Settings > Blog rules lists them) before it goes live.', reviewers: known }, { status: 400 });
+    }
+  }
 
   try {
     let featuredMediaId;
@@ -30,10 +45,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       featuredMediaId = await uploadFeaturedImage(draft.featured_image_path);
     }
 
-    const keyword = (await prisma.keywords.findUnique({ where: { id: draft.keyword_id }, select: { keyword: true } }))?.keyword;
+    const keyword = kw;
+    const author = pickAuthor(await authorNames());
+    const authorId = await wpAuthorId(author).catch(() => null);
+    const contentHtml = `${withByline(draft.content_html, author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null }) || ''}`;
     const post: any = await publishPost({
       title: draft.title,
-      contentHtml: draft.content_html,
+      contentHtml,
+      author: authorId || undefined,
       excerpt: draft.meta_description,
       featuredMediaId,
       status: wpStatus,

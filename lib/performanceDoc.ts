@@ -47,11 +47,20 @@ const fmt = (n, unit) => `${Number(n).toLocaleString('en-US')}${unit || ''}`;
 const kpiTable = (kpis) => table(['Measure', 'Now', 'Before', 'Change', 'Note'], kpis.map((k) => [k.label, fmt(k.now, k.unit), fmt(k.before, k.unit), changeText(k), k.note]));
 const bullets = (a) => (a.length ? `<ul>${a.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
 
-async function renderPerformanceHtml(p) {
+async function renderPerformanceHtml(p, business: any = null) {
   const L = p.seo.series.labels || [];
   const out: any[] = [];
   out.push('<h1>SEO, AEO and GEO performance report</h1>');
   out.push(`<p>Period: ${esc(p.ranges.current.startDate)} to ${esc(p.ranges.current.endDate)}, compared with ${esc(p.ranges.previous.startDate)} to ${esc(p.ranges.previous.endDate)}. Generated ${esc(p.generatedAt.slice(0, 10))}.</p>`);
+  // K12: the report starts with business results (Zoho), when Zoho is connected.
+  if (business && !business.error) {
+    const t = business.totals;
+    out.push(`<h2>Business results from content (last ${business.days} days)</h2>`);
+    out.push(table(['Organic leads', 'Consults', 'Signed clients', 'Signed value'], [[t.leads, t.consults, t.signed, t.value ? `$${Math.round(t.value).toLocaleString('en-US')}` : '-']]));
+    if (business.services.length) out.push('<h3>By service</h3>' + table(['Service', 'Leads', 'Consults', 'Signed'], business.services.map((s) => [s.service, s.leads, s.consults, s.signed])));
+    if (business.topics.length) out.push('<h3>By blog topic</h3>' + table(['Blog', 'Service', 'Leads', 'Consults', 'Signed'], business.topics.slice(0, 15).map((x) => [x.title, x.service, x.leads, x.consults, x.signed])));
+    out.push(`<p>${business.trackedShare}% of these leads have the source page recorded in Zoho.</p>`);
+  }
   out.push('<h2>Overall</h2>');
   out.push(table(['Area', 'Status', 'Summary'], p.overall.items.map((i) => [i.pillar, STATUS[i.status], i.headline])));
   if (p.dataNotes.length) out.push('<h3>Read this before reacting to a number</h3>' + bullets(p.dataNotes));

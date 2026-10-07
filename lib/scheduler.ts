@@ -29,6 +29,18 @@ async function tick() {
     if (!r?.error) await settings.set('last_weekly_run', today);
   }
 
+  // Weekly: keep the tracked keywords topped up, and learn from the week's reviews and results.
+  if (now.getUTCDay() === 1 && (await settings.get('last_keyword_topup')) !== today) {
+    const { topUpTrackedKeywords } = await import('./keywordTracking');
+    await topUpTrackedKeywords().catch((e: any) => console.error('Scheduler: keyword top-up failed:', e.message));
+    await settings.set('last_keyword_topup', today);
+  }
+  if (now.getUTCDay() === 1 && (await settings.get('last_lessons_run')) !== today) {
+    const { learnLessons } = await import('./lessons');
+    await learnLessons().catch((e: any) => console.error('Scheduler: lessons failed:', e.message));
+    await settings.set('last_lessons_run', today);
+  }
+
   if ((await settings.get('last_strategy_check')) !== today) {
     const soon = new Date(now.getTime() + 3 * 86400000).toISOString().slice(0, 10);
     const covering = await prisma.seo_strategies.findFirst({
