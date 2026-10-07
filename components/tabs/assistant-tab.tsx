@@ -487,8 +487,7 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4" ref={scrollRef}>
           {!conv && live.length === 0 && (
             <div className="mx-auto my-auto max-w-2xl py-8 text-center">
-              <Octopus mood="wave" size={128} className="mx-auto" />
-              <h3 className="mt-2 text-xl font-semibold">{firstName ? `Hi ${firstName}! What should we work on?` : 'Hi! What should we work on?'}</h3>
+              <h3 className="text-xl font-semibold">{firstName ? `Hi ${firstName}! What should we work on?` : 'Hi! What should we work on?'}</h3>
               <p className="mt-2 text-sm text-muted-foreground">
                 Ask about your SEO data, or tell me what to change on usaindiacfo.com. Anything that changes the
                 website waits for your approval first, and every change can be undone.

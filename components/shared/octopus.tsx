@@ -1,25 +1,23 @@
 'use client';
 
-// The assistant's face: short looping pixel-octopus clips. The clips have a white background, which
-// "multiply" hides on light themes; on dark themes the clip is inverted (white octopus, black
-// background) and "screen" hides the black.
+// The assistant's face: short looping pixel-octopus animations (animated WebP with a transparent
+// background, so the dashboard's own background shows through). On dark themes the colours are
+// inverted, so the octopus is white on the dark background.
 export type OctopusMood = 'wave' | 'peek' | 'search' | 'search-bubble' | 'thinking';
 
-export function Octopus({ mood, size = 120, className = '', loop = true, onEnded }: { mood: OctopusMood; size?: number; className?: string; loop?: boolean; onEnded?: () => void }) {
+export function Octopus({ mood, size = 120, className = '', style }: { mood: OctopusMood; size?: number; className?: string; style?: React.CSSProperties }) {
   return (
-    <video
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
       key={mood}
-      src={`/assistant/${mood}.mp4`}
+      src={`/assistant/${mood}.webp`}
       width={size}
       height={size}
-      autoPlay
-      muted
-      playsInline
-      loop={loop}
-      onEnded={onEnded}
+      alt=""
       aria-hidden="true"
-      className={`pointer-events-none select-none mix-blend-multiply [image-rendering:pixelated] dark:mix-blend-screen dark:invert ${className}`}
-      style={{ width: size, height: size }}
+      draggable={false}
+      className={`pointer-events-none select-none [image-rendering:pixelated] dark:invert ${className}`}
+      style={{ width: size, height: size, ...style }}
     />
   );
 }
