@@ -8,7 +8,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { renderMarkdown } from '@/components/shared/article';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { cn } from 'cn';
+import { useSession } from 'next-auth/react';
+import { Octopus, type OctopusMood } from '@/components/shared/octopus';
 
+// The welcome screen shows 4 of these at random each time.
 const ASSISTANT_SUGGESTIONS = [
   'Optimize a blog for SEO: I will paste it in my next message',
   'Add a banner to the homepage (I will attach the image)',
@@ -16,7 +19,18 @@ const ASSISTANT_SUGGESTIONS = [
   'Which pages get impressions but very few clicks?',
   'Check the alt text of images on my latest blog post',
   'What changes have you made to the website so far?',
+  'Show me today\'s keyword rankings',
+  'Which blogs will be published this week?',
+  'Which keywords dropped in ranking this week?',
+  'How much of this month\'s strategy is done?',
+  'Which pages are getting traffic from ChatGPT or other AI assistants?',
+  'Which of my pages load slowly on mobile?',
+  'Compare this month\'s organic clicks with last month',
+  'Which blog posts are good candidates for a refresh?',
+  'Find pages with a missing or duplicate meta description',
+  'How many leads came from organic search this month?',
 ];
+const pickSuggestions = (n = 4) => [...ASSISTANT_SUGGESTIONS].sort(() => Math.random() - 0.5).slice(0, n);
 
 // Same statuses as the old text icons (… ✓ ✕ ⊘ •), drawn with lucide icons.
 function ToolStatusIcon({ status }: { status: string }) {
@@ -28,7 +42,12 @@ function ToolStatusIcon({ status }: { status: string }) {
 }
 
 const MD_CLASSES =
-  '[&_p]:my-1.5 [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_h4]:mt-3 [&_h4]:mb-1 [&_h4]:font-semibold [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em]';
+  'leading-relaxed [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 ' +
+  '[&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-base [&_h3]:font-semibold [&_h4]:mt-3 [&_h4]:mb-1 [&_h4]:font-semibold [&_h3:first-child]:mt-0 [&_h4:first-child]:mt-0 ' +
+  '[&_a]:text-primary [&_a]:underline [&_strong]:font-semibold [&_hr]:my-3 [&_hr]:border-border ' +
+  '[&_blockquote]:my-2 [&_blockquote]:border-l-4 [&_blockquote]:border-primary/40 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground ' +
+  '[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs [&_th]:border [&_th]:bg-muted [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_.md-table]:overflow-x-auto ' +
+  '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em]';
 
 export function PreviewView({ preview }: { preview: any }) {
   if (!preview) return null;
@@ -88,6 +107,11 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<any[]>([]);
   const [running, setRunning] = useState(false);
+  const { data: session } = useSession();
+  const firstName = String(session?.user?.name || '').trim().split(/\s+/)[0] || '';
+  // Picked after mount so the server and browser render the same first frame.
+  const [suggestions, setSuggestions] = useState<string[]>(ASSISTANT_SUGGESTIONS.slice(0, 4));
+  const [waved, setWaved] = useState(false);
   const [live, setLive] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [decisions, setDecisions] = useState<Record<string, any>>({});
@@ -95,6 +119,12 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const [files, setFiles] = useState<any[]>([]);
+  const loadFiles = useCallback(async () => {
+    const res = await fetch('/api/assistant/files').catch(() => null);
+    if (res?.ok) setFiles(await res.json());
+  }, []);
 
   const loadList = useCallback(async () => {
     const res = await fetch('/api/assistant/conversations');
@@ -110,6 +140,11 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
     // eslint-disable-next-line react-hooks/set-state-in-effect -- same effect as the old app
     loadList();
   }, [loadList]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- random pick must happen in the browser
+    setSuggestions(pickSuggestions());
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -235,7 +270,7 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
     const docs = attachments.filter((a) => a.kind === 'document');
     if (!text && !images.length && !docs.length) return;
     const docText = docs
-      .map((d) => `<attached_document name="${d.filename.replace(/"/g, '')}">\n${d.html}\n</attached_document>`)
+      .map((d) => `<attached_document name="${d.filename.replace(/"/g, '')}"${d.fileId ? ` file_id="${d.fileId}"` : ''}>\n${d.html}\n</attached_document>`)
       .join('\n\n');
     setInput('');
     setAttachments([]);
@@ -247,7 +282,7 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
         message: [text, docText].filter(Boolean).join('\n\n'),
         imageIds: images.map((a) => a.id),
       },
-      { kind: 'user', text: [text, ...docs.map((d) => `[Attached: ${d.filename}]`)].filter(Boolean).join('\n'), images: images.map((a) => a.url) }
+      { kind: 'user', text, images: images.map((a) => a.url), files: docs.map((d) => ({ name: d.filename, url: d.fileUrl })) }
     );
   }
 
@@ -329,6 +364,10 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
 
   const changesById = Object.fromEntries((conv?.changes || []).map((c: any) => [c.id, c]));
   const items = conv?.items || [];
+  // Searching while a tool (data lookup) is running, thinking while writing the answer.
+  const lastLive = live[live.length - 1];
+  const toolCount = live.filter((x) => x.kind === 'tool').length;
+  const workingMood: OctopusMood = lastLive?.kind === 'tool' && lastLive.status === 'running' ? (toolCount % 2 ? 'search' : 'search-bubble') : 'thinking';
   const pending = !running && conv?.status === 'awaiting_approval' ? conv.pending || [] : [];
 
   function renderItem(item: any, key: string) {
@@ -341,6 +380,19 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
               {item.images.map((src: string, i: number) => <img key={i} src={src} alt="Attached" className="max-h-40 rounded-lg" />)}
             </div>
           )}
+          {item.files?.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {item.files.map((f: any, i: number) =>
+                f.url ? (
+                  <a key={i} href={f.url} download={f.name} className="inline-flex items-center gap-1.5 rounded-md bg-primary-foreground/15 px-2 py-1 text-xs underline-offset-2 hover:underline">
+                    <FileText className="size-3.5" />{f.name}
+                  </a>
+                ) : (
+                  <span key={i} className="inline-flex items-center gap-1.5 rounded-md bg-primary-foreground/15 px-2 py-1 text-xs"><FileText className="size-3.5" />{f.name}</span>
+                ),
+              )}
+            </div>
+          )}
           {item.text && <div className="whitespace-pre-wrap break-words">{item.text}</div>}
         </div>
       );
@@ -349,7 +401,7 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
       return (
         <div
           key={key}
-          className={cn('max-w-[92%] rounded-2xl rounded-bl-sm border bg-muted/40 px-4 py-2.5 text-sm break-words', MD_CLASSES)}
+          className={cn('max-w-[92%] rounded-2xl rounded-bl-sm border bg-background px-5 py-3.5 text-sm shadow-sm break-words', MD_CLASSES)}
           dangerouslySetInnerHTML={{ __html: renderMarkdown(item.text) }}
         />
       );
@@ -401,11 +453,28 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
               title={c.title}
             >
               {c.status === 'awaiting_approval' && <span className="size-2 shrink-0 rounded-full bg-amber-500" title="Waiting for your approval" />}
-              <span className="truncate">{c.title || 'Untitled'}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{c.title || 'Untitled'}</span>
+                <span className="block truncate text-[11px] font-normal text-muted-foreground">
+                  {[c.created_by, c.updated_at ? new Date(String(c.updated_at).replace(' ', 'T') + 'Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ')}
+                </span>
+              </span>
             </button>
           ))}
           {conversations.length === 0 && <p className="px-2 text-sm text-muted-foreground">No conversations yet.</p>}
         </div>
+        <details className="rounded-md border p-2 text-sm" onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && loadFiles()}>
+          <summary className="cursor-pointer font-medium">Uploaded files</summary>
+          <div className="mt-2 flex max-h-56 flex-col gap-1 overflow-y-auto">
+            {files.map((f) => (
+              <a key={f.id} href={f.url} target="_blank" rel="noreferrer" download={f.kind === 'document' ? f.filename : undefined} className="rounded px-1.5 py-1 hover:bg-muted" title={f.filename}>
+                <span className="flex items-center gap-1.5 truncate"><FileText className="size-3.5 shrink-0" />{f.filename}</span>
+                <span className="block truncate pl-5 text-[11px] text-muted-foreground">{[f.uploaded_by, String(f.created_at || '').slice(0, 10)].filter(Boolean).join(' · ')}</span>
+              </a>
+            ))}
+            {files.length === 0 && <p className="text-xs text-muted-foreground">No files yet.</p>}
+          </div>
+        </details>
       </aside>
 
       <section
@@ -419,13 +488,14 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4" ref={scrollRef}>
           {!conv && live.length === 0 && (
             <div className="mx-auto my-auto max-w-2xl py-8 text-center">
-              <h3 className="text-xl font-semibold">What should we work on?</h3>
+              <Octopus mood={waved ? 'peek' : 'wave'} loop={waved} onEnded={() => setWaved(true)} size={128} className="mx-auto" />
+              <h3 className="mt-2 text-xl font-semibold">{firstName ? `Hi ${firstName}! What should we work on?` : 'Hi! What should we work on?'}</h3>
               <p className="mt-2 text-sm text-muted-foreground">
                 Ask about your SEO data, or tell me what to change on usaindiacfo.com. Anything that changes the
                 website waits for your approval first, and every change can be undone.
               </p>
               <div className="mt-6 grid gap-2 sm:grid-cols-2">
-                {ASSISTANT_SUGGESTIONS.map((s) => (
+                {suggestions.map((s) => (
                   <button
                     type="button"
                     key={s}
@@ -442,8 +512,8 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
           {live.map((item, i) => renderItem(item, `l${i}`))}
           {running && (
             <div className="flex items-center gap-2 pl-1 text-xs text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
-              Working
+              <Octopus mood={workingMood} size={44} />
+              {workingMood === 'thinking' ? 'Thinking' : 'Looking it up'}
             </div>
           )}
 

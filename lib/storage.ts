@@ -25,6 +25,7 @@ const MIME: Record<string, string> = {
   '.png': 'image/png',
   '.webp': 'image/webp',
   '.gif': 'image/gif',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 };
 
 export function mimeFor(key: string): string {
