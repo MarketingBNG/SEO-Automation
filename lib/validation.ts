@@ -352,6 +352,8 @@ async function validateDraft({ title, meta, content, facts, keyword, paaQuestion
     } else if (missing.length) {
       warnings.push(`Planned secondary keyword(s) not in the article: ${missing.map(hint).join(', ')}.`);
     }
+    const trackedMissing = (cov.tracked || []).filter((t) => t.status === 'missing');
+    if (trackedMissing.length) warnings.push(`Keyword(s) we track in SE Ranking not in the article: ${trackedMissing.map((t) => `"${t.keyword}"`).join(', ')}. Use each once where it fits.`);
   }
 
   if (!facts || facts.length === 0) {

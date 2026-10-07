@@ -56,7 +56,7 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ service_ctas: JSON.stringify(ctas), tracked_keyword_target: String(Math.max(20, Math.min(5000, Number(target) || 1500))) }),
+        body: JSON.stringify({ service_ctas: JSON.stringify(ctas), tracked_keyword_target: String(Math.max(20, Math.min(4500, Number(target) || 1500))) }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       setMsg('Saved.');
@@ -102,9 +102,9 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
 
           <div className="grid gap-2">
             <div className="font-semibold">Keywords tracked in SE Ranking</div>
-            <p className="text-muted-foreground">Tracking follows the approved strategy. Every keyword in it is tracked as soon as it is approved or edited. Each week up to 500 more are added until the project tracks this many, only on the strategy&apos;s topics: Search Console searches we already appear for (no credits), then keyword research seeded from the strategy&apos;s keywords for the US and India (SE Ranking API credits, only above the reserve kept for blog research). The next strategy is built from these rankings. Your plan allows up to 5,000 tracked keywords.</p>
+            <p className="text-muted-foreground">Tracking follows the approved strategy. Every keyword in it is tracked as soon as it is approved or edited. Each week up to 500 more are added until the project tracks this many, only on the strategy&apos;s topics: Search Console searches we already appear for (no credits), then keyword research seeded from the strategy&apos;s keywords for the US and India (SE Ranking API credits, only above the reserve kept for blog research). The next strategy is built from these rankings. Your plan allows 5,000 tracked keywords; 500 are always kept free, so the most is 4,500.</p>
             <div className="flex flex-wrap items-center gap-2">
-              <Input className="h-8 w-32" type="number" min={20} max={5000} value={target} onChange={(e) => setTarget(e.target.value)} />
+              <Input className="h-8 w-32" type="number" min={20} max={4500} value={target} onChange={(e) => setTarget(e.target.value)} />
               <Button size="sm" variant="outline" disabled={!!running} onClick={() => runNow('topup')}>
                 {running === 'topup' && <Loader2 className="animate-spin" />} Add missing keywords now
               </Button>

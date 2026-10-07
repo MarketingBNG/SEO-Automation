@@ -14,6 +14,9 @@ export const DEFAULTS: Record<string, string> = {
   service_ctas: '',
   // How many keywords SE Ranking should track (US and India); the weekly job tops the project up.
   tracked_keyword_target: '1500',
+  // SE Ranking plan limit for tracked keywords and the slots always kept free.
+  seranking_keyword_limit: '5000',
+  seranking_keyword_buffer: '500',
   // SE Ranking API credits kept back for blog research; keyword discovery only uses credits above this.
   seranking_reserve_units: '20000',
   // Lessons the dashboard learned from reviews, holds, corrections and results (written weekly).

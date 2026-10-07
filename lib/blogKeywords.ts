@@ -54,6 +54,7 @@ function buildKeywordPlan(brief, keyword) {
     questions: questions.slice(0, 20),
     relatedSearches: [...new Set(serpRelated)].slice(0, 12),
     surferTerms: (brief.surfer?.terms || []).slice(0, 40).map((t) => ({ term: t.term, min: t.target_range?.min ?? null, max: t.target_range?.max ?? null })),
+    tracked: (brief.tracked || []).slice(0, 15),
     ownPages: (brief.ownRankings || []).slice(0, 8).map((r) => ({ query: r.keys?.[0], page: r.keys?.[1], position: Math.round(r.position * 10) / 10, impressions: r.impressions })),
   };
 }
