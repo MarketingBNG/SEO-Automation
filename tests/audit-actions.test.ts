@@ -1,5 +1,7 @@
 // Tests for the audit follow-ups: AI text block, expert review, official sources, CTAs, length,
 // duplicates, overdue reviews, time-left estimates, byline and schema.
+// lib/anthropic loads the database client at import time; no query runs in these tests.
+process.env.DATABASE_URL ||= 'postgresql://unused@localhost/unused';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -71,11 +73,57 @@ test('duplicate topics are blocked', () => {
   assert.ok(validatePlan(plan).errors.some((e) => /repeats the topic/.test(e)));
 });
 
-test('time left blends pace and history', () => {
+test('time left never freezes on a stuck percentage', () => {
   assert.equal(etaSeconds({ elapsed: 0, percent: 0, typical: 1500 }), 1500);
   const mid = etaSeconds({ elapsed: 600, percent: 50, typical: 1500 });
   assert.ok(mid > 600 && mid < 900);
+  // At a frozen 18% the old formula returned 1230 for every elapsed value; now it changes.
+  const a = etaSeconds({ elapsed: 300, percent: 18, typical: 1500 });
+  const b = etaSeconds({ elapsed: 1320, percent: 18, typical: 1500 });
+  assert.ok(b > a, 'a stuck step shows a growing estimate, never a frozen one');
+  assert.ok(etaSeconds({ elapsed: 3000, percent: 3, typical: 1500 }) <= 3000, 'the pace term is capped');
   assert.ok(etaSeconds({ elapsed: 2000, percent: 0, typical: 1500 }) > 0);
+});
+
+test('fact-check claims are split into parallel batches', async () => {
+  const { batchClaims } = await import('../lib/anthropic');
+  assert.deepEqual(batchClaims(['a', 'b', 'a', ''], 3), [['a', 'b']]);
+  const g = batchClaims(Array.from({ length: 30 }, (_, i) => `claim ${i}`), 3);
+  assert.equal(g.length, 3);
+  assert.equal(g.flat().length, 30);
+  assert.equal(batchClaims(Array.from({ length: 12 }, (_, i) => `c${i}`), 3).length, 2);
+});
+
+test('the two clean rounds always come from two different models', async () => {
+  const { verifyAndCorrect } = await import('../lib/anthropic');
+  const run = async (verdicts: string[], startClean = 0) => {
+    const models: string[] = [];
+    let i = 0;
+    const check = async (_d: any, _s: any, { model }: any) => {
+      models.push(model);
+      const v = verdicts[Math.min(i++, verdicts.length - 1)];
+      return { checks: [{ claim: 'x', verdict: v, source_url: 'https://www.irs.gov/a', correction: 'y' }], model };
+    };
+    const r = await verifyAndCorrect({ title: 't', meta: 'm', content: '<p>x</p>', facts: [] }, { check, correct: async (d: any) => d, startClean, maxRounds: 6 });
+    return { ok: r.ok, models };
+  };
+  assert.deepEqual((await run(['correct', 'correct'])).models, ['claude-opus-5-5', 'claude-sonnet-5-5']);
+  assert.deepEqual((await run(['incorrect', 'correct', 'correct'])).models, ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5']);
+  assert.deepEqual((await run(['incorrect', 'correct', 'correct'], 1)).models, ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5']);
+});
+
+test('a clean inline check counts as the first clean round, the other model does the second', async () => {
+  const { verifyAndCorrect } = await import('../lib/anthropic');
+  const models: string[] = [];
+  const check = async (_d: any, _s: any, { model }: any) => {
+    models.push(model);
+    return { checks: [{ claim: 'x', verdict: 'correct', source_url: 'https://www.irs.gov/a' }], model };
+  };
+  const r = await verifyAndCorrect({ title: 't', meta: 'm', content: '<p>x</p>', facts: [] }, { check, correct: async (d: any) => d, startClean: 1, maxRounds: 5 });
+  assert.equal(r.ok, true);
+  assert.equal(models.length, 1, 'one more check was enough');
+  assert.equal(models[0], 'claude-sonnet-5-5', 'the second model did it');
+  assert.equal(r.rounds, 2);
 });
 
 test('byline and expert schema', () => {

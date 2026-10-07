@@ -11,7 +11,7 @@ import { buildKeywordPlan } from './blogKeywords';
 import { chooseKeywords, planForPrompt } from './keywordPlanner';
 import { getTopLandingPages } from './ga4';
 import { topResultsLength } from './topLength';
-import { DEFAULT_CTAS, pickCta, withUtm, isOfficialSource, sameTopic } from './strategy/core';
+import { DEFAULT_CTAS, pickCta, withUtm, isOfficialSource, sameTopic, extractClaims } from './strategy/core';
 
 // The call to action for one blog: the service it fits best (Settings > service CTAs, else the
 // built-in list), with UTM tags so Zoho can show which blog and service a lead came from.
@@ -125,14 +125,15 @@ and family office / HNI wealth work. Blog readers include founders, SMEs, HNIs, 
 and finance peers (CAs, CPAs) - some of them will notice a wrong number or a misquoted statute, so
 accuracy comes before cleverness, every time.
 
-RESEARCH (do this before writing, using web search):
-- Prefer primary sources: IRS, US Treasury, CBDT, RBI, SEBI, GST Council, DGFT, USCIS/DOL,
+RESEARCH (do this before writing, using web search; the request gives your search budget, so spend it
+on official primary sources and the pages ranking now, one search per source):
+- Primary sources: IRS, US Treasury, FinCEN, CBDT, RBI, SEBI, GST Council, MCA, DGFT, USCIS/DOL,
   official gazettes and circulars, the actual text of the relevant act/section.
-- Reputable secondary sources are fine as backup: Big Four advisories, Economic Times, Mint,
-  Bloomberg, Reuters, WSJ, ICAI/AICPA.
-- For every hard claim (a number, rate, threshold, deadline, section reference, or "new" rule),
-  confirm it across at least two sources, or one primary source. If sources disagree, say so and
-  give the range. Confirm the rule/figure is current as of today.
+- Secondary sources (Big Four advisories, Economic Times, Mint, Bloomberg, Reuters, WSJ, ICAI/AICPA)
+  are for context only. Every hard claim (a number, rate, threshold, deadline, section reference, or
+  "new" rule) must be confirmed by, and linked to, an official primary source: the automatic fact
+  checker accepts only official sources and sends the draft back for anything else. If sources
+  disagree, say so and give the range. Confirm the rule/figure is current as of today.
 - Never invent a statute, form number, rate, or deadline you have not found via search.
 - If you cannot verify something, either drop it or mark it inline as [VERIFY: what's uncertain].
 
@@ -155,7 +156,7 @@ VOICE (USAIndiaCFO blog house style): ${voiceGuidelines}
   Write like a senior practitioner talking to a client, not like a textbook.
 - RESEARCH DEPTH: read widely before writing. Check every page currently ranking in the top 10 in
   the US and India for this keyword, the AI Overview, People Also Ask, and the primary sources. Cover
-  every sub-question they cover and the ones they miss. Research has no search budget limit.
+  every sub-question they cover and the ones they miss, within the search budget in the request.
 - No AI filler or hype vocabulary ("delve", "unlock", "seamless", "robust", "game-changer",
   "navigate the landscape", "unprecedented", "in today's fast-paced world", canned hooks like
   "Here's what nobody tells you", empty closers like "The future is bright"). No em dashes.
@@ -251,13 +252,46 @@ function isTransient(err: any) {
   return /connection|socket|ECONNRESET|ETIMEDOUT|EPIPE|terminated|network|fetch failed|timed? ?out|overloaded|stream (ended|closed)|premature/i.test(`${err?.name} ${err?.message} ${err?.cause?.code || ''}`);
 }
 
-async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40 }: any = {}) {
+// Live activity of one call, for progress bars: web searches done, characters written, which
+// continuation part is running, retries so far, and when the API last sent anything.
+type Activity = { part: number; searches: number; chars: number; retries: number; lastEventAt: number; note?: string };
+// A stream that sends nothing for this long is treated as dead and started again. Long thinking at
+// maximum effort can be silent for minutes (the SDK also drops keep-alive pings), so 10 minutes.
+const IDLE_MS = () => Math.max(60000, Number(process.env.CLAUDE_IDLE_TIMEOUT_MS) || 10 * 60 * 1000);
+
+// The system prompt and the first user message (the research brief) are the same on every
+// continuation part of a long research turn (and on a quick retry), so they are cached: each part
+// then re-reads them at the cache price instead of processing 15-25k tokens again. The cache lives
+// 5 minutes, so it does not reach a repair round that comes after a fact check; and a repair round
+// changes the tool's search cap, which starts a new cache anyway. Only used for research calls.
+function withCache(systemPrompt, conversation) {
+  const system = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }];
+  const first = conversation[0];
+  const messages =
+    first && typeof first.content === 'string'
+      ? [{ role: first.role, content: [{ type: 'text', text: first.content, cache_control: { type: 'ephemeral' } }] }, ...conversation.slice(1)]
+      : conversation;
+  return { system, messages };
+}
+
+async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40, onActivity, idleMs = IDLE_MS() }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
   const assistantMessages: any[] = [];
+  const activity: Activity = { part: 0, searches: 0, chars: 0, retries: 0, lastEventAt: Date.now() };
+  // What the screen shows never goes backwards, even when a retry recounts a part from zero.
+  const shown = { searches: 0, chars: 0 };
+  const report = (note?: string) => {
+    shown.searches = Math.max(shown.searches, activity.searches);
+    shown.chars = Math.max(shown.chars, activity.chars);
+    try {
+      onActivity?.({ ...activity, searches: shown.searches, chars: shown.chars, note });
+    } catch {}
+  };
 
   let lastStop = '';
   for (let part = 0; part < maxParts; part++) {
+    activity.part = part;
     // Refuses to start when AI work is paused for low credits (see lib/aiCredits.ts).
     await assertCredits();
     if (batch) {
@@ -278,33 +312,84 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
       assistantMessages.push(message);
       conversation.push(message);
       lastStop = response.stop_reason;
-    if (response.stop_reason !== 'pause_turn') break;
+      if (response.stop_reason !== 'pause_turn') break;
       continue;
     }
 
+    const cached = maxUses >= 10 ? withCache(systemPrompt, conversation) : { system: systemPrompt, messages: conversation };
     const params = {
       model,
       max_tokens: 32000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
       output_config: { effort },
-      system: systemPrompt,
+      system: cached.system,
       tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxUses }],
-      messages: conversation,
+      messages: cached.messages,
     };
-    // A long research turn can lose its connection or hit a busy API part-way. Those are retried
-    // (same request, up to 4 times with a growing wait) instead of failing the whole blog.
+    if (part > 0) report(`research continues (part ${part + 1})`);
+    // A long research turn can lose its connection, stall silently or hit a busy API part-way.
+    // Those are retried (same request, up to 4 times with a growing wait) instead of failing the
+    // whole blog, and every retry is reported so the screen never claims "still working" blindly.
+    const searchesAtStart = activity.searches;
+    const charsAtStart = activity.chars;
     let response;
     for (let attempt = 0; ; attempt++) {
+      activity.searches = searchesAtStart;
+      activity.chars = charsAtStart;
+      const stream = client.beta.messages.stream(params, { signal });
+      let idleTimer: any;
+      let stalled = false;
+      let lastTextReport = 0;
+      let lastEventReport = 0;
+      const arm = () => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          stalled = true;
+          stream.abort();
+        }, idleMs);
+      };
+      stream.on('streamEvent', () => {
+        activity.lastEventAt = Date.now();
+        arm();
+        // Every 15 s at most: the heartbeat then knows the AI is alive even while it only thinks.
+        if (Date.now() - lastEventReport > 15000) {
+          lastEventReport = Date.now();
+          report();
+        }
+      });
+      stream.on('contentBlock', (block: any) => {
+        if (block?.type === 'server_tool_use') {
+          activity.searches++;
+          report();
+        }
+      });
+      stream.on('text', (delta: string) => {
+        activity.chars += delta.length;
+        if (Date.now() - lastTextReport > 2000) {
+          lastTextReport = Date.now();
+          report();
+        }
+      });
+      arm();
       try {
-        response = await client.beta.messages.stream(params, { signal }).finalMessage();
+        response = await stream.finalMessage();
         break;
       } catch (err: any) {
-        if (signal?.aborted || err?.name === 'AbortError' || err?.name === 'APIUserAbortError') throw err;
+        if (signal?.aborted) throw err; // stopped by the user
+        if (!stalled && (err?.name === 'AbortError' || err?.name === 'APIUserAbortError')) throw err;
         await onApiError(err);
-        if (attempt >= 4 || !isTransient(err)) return rethrowFriendly(err, signal);
-        console.warn(`Claude call failed (${err?.status || err?.name}: ${String(err?.message).slice(0, 120)}); retry ${attempt + 1} of 4`);
+        if (attempt >= 4 && stalled) {
+          throw Object.assign(new Error(`The AI sent nothing for ${Math.round(idleMs / 60000)} minutes, ${attempt + 1} times in a row. Try again, or raise CLAUDE_IDLE_TIMEOUT_MS.`), { cause: err });
+        }
+        if (attempt >= 4 || !(stalled || isTransient(err))) return rethrowFriendly(err, signal);
+        activity.retries++;
+        const why = stalled ? `no reply from the AI for ${Math.round(idleMs / 60000)} minutes` : `connection problem (${err?.status || err?.name || 'error'})`;
+        console.warn(`Claude call: ${why}; ${String(err?.message).slice(0, 120)}; retry ${attempt + 1} of 4`);
+        report(`${why}, connecting again (retry ${attempt + 1} of 4)`);
         await new Promise((r) => setTimeout(r, Math.min(60000, 5000 * 2 ** attempt)));
+      } finally {
+        clearTimeout(idleTimer);
       }
     }
     await recordUsage({ model: response.model || model, usage: response.usage, feature });
@@ -323,7 +408,7 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
     .map((b) => b.text)
     .join('\n');
   // stopReason 'pause_turn' here means the turn was still unfinished after maxParts continuations.
-  return { text, assistantMessages, stopReason: lastStop };
+  return { text, assistantMessages, stopReason: lastStop, activity };
 }
 
 const BATCH_POLL_MS = 30_000;
@@ -399,6 +484,22 @@ function parseBlogResponse(text) {
 }
 
 const WRITER_SEARCHES = () => Number(process.env.WRITER_MAX_SEARCHES) || 40;
+// Writer effort: 'high' is the usual sweet spot; the separate maximum-effort fact check guards the
+// facts. Set WRITER_EFFORT=max to make the writer think longer again.
+const WRITER_EFFORT = () => process.env.WRITER_EFFORT || 'high';
+// A repair round already has all the research in the conversation, so it searches far less.
+const REPAIR_SEARCHES = () => Number(process.env.REPAIR_MAX_SEARCHES) || 12;
+const FACT_CHECK_SEARCHES = 60;
+// The claims are split between this many checkers that run at the same time (1 to 4).
+const FACT_CHECK_PARALLEL = () => Math.max(1, Math.min(4, Number(process.env.FACT_CHECK_PARALLEL) || 3));
+
+// Splits the claims into up to `groups` lists of at least 8, in order, without duplicates.
+export function batchClaims(claims: string[], groups: number): string[][] {
+  const uniq = [...new Set(claims.map((c) => String(c || '').trim()).filter(Boolean))];
+  const n = Math.max(1, Math.min(groups, Math.ceil(uniq.length / 8)));
+  const size = Math.ceil(uniq.length / n) || 1;
+  return Array.from({ length: n }, (_, i) => uniq.slice(i * size, (i + 1) * size)).filter((g) => g.length);
+}
 // The fact checker can run on a different (stronger) model than the writer. Default: the same top model.
 const FACT_CHECK_MODEL = () => process.env.FACT_CHECK_MODEL || MODEL;
 // K6: a second, different model checks every draft too. The rounds alternate between the two, so a
@@ -409,36 +510,88 @@ const SECOND_CHECK_MODEL = () => {
 };
 
 // Re-verifies every hard claim in a draft (numbers, rates, thresholds, deadlines, sections, forms,
-// "new" rules) against primary sources with web search, independently of the writer.
-async function factCheckDraft(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL() }: any = {}) {
-  const system = `You are a senior US-India tax fact checker. You did not write this article. Find every hard
-claim in it (a number, rate, threshold, deadline, statute or section, form number, or "new" rule) and
-verify each one against a primary source (irs.gov, treasury.gov, fincen.gov, incometax.gov.in,
-incometaxindia.gov.in, cbic-gst.gov.in, rbi.org.in, sebi.gov.in, mca.gov.in, the treaty text) as of
-today, ${new Date().toISOString().slice(0, 10)}. Use web search for every claim; there is no search budget.
+// "new" rules) against primary sources with web search, independently of the writer. The claims are
+// shared between up to FACT_CHECK_PARALLEL checkers that run at the same time, so a 30-claim article
+// is checked in a third of the time; the first checker also looks for claims nobody listed.
+async function factCheckDraft(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity }: any = {}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const groups = batchClaims([...(result.facts || []).map((f) => f.claim), ...mustCheck], FACT_CHECK_PARALLEL());
+  if (!groups.length) groups.push([]);
+  const perChecker = Math.ceil(FACT_CHECK_SEARCHES / groups.length) + (groups.length > 1 ? 5 : 0);
+  const article = `Title: ${result.title}\nMeta: ${result.meta}\n\nArticle HTML:\n${result.content}\n\nWriter's Facts Register:\n${(result.facts || [])
+    .map((f) => `${f.fact_id} | ${f.claim} | ${f.source_url}`)
+    .join('\n')}`;
+  const system = (i: number) => `You are a senior US-India tax fact checker. You did not write this article.${
+    groups.length > 1 ? ` You are checker ${i + 1} of ${groups.length}; each checker has its own list of claims.` : ''
+  } Verify each claim assigned to you against a primary source (irs.gov, treasury.gov, fincen.gov,
+incometax.gov.in, incometaxindia.gov.in, cbic-gst.gov.in, rbi.org.in, sebi.gov.in, mca.gov.in, the
+treaty text) as of today, ${today}. You have up to ${perChecker} web searches: one per claim where
+possible, grouping claims that share a source.${
+    i === 0
+      ? ' Also find any OTHER hard claim in the article (a number, rate, threshold, deadline, statute or section, form number, or "new" rule) that is in none of the lists, and verify it too.'
+      : ''
+  }
 verdict is "correct" only when a primary source confirms it as currently applicable. Otherwise
 "incorrect" (give the correction) or "unverifiable". Return ONLY JSON between ===JSON=== and ===END===:
 {"checks":[{"claim":"exact sentence or phrase","verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}]}`;
-  const user = `Title: ${result.title}\nMeta: ${result.meta}\n\nArticle HTML:\n${result.content}\n\nWriter's Facts Register:\n${(result.facts || [])
-    .map((f) => `${f.fact_id} | ${f.claim} | ${f.source_url}`)
-    .join('\n')}${mustCheck.length ? `\n\nThese sentences state figures, rates or deadlines. Each one MUST appear in "checks" (quote it as "claim"):\n${mustCheck.map((x) => `- ${x}`).join('\n')}` : ''}`;
-  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 60, effort: 'max', model, feature: 'fact-check' });
-  const m = text.match(/===JSON===([\s\S]*?)===END===/);
+  const user = (group: string[], i: number) =>
+    `${article}${
+      group.length ? `\n\nCLAIMS ASSIGNED TO YOU (each MUST appear in "checks", quoted as "claim"):\n${group.map((x) => `- ${x}`).join('\n')}` : ''
+    }${i === 0 && groups.length > 1 ? `\n\nClaims the other checkers cover (do not repeat these):\n${groups.slice(1).flat().map((x) => `- ${x}`).join('\n')}` : ''}`;
+
+  const totals = groups.map(() => ({ searches: 0, chars: 0 }));
+  const report = (note?: string) =>
+    onActivity?.({ searches: totals.reduce((n, t) => n + t.searches, 0), chars: totals.reduce((n, t) => n + t.chars, 0), maxSearches: perChecker * groups.length, checkers: groups.length, note });
+  // One controller for all checkers: when one fails for good, the others stop too (no stray
+  // maximum-effort streams billing on after the draft has already been sent back).
+  const local = new AbortController();
+  const onAbort = () => local.abort();
+  signal?.addEventListener('abort', onAbort);
+  let outputs;
   try {
-    const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
-    const checks = Array.isArray(parsed.checks) ? parsed.checks : [];
-    // K4: a rule backed only by a blog or news site is not confirmed.
-    for (const c of checks) {
-      if (c.verdict === 'correct' && c.source_url && !isOfficialSource(c.source_url)) {
-        c.verdict = 'unverifiable';
-        c.correction = `Only a non-official source (${c.source_url}) was found; link the official source (IRS, CBDT, FinCEN, RBI, MCA, the treaty text or the state site) or remove the claim.`;
-      }
-    }
-    return { checks, model };
-  } catch {
-    // An unreadable check never lets a draft through as checked.
-    return { checks: [{ claim: 'Fact check output could not be read', verdict: 'unverifiable', correction: '', source_url: '' }], model };
+    outputs = await Promise.all(
+      groups.map((g, i) =>
+        callClaude(system(i), [{ role: 'user', content: user(g, i) }], local.signal, {
+          maxUses: perChecker,
+          effort: 'max',
+          model,
+          feature: 'fact-check',
+          onActivity: (a) => {
+            totals[i] = { searches: a.searches, chars: a.chars };
+            report(a.note);
+          },
+        })
+      )
+    );
+  } catch (err) {
+    local.abort();
+    throw err;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
   }
+  const checks: any[] = [];
+  let unreadable = 0;
+  outputs.forEach(({ text }, i) => {
+    const m = text.match(/===JSON===([\s\S]*?)===END===/);
+    try {
+      const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
+      // No "checks" list, or an empty one from a checker that had claims to check, is not a result.
+      if (!Array.isArray(parsed.checks) || (!parsed.checks.length && groups[i].length)) unreadable++;
+      else checks.push(...parsed.checks);
+    } catch {
+      unreadable++;
+    }
+  });
+  // An unreadable check never lets a draft through as checked.
+  if (unreadable) checks.push({ claim: `Fact check output could not be read (${unreadable} of ${groups.length} checkers)`, verdict: 'unverifiable', correction: '', source_url: '' });
+  // K4: a rule backed only by a blog or news site is not confirmed.
+  for (const c of checks) {
+    if (c.verdict === 'correct' && c.source_url && !isOfficialSource(c.source_url)) {
+      c.verdict = 'unverifiable';
+      c.correction = `Only a non-official source (${c.source_url}) was found; link the official source (IRS, CBDT, FinCEN, RBI, MCA, the treaty text or the state site) or remove the claim.`;
+    }
+  }
+  return { checks, model, checkers: groups.length };
 }
 
 const FACT_CHECK_ROUNDS = () => Math.max(2, Number(process.env.FACT_CHECK_ROUNDS) || 50);
@@ -470,14 +623,20 @@ No em dashes. Return ONLY: ===TITLE===<title>===META===<meta description>===CONT
 // independent checks in a row find nothing wrong (and every figure sentence was checked). Gives up
 // after FACT_CHECK_ROUNDS (default 50) rounds; the caller then holds the blog instead of publishing.
 // `check` and `correct` are injectable for tests.
-async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], check = factCheckDraft, correct = correctClaims, maxRounds = FACT_CHECK_ROUNDS() }: any = {}) {
+// `startClean` = 1 when the writer's own independent check already found this exact text clean:
+// then one more clean check, by the other model, is enough (K6: two different models agree).
+async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], check = factCheckDraft, correct = correctClaims, maxRounds = FACT_CHECK_ROUNDS(), startClean = 0, onActivity }: any = {}) {
   let current = { title: draft.title, meta: draft.meta, content: draft.content };
-  let clean = 0;
+  let clean = Math.max(0, Math.min(1, Number(startClean) || 0));
+  // Models alternate every round (FACT, SECOND, FACT...; or SECOND first when the inline check by
+  // FACT already counts), so two clean rounds in a row always come from two different models.
+  const offset = clean;
   const log = [];
   for (let round = 1; round <= maxRounds; round++) {
     const mustCheck = mustCheckOf(current.content);
-    const model = round % 2 === 1 ? FACT_CHECK_MODEL() : SECOND_CHECK_MODEL();
-    const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck, model });
+    const model = (round + offset) % 2 === 1 ? FACT_CHECK_MODEL() : SECOND_CHECK_MODEL();
+    onActivity?.({ round, model, note: `check round ${round}` });
+    const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck, model, onActivity });
     const bad = result.checks.filter((c) => c.verdict !== 'correct');
     // A figure sentence the checker skipped counts as unverified.
     const checked = result.checks.map((c) => String(c.claim || '').toLowerCase());
@@ -487,7 +646,7 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
       clean++;
       if (clean >= 2) {
         await rememberFacts(result.checks, result.model || model).catch(() => 0);
-        return { ok: true, rounds: round, draft: current, log };
+        return { ok: true, rounds: round + (startClean ? 1 : 0), draft: current, log };
       }
       continue;
     }
@@ -502,8 +661,14 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
 // keyword, auto-repairing up to MAX_REPAIR_ATTEMPTS times, per the Frozen Playbook.
 async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any = {}) {
   const systemPrompt = await buildSystemPrompt();
+  // Progress: (text, percent, { key, round, progress 0..1, lastActivityAt }). The percent scale is
+  // weighted by how long each step usually takes: brief 3-9, write 10-50, validate 52, check 54-92,
+  // save 96. A repair round starts the scale again and says so in the text.
+  let attempt = 0;
+  const stage = (key, percent, text, extra: any = {}) => onProgress?.(text, Math.round(percent), { key, round: attempt, ...extra });
+  const words = (chars) => Math.round(chars / 6.5).toLocaleString('en-US');
 
-  onProgress?.('Gathering data from SE Ranking, Google, Search Console, WordPress and Surfer…', 6);
+  stage('brief', 3, 'Gathering data from SE Ranking, Google, Search Console, WordPress and Surfer…', { progress: 0 });
   const brief = await gatherBrief(keyword, { includeSurfer: true });
   if (signal?.aborted) throw Object.assign(new Error('Request was aborted.'), { name: 'AbortError' });
 
@@ -511,15 +676,16 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
   // goes) from the research, then write to it. The plan is saved with the draft and checked after.
   const keywordPlan = buildKeywordPlan(brief, keyword);
   const chosen = chooseKeywords(keywordPlan, keyword);
-  onProgress?.(`Keyword plan ready: ${chosen.secondary.length} secondary keywords, ${chosen.questions.length} questions. Writing to the plan…`, 15);
+  stage('plan', 8, `Keyword plan ready: ${chosen.secondary.length} secondary keywords, ${chosen.questions.length} questions. Measuring the pages ranking now…`, { progress: 0.3 });
 
-  onProgress?.('Measuring the pages ranking now and picking the call to action…', 16);
   const length = await topResultsLength(brief, parseInt(await settings.get('max_words'), 10) || 1600).catch(() => null);
   const cta = await ctaFor(keyword, '', notes);
   const known = await approvedFactsFor(keyword).catch(() => []);
+  const expectedChars = (length?.median || 1800) * 8 + 4000;
 
   const userPrompt = [
     `Target keyword: "${keyword}"`,
+    `SEARCH BUDGET: up to ${WRITER_SEARCHES()} web searches for the research.`,
     notes ? `Additional context from the content team: ${notes}` : '',
     length?.median
       ? `LENGTH TARGET: ${length.min}-${length.max} words. The ${length.basedOn} pages ranking now that we could read use about ${length.median} words (median). Cover what they cover and what they miss, without padding.`
@@ -535,18 +701,30 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
     .join('\n\n');
 
   const messages = [{ role: 'user', content: userPrompt }];
-  let attempt = 0;
   let result: any;
   let validation: any;
 
   while (attempt <= MAX_REPAIR_ATTEMPTS) {
-    onProgress?.(
-      attempt === 0 ? 'Researching sources & writing the draft…' : `Repairing draft, attempt ${attempt}…`,
-      18 + attempt * 22
-    );
-    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages, signal, { maxUses: WRITER_SEARCHES(), effort: 'max', feature: 'blog' });
+    const repair = attempt > 0;
+    const budget = repair ? REPAIR_SEARCHES() : WRITER_SEARCHES();
+    const roundText = repair ? `Repair round ${attempt} of up to ${MAX_REPAIR_ATTEMPTS}: ` : '';
+    stage('write', 10, `${roundText}Researching sources and writing the draft (up to ${budget} web searches)…`, { progress: 0 });
+    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages, signal, {
+      maxUses: budget,
+      effort: repair ? 'high' : WRITER_EFFORT(),
+      feature: 'blog',
+      onActivity: (a) => {
+        const p = Math.min(0.97, 0.65 * Math.min(1, a.searches / budget) + 0.35 * Math.min(1, a.chars / expectedChars));
+        stage(
+          'write',
+          10 + 40 * p,
+          `${roundText}${a.searches} of up to ${budget} web searches done, about ${words(a.chars)} words written${a.part ? ` (research part ${a.part + 1})` : ''}${a.note ? `. ${a.note}` : ''}`,
+          { progress: p, lastActivityAt: a.lastEventAt }
+        );
+      },
+    });
 
-    onProgress?.('Validating draft & fact-checking claims…', 30 + attempt * 22);
+    stage('validate', 52, `${roundText}Checking the draft against the writing rules…`, { progress: 0.5 });
     result = parseBlogResponse(rawText);
     validation = await validateDraft({
       title: result.title,
@@ -563,9 +741,20 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
     // Independent fact check: a separate maximum-effort pass (FACT_CHECK_MODEL) re-verifies every
     // hard claim against primary sources. Any wrong or unverifiable claim sends the draft back.
     if (validation.passed) {
-      onProgress?.('Independent fact check against primary sources…', 34 + attempt * 22);
-      const check = await factCheckDraft(result, signal);
-      result.factCheck = check;
+      stage('check', 54, `${roundText}Independent fact check against official sources (about ${FACT_CHECK_SEARCHES} web searches)…`, { progress: 0 });
+      // Every sentence with a figure, rate or deadline must be covered, as in the review's own check.
+      const mustCheck = extractClaims(result.content).map((c) => c.sentence);
+      const check = await factCheckDraft(result, signal, {
+        mustCheck,
+        onActivity: (a) => {
+          const max = a.maxSearches || FACT_CHECK_SEARCHES;
+          const p = Math.min(0.97, 0.8 * Math.min(1, a.searches / max) + 0.2 * Math.min(1, a.chars / 6000));
+          stage('check', 54 + 38 * p, `${roundText}Fact check: ${a.searches} of up to ${max} web searches done${a.checkers > 1 ? ` (${a.checkers} checkers at once)` : ''}${a.note ? `. ${a.note}` : ''}`, { progress: p, lastActivityAt: Date.now() });
+        },
+      });
+      const checked = check.checks.map((c) => String(c.claim || '').toLowerCase());
+      const skipped = mustCheck.filter((sent) => !checked.some((c) => c && (sent.toLowerCase().includes(c) || c.includes(sent.toLowerCase().slice(0, 60)))));
+      result.factCheck = { ...check, covered: skipped.length === 0 };
       const bad = check.checks.filter((c) => c.verdict !== 'correct');
       if (bad.length) {
         validation.passed = false;
@@ -583,12 +772,14 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
     messages.push({
       role: 'user',
       content: `This draft failed validation. Fix these specific issues and return the FULL
-corrected draft again in the exact same format (===TITLE=== through ===END===):\n- ${validation.issues.join('\n- ')}`,
+corrected draft again in the exact same format (===TITLE=== through ===END===). The research is
+already in this conversation: SEARCH BUDGET for this round is up to ${REPAIR_SEARCHES()} web searches,
+only to confirm a corrected fact from its official source.\n- ${validation.issues.join('\n- ')}`,
     });
     attempt++;
   }
 
-  onProgress?.('Saving draft…', 96);
+  stage('save', 96, 'Saving draft…', { progress: 0.5 });
 
   return {
     ...result,
@@ -786,7 +977,7 @@ If the piece has no checkable hard claims, leave this section empty.>
 // house voice, research, and Facts Register as new drafts. Runs through the same
 // validate+auto-repair loop as researchAndWriteBlog so a rewrite can't ship with the same
 // problems it was supposed to fix.
-async function rewriteBlog({ title, content, issues, suggestions }) {
+async function rewriteBlog({ title, content, issues, suggestions, signal, onProgress }: any) {
   const systemPrompt = await buildSystemPrompt();
 
   const issuesList = (issues || [])

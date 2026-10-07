@@ -26,7 +26,7 @@ import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey
 import { requireExpert } from '../reviewers';
 import { submitToBing } from '../bing';
 import { withByline, expertSchema } from '../byline';
-import { startTimer, endTimer, timed } from '../jobTimer';
+import { startTimer, endTimer, timed, setStage } from '../jobTimer';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
 const HOST = () => SITE().replace(/^https?:\/\//, '').replace(/^www\./, '');
@@ -41,7 +41,13 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
   const kw = await prisma.keywords.create({
     data: { batch_name: `Strategy #${row.strategy_id}`, keyword: row.main_keyword, notes: `Planned title: ${row.title}. Channels: ${JSON.parse(row.tags).join(', ')}.${row.refresh_url ? ` Refresh of ${row.refresh_url}.` : ''}${extraNotes ? `\n\n${extraNotes}` : ''}`, status: 'generating' },
   });
-  const onProgress = progressWriter((stage, percent) => prisma.keywords.update({ where: { id: kw.id }, data: { progress_stage: stage, progress_percent: percent } }));
+  const writer = progressWriter((stage, percent) => prisma.keywords.update({ where: { id: kw.id }, data: { progress_stage: stage, progress_percent: percent } }));
+  // The step details reach the job timer too, so the header's time-left estimate is per step here
+  // as well (the same wiring as lib/blogJob.ts for blogs started from the Keywords tab).
+  const onProgress = (stage, percent, extra?: any) => {
+    if (extra?.key) setStage(`blog-${kw.id}`, extra.key, { progress: extra.progress, round: extra.round, lastActivityAt: extra.lastActivityAt ?? null, label: stage });
+    writer(stage, percent);
+  };
   let result;
   startTimer(`blog-${kw.id}`, 'blog', `Blog: ${row.main_keyword}`);
   try {
@@ -78,7 +84,18 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
     await prisma.facts.create({ data: { draft_id: draft.id, fact_id: f.fact_id, claim: f.claim, source_name: f.source_name, source_url: f.source_url, jurisdiction: f.jurisdiction, effective_date: f.effective_date } });
   }
   await prisma.keywords.update({ where: { id: kw.id }, data: { status: 'drafted', progress_stage: null, progress_percent: null } });
-  await update(row.id, { keyword_id: kw.id, draft_id: draft.id, status: 'planned', cta: result.cta ? JSON.stringify(result.cta) : row.cta || null });
+  // A clean independent check by the writer pipeline counts as the first of the two clean checks the
+  // review needs, so the review's own check (by the other model) is the only one still to run.
+  const inlineClean = Boolean(
+    result.factCheck && result.validation?.passed && result.factCheck.covered !== false && result.factCheck.checks.length > 0 && result.factCheck.checks.every((c) => c.verdict === 'correct')
+  );
+  await update(row.id, {
+    keyword_id: kw.id,
+    draft_id: draft.id,
+    status: 'planned',
+    cta: result.cta ? JSON.stringify(result.cta) : row.cta || null,
+    fact_check: inlineClean ? JSON.stringify({ inlineStamp: draft.updated_at, inlineModel: result.factCheck.model, inlineClaims: result.factCheck.checks.length }) : null,
+  });
   await activity.log('schedule.drafted', { entityType: 'draft', entityId: draft.id, details: `"${result.title}" for ${row.publish_at} UTC` });
   return draft;
 }
@@ -139,11 +156,12 @@ async function addInternalLinks(newUrl, title, keyword) {
 async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   const prev = row.fact_check ? JSON.parse(row.fact_check) : null;
   if (prev && prev.stamp === draft.updated_at) return { ...prev, draft };
+  const startClean = prev?.inlineStamp && prev.inlineStamp === draft.updated_at ? 1 : 0;
   const facts = await prisma.facts.findMany({ where: { draft_id: draft.id }, select: { fact_id: true, claim: true, source_url: true } });
   const result = await timed(`factcheck-${draft.id}`, 'fact-check', `Fact check: ${draft.title}`, () =>
     verify(
       { title: draft.title, meta: draft.meta_description, content: draft.content_html || '', facts },
-      { mustCheckOf: (html) => extractClaims(html).map((c) => c.sentence) }
+      { mustCheckOf: (html) => extractClaims(html).map((c) => c.sentence), startClean }
     )
   );
   let saved = draft;
@@ -154,7 +172,7 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
       data: { title: result.draft.title, meta_description: result.draft.meta, content_html: result.draft.content, updated_at: sqlNow() },
     });
   }
-  const record = { stamp: saved.updated_at, ok: result.ok, rounds: result.rounds, corrected: changed, log: result.log, checkedAt: sqlNow() };
+  const record = { stamp: saved.updated_at, ok: result.ok, rounds: result.rounds, corrected: changed, log: result.log, checkedAt: sqlNow(), inlineCounted: Boolean(startClean) };
   await update(row.id, { fact_check: JSON.stringify(record) });
   await activity.log('schedule.fact_checked', {
     entityType: 'draft',

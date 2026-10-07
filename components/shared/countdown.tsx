@@ -15,15 +15,27 @@ export function fmtDuration(sec: number) {
   return `${r} s`;
 }
 
-export function Countdown({ remaining, elapsed, className }: { remaining: number | null | undefined; elapsed?: number | null; className?: string }) {
+type CountdownProps = {
+  remaining: number | null | undefined;
+  elapsed?: number | null;
+  overdue?: boolean;
+  typical?: number | null;
+  stageElapsed?: number | null;
+  stageTypical?: number | null;
+  stageLabel?: string | null;
+  ifRepair?: number | null;
+  className?: string;
+};
+
+export function Countdown({ remaining, elapsed, overdue, typical, stageElapsed, stageTypical, stageLabel, ifRepair, className }: CountdownProps) {
   const [now, setNow] = useState(() => Date.now());
-  const [base, setBase] = useState(() => ({ at: Date.now(), remaining: remaining ?? null, elapsed: elapsed ?? null }));
+  const [base, setBase] = useState(() => ({ at: Date.now(), remaining: remaining ?? null, elapsed: elapsed ?? null, stageElapsed: stageElapsed ?? null }));
   useEffect(() => {
     const at = Date.now();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setBase({ at, remaining: remaining ?? null, elapsed: elapsed ?? null });
+    setBase({ at, remaining: remaining ?? null, elapsed: elapsed ?? null, stageElapsed: stageElapsed ?? null });
     setNow(at);
-  }, [remaining, elapsed]);
+  }, [remaining, elapsed, stageElapsed]);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -32,8 +44,19 @@ export function Countdown({ remaining, elapsed, className }: { remaining: number
   const passed = Math.max(0, (now - base.at) / 1000);
   const left = base.remaining - passed;
   const spent = base.elapsed !== null ? base.elapsed + passed : null;
+  const title = [spent !== null ? `Running for ${fmtDuration(spent)}` : '', ifRepair ? `If the checks find a problem, a repair round adds about ${fmtDuration(ifRepair)}.` : ''].filter(Boolean).join(' ');
+  // Late: say so (for the step when steps are known, else for the whole job) instead of a number.
+  const lateFor = base.stageElapsed !== null && stageTypical ? { on: base.stageElapsed + passed, usual: stageTypical, what: stageLabel ? stageLabel.toLowerCase() : 'this step' } : spent !== null && typical ? { on: spent, usual: typical, what: 'this job' } : null;
+  if (overdue && lateFor) {
+    return (
+      <span className={className} title={title}>
+        <span className="text-amber-700 dark:text-amber-400">Taking longer than usual: {fmtDuration(lateFor.on)} on {lateFor.what} (usually about {fmtDuration(lateFor.usual)})</span>
+        {spent !== null && lateFor.what !== 'this job' && <span className="text-muted-foreground"> · {fmtDuration(spent)} so far</span>}
+      </span>
+    );
+  }
   return (
-    <span className={className} title={spent !== null ? `Running for ${fmtDuration(spent)}` : undefined}>
+    <span className={className} title={title}>
       {left > 1 ? `about ${fmtDuration(left)} left` : 'almost done, taking a little longer than usual'}
       {spent !== null && <span className="text-muted-foreground"> · {fmtDuration(spent)} so far</span>}
     </span>

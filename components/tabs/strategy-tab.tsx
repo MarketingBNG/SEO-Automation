@@ -695,6 +695,7 @@ function MonthRunning() {
   const factCheck = (r: any) => {
     const fc = r.fact_check;
     if (!fc) return <span className="text-muted-foreground">Not checked yet</span>;
+    if (!('ok' in fc)) return <span className="text-muted-foreground">Writer&apos;s check clean; the review&apos;s check runs when the review opens</span>;
     return fc.ok ? (
       <span>Verified ({fc.rounds} rounds{fc.corrected ? ', corrections applied' : ''})</span>
     ) : (
