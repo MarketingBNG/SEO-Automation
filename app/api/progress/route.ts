@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { markInterrupted, strategyStarted } from '@/lib/strategy/jobs';
 import { eta, runningTimers, startedAt } from '@/lib/jobTimer';
+import { blogRuns } from '@/lib/blogRuns';
 import * as settings from '@/lib/settings';
 import { methodNotAllowed } from '../_lib/http';
 
@@ -11,6 +12,21 @@ export const runtime = 'nodejs';
 // Polled by the progress bar in the dashboard header.
 export async function GET() {
   await markInterrupted();
+  // A blog cut off by a server restart (for example a deploy) goes back in the queue instead of
+  // staying "generating" for ever; the next "Generate next blog draft" writes it again.
+  // Only after it has had no live run for over a minute, so a run that is just starting is left alone.
+  const g = globalThis as unknown as { __orphanSeen?: Map<number, number> };
+  const seen = (g.__orphanSeen ||= new Map<number, number>());
+  for (const k of await prisma.keywords.findMany({ where: { status: 'generating' }, select: { id: true } })) {
+    if (blogRuns.has(k.id) || startedAt(`blog-${k.id}`)) {
+      seen.delete(k.id);
+      continue;
+    }
+    if (!seen.has(k.id)) seen.set(k.id, Date.now());
+    if (Date.now() - (seen.get(k.id) as number) < 60000) continue;
+    seen.delete(k.id);
+    await prisma.keywords.update({ where: { id: k.id }, data: { status: 'pending', error: 'The previous run was cut off by a server restart.', progress_stage: null, progress_percent: null } }).catch(() => {});
+  }
   const [strategies, blogs] = await Promise.all([
     prisma.seo_strategies.findMany({ where: { status: { in: ['generating', 'paused', 'stopping'] } }, select: { id: true, period: true, status: true, progress_stage: true, progress_percent: true } }),
     prisma.keywords.findMany({ where: { status: 'generating' }, select: { id: true, keyword: true, progress_stage: true, progress_percent: true, created_at: true } }),
