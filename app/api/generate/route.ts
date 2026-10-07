@@ -162,6 +162,10 @@ export async function POST(req: NextRequest) {
               details: `"${keyword.keyword}": stopped by user`,
             });
             send({ status: 'stopped', stage: 'Stopped by user' });
+          } else if (err?.name === 'CreditPausedError' || /out of credit|credit balance is too low/i.test(err?.message || '')) {
+            // Not the keyword's fault: keep it in the queue so it runs again after a top-up.
+            await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'pending', error: err.message, progress_stage: null, progress_percent: null } }).catch((e) => console.error(e));
+            send({ status: 'error', stage: 'Paused', error: `${err.message} The keyword stays in the queue.` });
           } else {
             console.error(err);
             await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'failed', error: err.message, progress_stage: null, progress_percent: null } }).catch((e) => console.error(e));

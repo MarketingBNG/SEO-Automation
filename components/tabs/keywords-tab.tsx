@@ -10,6 +10,15 @@ import { Progress } from '@/components/ui/progress';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { DataTable, NativeSelect, TD, TD_MUTED } from '@/components/shared/content-ui';
 
+// Plain-English reason for a failed blog run.
+function friendlyError(e: string) {
+  if (/credit|balance/i.test(e)) return 'AI credits ran out during the run. Top up, then try again.';
+  if (/abort|timed? ?out|timeout|ETIMEDOUT|socket|ECONNRESET|fetch failed|terminated/i.test(e)) return `The run was cut off (connection or time limit, often a server restart). Trying again usually works. (${e.slice(0, 120)})`;
+  if (/parse|format/i.test(e)) return `The AI reply could not be read. Trying again usually works. (${e.slice(0, 120)})`;
+  if (/overloaded|529|rate/i.test(e)) return 'The AI service was busy. Try again in a few minutes.';
+  return e.slice(0, 300);
+}
+
 export default function KeywordsTab() {
   const [keywords, setKeywords] = useState<any[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -268,6 +277,24 @@ export default function KeywordsTab() {
                 <td className={TD_MUTED}>{k.batch_name}</td>
                 <td className={TD}>
                   <StatusBadge status={k.status}>{k.status}</StatusBadge>
+                  {k.status === 'failed' && (
+                    <div className="mt-1 max-w-sm space-y-1 text-xs">
+                      {k.error && <div className="text-muted-foreground">Why: {friendlyError(k.error)}</div>}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7"
+                        onClick={async () => {
+                          const res = await fetch(`/api/keywords/${k.id}/retry`, { method: 'POST' });
+                          const j = await res.json().catch(() => ({}));
+                          setMessage(res.ok ? `"${k.keyword}" is back in the queue. Click "Generate next blog draft" to write it.` : j.error || 'Could not retry.');
+                          load();
+                        }}
+                      >
+                        Try again
+                      </Button>
+                    </div>
+                  )}
                 </td>
                 <td className={`${TD_MUTED} whitespace-nowrap`}>{k.created_at}</td>
               </tr>
