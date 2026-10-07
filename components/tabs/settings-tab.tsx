@@ -4,6 +4,7 @@ import { useRole } from '@/hooks/use-role';
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { AiCreditsCard } from '@/components/shared/ai-credits-card';
+import { BlogRulesCard } from '@/components/shared/blog-rules-card';
 import {
   BarChart3, Building2, ClipboardCopy, ExternalLink, Gauge, Globe, Loader2, MousePointerClick, PlugZap,
   RefreshCw, Search, Spline, Upload, Wand2,
@@ -73,7 +74,7 @@ function ConnBadge({ state }: { state: ConnState }) {
   return <Pill tone="danger">● Error</Pill>;
 }
 
-const CONN_TESTS = ['wordpress', 'gsc', 'gbp', 'zoho', 'seranking', 'surfer', 'serphouse'] as const;
+const CONN_TESTS = ['wordpress', 'gsc', 'gbp', 'zoho', 'seranking', 'surfer', 'serphouse', 'bing'] as const;
 
 function ConnCard({
   icon: Icon, title, description, badge, className, children,
@@ -228,6 +229,7 @@ export default function SettingsTab() {
   const [serphouseResult, setSerphouseResult] = useState<any>(null);
   const [loadingSerphouse, setLoadingSerphouse] = useState(false);
 
+  const [bingStatus, setBingStatus] = useState<string | null>(null);
   const [surferStatus, setSurferStatus] = useState<string | null>(null);
   const [surferKeyword, setSurferKeyword] = useState('');
   const [surferTerms, setSurferTerms] = useState<any[] | null>(null);
@@ -549,6 +551,10 @@ export default function SettingsTab() {
         </div>
       )}
       <AiCreditsCard />
+      <Section title="Blog rules" description="Reviewers, calls to action and keyword tracking.">
+        <BlogRulesCard canChange={canChange} />
+      </Section>
+
       <Section title="Publishing" description="Where drafts go live and how their SEO fields are written.">
         <ConnCard
           icon={Globe}
@@ -806,7 +812,8 @@ export default function SettingsTab() {
           description={
             <>
               Daily keyword rank tracking, via SERANKING_API_KEY in .env. Uses the existing
-              &quot;Usaindiacfo.com&quot; rank-tracking project (20 keywords).
+              &quot;Usaindiacfo.com&quot; rank-tracking project; the weekly job adds keywords up to the
+              target in Blog rules.
             </>
           }
         >
@@ -854,6 +861,32 @@ export default function SettingsTab() {
               </TableBody>
             </DataTable>
           )}
+        </ConnCard>
+
+        <ConnCard
+          icon={Globe}
+          title="Bing Webmaster Tools"
+          badge={<ConnBadge state={conn.bing} />}
+          description={
+            <>
+              Sends every new post to Bing (which also feeds ChatGPT search). Add BING_WEBMASTER_API_KEY in
+              Coolify: Bing Webmaster Tools, Settings, API access, API key.
+            </>
+          }
+        >
+          <Actions>
+            <Button
+              onClick={async () => {
+                setBingStatus('Testing…');
+                const json = await fetch('/api/bing/test').then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
+                markConn('bing', json);
+                setBingStatus(json.ok ? `Connected: ${json.site} is verified.` : `Not working: ${json.error}`);
+              }}
+            >
+              <PlugZap /> Test connection
+            </Button>
+          </Actions>
+          {bingStatus && <Status>{bingStatus}</Status>}
         </ConnCard>
 
         <ConnCard

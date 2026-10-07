@@ -1,4 +1,5 @@
 // @ts-nocheck -- PORT NOTE: ported 1:1 from untyped JS; type checking disabled for this file only (logic unchanged).
+import { aiLeftovers } from './strategy/core';
 import * as settings from './settings';
 import { chooseKeywords, coverage } from './keywordPlanner';
 
@@ -203,7 +204,7 @@ function markUsedQuestions(content, paaQuestions) {
 // verified SEO research). Returns { passed, issues, warnings, wordCount }. Issues block the draft
 // and trigger the automatic repair loop, so only failures an AI writer can always fix are issues;
 // everything else is a warning shown to the human reviewer.
-async function validateDraft({ title, meta, content, facts, keyword, paaQuestions, keywordPlan }) {
+async function validateDraft({ title, meta, content, facts, keyword, paaQuestions, keywordPlan, lengthTarget = null, ctaUrl = null }: any) {
   const issues: any[] = [];
   const warnings: any[] = [];
   const maxWords = parseInt(await settings.get('max_words'), 10) || 1600;
@@ -229,9 +230,18 @@ async function validateDraft({ title, meta, content, facts, keyword, paaQuestion
   const wc = wordCount(content);
   if (wc === 0) {
     issues.push('Content is empty.');
+  } else if (lengthTarget?.median) {
+    // Rule 8: length fits the topic, measured from the pages that rank now.
+    if (wc < lengthTarget.min) issues.push(`Content is ${wc} words; the pages ranking now cover this in about ${lengthTarget.median} words. Cover the sub-topics they cover to reach at least ${lengthTarget.min} words (no padding).`);
+    else if (wc > lengthTarget.max) warnings.push(`Content is ${wc} words; the pages ranking now use about ${lengthTarget.median}. Cut anything that does not help the reader (target ${lengthTarget.min}-${lengthTarget.max}).`);
   } else if (wc > maxWords) {
     warnings.push(`Content is ${wc} words, over the ${maxWords}-word house guideline. Fine if the topic truly needs it; otherwise cut padding.`);
   }
+
+  // K1: notes to us, chat text and placeholders never reach readers.
+  for (const i of aiLeftovers(title, meta, content)) issues.push(i);
+  // Rule 9: the call to action for this blog's service is linked.
+  if (ctaUrl && !String(content).includes(String(ctaUrl).split('?')[0])) issues.push(`End with the call to action given in the request, linked to ${ctaUrl}.`);
 
   // Lower-cased plain text (entities decoded, curly quotes straightened) for the phrase checks.
   const bodyText = plainText(content);

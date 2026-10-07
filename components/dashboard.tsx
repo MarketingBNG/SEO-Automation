@@ -187,7 +187,7 @@ export default function Dashboard() {
           <ThemeToggle />
         </header>
         {/* Strategy and blog progress, visible from every tab. */}
-        <JobProgress key={`jobs-${reloadKey}`} onOpen={(kind) => setTab(kind === 'strategy' ? 'strategy' : kind === 'settings' ? 'settings' : 'keywords')} />
+        <JobProgress key={`jobs-${reloadKey}`} onOpen={(kind) => setTab(kind === 'settings' ? 'settings' : kind === 'blog' ? 'keywords' : 'strategy')} />
 
         <main className="min-w-0 flex-1 p-3 sm:p-6">
           {who.blocked && (

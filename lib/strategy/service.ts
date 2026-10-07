@@ -20,6 +20,8 @@ async function revalidate(plan) {
   const used = new Set(
     (await prisma.strategy_keywords.findMany({ where: { period: { not: plan.period } }, select: { keyword_key: true } })).map((k) => k.keyword_key)
   );
+  // Published posts count as used topics too (K10).
+  for (const d of await prisma.drafts.findMany({ where: { status: 'published' }, select: { keyword: { select: { keyword: true } } } })) if (d.keyword?.keyword) used.add(keywordKey(d.keyword.keyword));
   const focus = String((await settings.get('focus_services')) || '').split(/\n|;/).map((s) => s.trim()).filter(Boolean);
   return validatePlan(plan, { usedKeywords: used, focusServices: focus });
 }

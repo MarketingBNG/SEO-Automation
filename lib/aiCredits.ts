@@ -87,6 +87,45 @@ async function spentAfterId(afterId: number) {
   return r._sum.cost_usd || 0;
 }
 
+// Real spend from Anthropic's Cost API, when an Admin API key (sk-ant-admin...) is set as
+// ANTHROPIC_ADMIN_KEY. Daily buckets in USD cents (decimal strings); data lags about 5 minutes.
+export async function anthropicSpend(sinceDay: string): Promise<{ usd: number; from: string } | null> {
+  const key = process.env.ANTHROPIC_ADMIN_KEY;
+  if (!key) return null;
+  let total = 0;
+  let page: string | null = null;
+  for (let i = 0; i < 20; i++) {
+    const q = new URLSearchParams({ starting_at: `${sinceDay}T00:00:00Z`, bucket_width: '1d', limit: '31' });
+    if (page) q.set('page', page);
+    const res = await fetch(`https://api.anthropic.com/v1/organizations/cost_report?${q}`, {
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) throw new Error(`Anthropic cost report failed (${res.status})`);
+    const json: any = await res.json();
+    for (const b of json.data || []) for (const r of b.results || []) total += Number(r.amount || 0) / 100;
+    if (!json.has_more || !json.next_page) break;
+    page = json.next_page;
+  }
+  return { usd: total, from: sinceDay };
+}
+
+// One alert per balance when 80% of it has been used (Slack + Activity log + dashboard banner).
+async function checkUsageAlert(s: { balance: number | null; spentSinceBalance: number | null; remaining: number | null; balanceSetAt: string | null }) {
+  if (s.balance === null || !s.balance || s.spentSinceBalance === null) return;
+  const used = s.spentSinceBalance / s.balance;
+  if (used < 0.8) return;
+  const stamp = `${s.balanceSetAt}|${s.balance}`;
+  if ((await settings.get('credit_alert_80_for')) === stamp) return;
+  await settings.set('credit_alert_80_for', stamp);
+  const { notify } = await import('./notify');
+  await notify(
+    `AI credits: ${Math.round(used * 100)}% used`,
+    `About $${(s.remaining ?? 0).toFixed(2)} of the $${s.balance.toFixed(2)} balance is left. Top up at console.anthropic.com (Settings > Billing; turn on auto-reload there so it never runs out), then enter the new balance in Settings > AI credits.`,
+    { action: 'alert.credits_80' }
+  );
+}
+
 export async function creditStatus() {
   const balance = num(await settings.get('credit_balance_usd'));
   const setAt = (await settings.get('credit_balance_set_at')) || null;
@@ -108,10 +147,16 @@ export async function creditStatus() {
     writer: process.env.ANTHROPIC_MODEL || 'claude-opus-5-5',
     strategy: process.env.STRATEGY_MODEL || process.env.ANTHROPIC_MODEL || 'claude-opus-5-5',
     factCheck: process.env.FACT_CHECK_MODEL || process.env.ANTHROPIC_MODEL || 'claude-opus-5-5',
+    secondCheck: process.env.SECOND_CHECK_MODEL || 'claude-sonnet-5-5',
     assistant: process.env.ASSISTANT_MODEL || 'claude-opus-5-5',
   };
+  const actual = setAt ? await anthropicSpend(setAt.slice(0, 10)).catch((e) => ({ error: e.message })) : null;
+  const usedPercent = balance && spent !== null ? Math.min(100, Math.round(((spent as number) / (balance as number)) * 100)) : null;
   return {
     balance,
+    usedPercent,
+    alert80: usedPercent !== null && usedPercent >= 80,
+    actual,
     balanceSetAt: setAt,
     spentSinceBalance: spent,
     remaining,
@@ -156,6 +201,7 @@ export async function setBalance(usd: number, actor = 'system', threshold?: numb
 
 async function checkThreshold() {
   const s = await creditStatus();
+  await checkUsageAlert(s).catch(() => {});
   if (s.remaining !== null && s.remaining < s.threshold && !s.paused) {
     await pauseAi(`Estimated credit left ($${s.remaining.toFixed(2)}) is below the pause threshold ($${s.threshold.toFixed(2)}).`);
   }

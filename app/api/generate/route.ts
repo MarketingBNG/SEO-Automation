@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { researchAndWriteBlog } from '@/lib/anthropic';
+import { startTimer, endTimer } from '@/lib/jobTimer';
 import * as activity from '@/lib/activity';
 import { progressWriter } from '@/lib/strategy/jobs';
 import { methodNotAllowed } from '../_lib/http';
@@ -80,6 +81,7 @@ export async function POST(req: NextRequest) {
           saveProgress(stage, lastPercent);
         }, 20000);
 
+        startTimer(`blog-${keyword.id}`, 'blog', `Blog: ${keyword.keyword}`);
         try {
           const result: any = await researchAndWriteBlog(keyword.keyword, keyword.notes, {
             signal: controller.signal,
@@ -106,6 +108,8 @@ export async function POST(req: NextRequest) {
               word_count: result.validation.wordCount,
               people_also_ask: JSON.stringify(result.peopleAlsoAsk || []),
               keyword_plan: JSON.stringify(result.keywordPlan || null),
+              linkedin_post: result.linkedin || null,
+              length_target: result.lengthTarget ? JSON.stringify(result.lengthTarget) : null,
               status: 'pending_review',
             },
           });
@@ -128,6 +132,7 @@ export async function POST(req: NextRequest) {
           }
 
           await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'drafted', progress_stage: null, progress_percent: null } });
+          await endTimer(`blog-${keyword.id}`, true);
 
           await activity.log('draft.generated', {
             entityType: 'draft',
@@ -170,6 +175,7 @@ export async function POST(req: NextRequest) {
         } finally {
           clearInterval(beat);
           blogRuns.delete(keyword.id);
+          await endTimer(`blog-${keyword.id}`, false);
           if (!closed) {
             closed = true;
             try {

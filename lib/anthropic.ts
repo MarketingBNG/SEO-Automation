@@ -10,6 +10,46 @@ import { gatherBrief, formatBrief, aiOverviewSummary } from './researchBrief';
 import { buildKeywordPlan } from './blogKeywords';
 import { chooseKeywords, planForPrompt } from './keywordPlanner';
 import { getTopLandingPages } from './ga4';
+import { topResultsLength } from './topLength';
+import { DEFAULT_CTAS, pickCta, withUtm, isOfficialSource, sameTopic } from './strategy/core';
+
+// The call to action for one blog: the service it fits best (Settings > service CTAs, else the
+// built-in list), with UTM tags so Zoho can show which blog and service a lead came from.
+export async function ctaFor(keyword, title = '', notes = '') {
+  let list = DEFAULT_CTAS;
+  try {
+    const custom = JSON.parse((await settings.get('service_ctas')) || '[]');
+    if (Array.isArray(custom) && custom.length) list = custom;
+  } catch {}
+  const c = pickCta(list, keyword, title, notes) || { service: 'Cross-border advisory', match: '', text: (await settings.get('cta_text')) || 'Talk to the USAIndiaCFO cross-border team about your situation', url: (await settings.get('cta_url')) || 'https://usaindiacfo.com/contact-us/' };
+  const slug = String(keyword).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+  return { service: c.service, text: c.text, url: withUtm(c.url, { campaign: slug, content: c.service.toLowerCase().replace(/[^a-z0-9]+/g, '-') }) };
+}
+
+// K5 Facts Register: facts already verified from an official source, reused across drafts.
+export async function approvedFactsFor(keyword, limit = 15) {
+  const rows = await prisma.verified_facts.findMany({ orderBy: { id: 'desc' }, take: 500 }).catch(() => []);
+  const words = String(keyword).toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+  return rows
+    .filter((r) => isOfficialSource(r.source_url) && (words.some((w) => r.claim.toLowerCase().includes(w)) || sameTopic(keyword, r.claim)))
+    .slice(0, limit);
+}
+
+// Saves every claim the fact check confirmed from an official source, so the next draft reuses it.
+export async function rememberFacts(checks, model) {
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  let saved = 0;
+  for (const c of checks || []) {
+    if (c.verdict !== 'correct' || !isOfficialSource(c.source_url) || !c.claim) continue;
+    const claim = String(c.claim).slice(0, 1000);
+    const value = (claim.match(/\d[\d,.]*\s?%|(?:\$|rs\.?|inr|₹)\s?\d[\d,.]*|\d[\d,.]*/i) || [''])[0];
+    await prisma.verified_facts
+      .upsert({ where: { claim }, create: { claim, value, source_url: c.source_url, verified_by: model, last_checked_at: now }, update: { source_url: c.source_url, verified_by: model, last_checked_at: now, times_used: { increment: 1 } } })
+      .then(() => saved++)
+      .catch(() => {});
+  }
+  return saved;
+}
 
 function getClient() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -65,10 +105,7 @@ Planned topics: ${(activePlan.blogPlan?.calendar || []).map((b) => `${b.title} [
     : '';
 
   const playbook = getWriterPlaybook();
-  const author = await settings.get('byline_author');
-  const reviewer = await settings.get('byline_reviewer');
-  const ctaText = await settings.get('cta_text');
-  const ctaUrl = await settings.get('cta_url');
+  const lessons = String((await settings.get('writer_lessons')) || '').trim();
   const playbookReference = playbook
     ? `\n\nSEO / GEO / AEO PLAYBOOK (permanent, researched and fact-checked; follow it on every article,
 together with the house rules above; if anything here conflicts with accuracy or the house voice,
@@ -76,10 +113,10 @@ accuracy and the house voice win):\n${playbook}
 
 HOW THE PLAYBOOK MAPS TO THIS DASHBOARD (these override the playbook where they differ):
 - Do NOT write an <h1> in the content: WordPress prints the SEO title as the H1. Start at <h2>.
-- Byline: put one short line right after the opening answer: "${author ? `By ${author}` : 'By [AUTHOR NAME, CREDENTIAL]'}. ${reviewer ? `Reviewed by ${reviewer}` : 'Reviewed by [REVIEWER NAME, CREDENTIAL]'}." Use exactly these names; never invent or change a name or credential. Do not write "Published" or "Last updated" dates: WordPress shows the dates.
-- Call to action: end the article (after the disclaimer) with exactly one call to action: "${ctaText}", linked to ${ctaUrl}.
+- Byline: do NOT write a byline, author name or reviewer line. The dashboard adds the author, the CA/CPA reviewer and the "last reviewed" date when the post is published. Do not write "Published" or "Last updated" dates either.
+- Call to action: end the article (after the disclaimer) with exactly one call to action written for THIS article's reader, using the CALL TO ACTION given in the request (its service, link and idea). Make it specific to the problem the article solved, one or two sentences, no hype, with the link on descriptive anchor text.
 - The Facts Register goes ONLY in the ===FACTS=== section of the output format below, never in ===CONTENT===. List the FAQ sources (each FAQ question with its source and market, e.g. "paa, US") as bullets at the end of ===RESEARCH_NOTES===.
-- Placeholders such as [PRACTITIONER NOTE NEEDED], [VISUAL SUGGESTION: ...] and the byline placeholders are allowed; the reviewer replaces them and publishing is blocked until they do.`
+- Placeholders such as [PRACTITIONER NOTE NEEDED] and [VISUAL SUGGESTION: ...] are allowed; the reviewer replaces them and publishing is blocked until they do. NEVER write notes to us inside the article ("Here is your...", "CTA section", "Meta description:", "I hope this helps"): a check blocks any draft that has them.`
     : '';
 
   return `You are the USAIndiaCFO blog writer. USAIndiaCFO is a Virtual CFO firm serving the USA
@@ -124,9 +161,13 @@ VOICE (USAIndiaCFO blog house style): ${voiceGuidelines}
   "Here's what nobody tells you", empty closers like "The future is bright"). No em dashes.
 - Where the piece gives guidance, include a brief line noting it is general information, not
   individualized tax/legal advice.
-- Length: size the article to what the search intent needs; about ${maxWords} words is the house
-  guideline for most topics. Never pad, and cut background, generic definitions and repeated
-  caveats before adding words.${playbookReference}${skillReference}${clientInsightReference}${strategyReference}
+- Length: match what the pages ranking now cover. The request gives a LENGTH TARGET measured from the
+  current top results; stay inside it. Without one, about ${maxWords} words. Never pad, and cut
+  background, generic definitions and repeated caveats before adding words.
+- Both sides of the border: where the topic touches both countries, cover the US side, the India side
+  and how they connect (treaty relief, credits, reporting in both places).${playbookReference}${
+    lessons ? `\n\nLESSONS LEARNED (from our reviewers' rejections, blogs held by checks, fact-check corrections and how published posts performed; follow them):\n${lessons}` : ''
+  }${skillReference}${clientInsightReference}${strategyReference}
 
 CHECKED AUTOMATICALLY (a draft that fails any of these is sent back to you):
 - Title 50-60 characters (never over 65) with the target keyword early. Meta description 120-156
@@ -186,6 +227,10 @@ List every hard claim from the article, in the order they appear. If a claim has
 source, still list it and leave source name/URL as "NONE - could not verify".>
 ===RESEARCH_NOTES===
 <3-6 bullet points summarizing your research process, for human review>
+===LINKEDIN===
+<a LinkedIn post for the firm's page that promotes this article: a specific first line, 3-5 short
+lines with the key takeaway and one real number from the article, then "Read the full guide:" and the
+words LINK HERE. 120-200 words, no hashtag spam (3 at most), no emojis, no em dashes>
 ===END===`;
 }
 
@@ -307,7 +352,8 @@ function parseBlogResponse(text) {
   const meta = get('===META===', '===CONTENT===');
   const content = get('===CONTENT===', '===FACTS===');
   const factsBlock = get('===FACTS===', '===RESEARCH_NOTES===');
-  const researchNotes = get('===RESEARCH_NOTES===', '===END===');
+  const researchNotes = text.includes('===LINKEDIN===') ? get('===RESEARCH_NOTES===', '===LINKEDIN===') : get('===RESEARCH_NOTES===', '===END===');
+  const linkedin = text.includes('===LINKEDIN===') ? get('===LINKEDIN===', '===END===') : '';
 
   if (!title || !content) {
     throw new Error(
@@ -333,16 +379,22 @@ function parseBlogResponse(text) {
     })
     .filter((f) => f.claim);
 
-  return { title, meta, content, researchNotes, facts, raw: text };
+  return { title, meta, content, researchNotes, facts, linkedin, raw: text };
 }
 
 const WRITER_SEARCHES = () => Number(process.env.WRITER_MAX_SEARCHES) || 40;
 // The fact checker can run on a different (stronger) model than the writer. Default: the same top model.
 const FACT_CHECK_MODEL = () => process.env.FACT_CHECK_MODEL || MODEL;
+// K6: a second, different model checks every draft too. The rounds alternate between the two, so a
+// draft only passes when both models find nothing wrong in two checks in a row.
+const SECOND_CHECK_MODEL = () => {
+  const m = process.env.SECOND_CHECK_MODEL || 'claude-sonnet-5-5';
+  return m === FACT_CHECK_MODEL() ? (m === 'claude-sonnet-5-5' ? 'claude-opus-5-5' : 'claude-sonnet-5-5') : m;
+};
 
 // Re-verifies every hard claim in a draft (numbers, rates, thresholds, deadlines, sections, forms,
 // "new" rules) against primary sources with web search, independently of the writer.
-async function factCheckDraft(result, signal, { mustCheck = [] }: any = {}) {
+async function factCheckDraft(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL() }: any = {}) {
   const system = `You are a senior US-India tax fact checker. You did not write this article. Find every hard
 claim in it (a number, rate, threshold, deadline, statute or section, form number, or "new" rule) and
 verify each one against a primary source (irs.gov, treasury.gov, fincen.gov, incometax.gov.in,
@@ -354,14 +406,22 @@ verdict is "correct" only when a primary source confirms it as currently applica
   const user = `Title: ${result.title}\nMeta: ${result.meta}\n\nArticle HTML:\n${result.content}\n\nWriter's Facts Register:\n${(result.facts || [])
     .map((f) => `${f.fact_id} | ${f.claim} | ${f.source_url}`)
     .join('\n')}${mustCheck.length ? `\n\nThese sentences state figures, rates or deadlines. Each one MUST appear in "checks" (quote it as "claim"):\n${mustCheck.map((x) => `- ${x}`).join('\n')}` : ''}`;
-  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 60, effort: 'max', model: FACT_CHECK_MODEL(), feature: 'fact-check' });
+  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 60, effort: 'max', model, feature: 'fact-check' });
   const m = text.match(/===JSON===([\s\S]*?)===END===/);
   try {
     const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
-    return { checks: Array.isArray(parsed.checks) ? parsed.checks : [], model: FACT_CHECK_MODEL() };
+    const checks = Array.isArray(parsed.checks) ? parsed.checks : [];
+    // K4: a rule backed only by a blog or news site is not confirmed.
+    for (const c of checks) {
+      if (c.verdict === 'correct' && c.source_url && !isOfficialSource(c.source_url)) {
+        c.verdict = 'unverifiable';
+        c.correction = `Only a non-official source (${c.source_url}) was found; link the official source (IRS, CBDT, FinCEN, RBI, MCA, the treaty text or the state site) or remove the claim.`;
+      }
+    }
+    return { checks, model };
   } catch {
     // An unreadable check never lets a draft through as checked.
-    return { checks: [{ claim: 'Fact check output could not be read', verdict: 'unverifiable', correction: '', source_url: '' }], model: FACT_CHECK_MODEL() };
+    return { checks: [{ claim: 'Fact check output could not be read', verdict: 'unverifiable', correction: '', source_url: '' }], model };
   }
 }
 
@@ -400,15 +460,19 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
   const log = [];
   for (let round = 1; round <= maxRounds; round++) {
     const mustCheck = mustCheckOf(current.content);
-    const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck });
+    const model = round % 2 === 1 ? FACT_CHECK_MODEL() : SECOND_CHECK_MODEL();
+    const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck, model });
     const bad = result.checks.filter((c) => c.verdict !== 'correct');
     // A figure sentence the checker skipped counts as unverified.
     const checked = result.checks.map((c) => String(c.claim || '').toLowerCase());
     const skipped = mustCheck.filter((sent) => !checked.some((c) => c && (sent.toLowerCase().includes(c) || c.includes(sent.toLowerCase().slice(0, 60)))));
-    log.push({ round, claims: result.checks.length, wrong: bad.length, skipped: skipped.length });
+    log.push({ round, model: result.model || model, claims: result.checks.length, wrong: bad.length, skipped: skipped.length });
     if (!bad.length && !skipped.length) {
       clean++;
-      if (clean >= 2) return { ok: true, rounds: round, draft: current, log };
+      if (clean >= 2) {
+        await rememberFacts(result.checks, result.model || model).catch(() => 0);
+        return { ok: true, rounds: round, draft: current, log };
+      }
       continue;
     }
     clean = 0;
@@ -433,9 +497,21 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
   const chosen = chooseKeywords(keywordPlan, keyword);
   onProgress?.(`Keyword plan ready: ${chosen.secondary.length} secondary keywords, ${chosen.questions.length} questions. Writing to the plan…`, 15);
 
+  onProgress?.('Measuring the pages ranking now and picking the call to action…', 16);
+  const length = await topResultsLength(brief, parseInt(await settings.get('max_words'), 10) || 1600).catch(() => null);
+  const cta = await ctaFor(keyword, '', notes);
+  const known = await approvedFactsFor(keyword).catch(() => []);
+
   const userPrompt = [
     `Target keyword: "${keyword}"`,
     notes ? `Additional context from the content team: ${notes}` : '',
+    length?.median
+      ? `LENGTH TARGET: ${length.min}-${length.max} words. The ${length.basedOn} pages ranking now that we could read use about ${length.median} words (median). Cover what they cover and what they miss, without padding.`
+      : '',
+    `CALL TO ACTION: service "${cta.service}". Idea: ${cta.text} Link (use exactly): ${cta.url}`,
+    known.length
+      ? `FACTS REGISTER (already verified from official sources; reuse them with the same source link when relevant, and still check that each is current):\n${known.map((f) => `- ${f.claim} | ${f.source_url} | checked ${f.last_checked_at || f.created_at}`).join('\n')}`
+      : '',
     planForPrompt(chosen),
     formatBrief(brief),
   ]
@@ -464,6 +540,8 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
       keyword,
       paaQuestions: brief.peopleAlsoAsk,
       keywordPlan,
+      lengthTarget: length,
+      ctaUrl: cta.url,
     });
 
     // Independent fact check: a separate maximum-effort pass (FACT_CHECK_MODEL) re-verifies every
@@ -501,6 +579,8 @@ corrected draft again in the exact same format (===TITLE=== through ===END===):\
     validation,
     peopleAlsoAsk: markUsedQuestions(result.content, brief.peopleAlsoAsk),
     keywordPlan,
+    lengthTarget: length,
+    cta,
     repairAttempts: attempt,
     productionState: validation.passed ? 'READY_FOR_REVIEW' : 'NEEDS_ATTENTION',
   };

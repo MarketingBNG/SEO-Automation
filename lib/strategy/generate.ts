@@ -335,7 +335,8 @@ export async function generateStrategy({ window = strategyWindow(), actor = 'Mon
   };
   const messages = [{ role: 'user', content: `Build the strategy for the 30 days from ${window.start} to ${window.end} (${period}). Targets are for these 30 days. Data (JSON):\n${JSON.stringify(payload).slice(0, 180000)}` }];
   const opts = { maxUses: STRATEGY_SEARCHES(), effort: 'max', model: STRATEGY_MODEL(), feature: 'strategy' };
-  const { text } = await callClaude(systemPrompt(siteUrl), messages, signal, opts);
+  const { lessonsBlock } = await import('../lessons');
+  const { text } = await callClaude(systemPrompt(siteUrl) + (await lessonsBlock()), messages, signal, opts);
   let ai;
   try {
     ai = parseJson(text);
@@ -371,6 +372,7 @@ export async function generateStrategy({ window = strategyWindow(), actor = 'Mon
   onProgress?.('Filling numbers from data and validating', 85);
   const plan = await buildPlan(ai, inputs, period, window);
   const used = new Set((await prisma.strategy_keywords.findMany({ select: { keyword_key: true } })).map((k) => k.keyword_key));
+  for (const d of await prisma.drafts.findMany({ where: { status: 'published' }, select: { keyword: { select: { keyword: true } } } })) if (d.keyword?.keyword) used.add(keywordKey(d.keyword.keyword));
   const validation = validatePlan(plan, { usedKeywords: used, focusServices: inputs.focusServices });
 
   // Older strategies for the same month that were never approved are replaced by this one.

@@ -652,6 +652,7 @@ function MonthRunning() {
   const [rejecting, setRejecting] = useState<number | null>(null);
   const [feedback, setFeedback] = useState('');
   const [busy, setBusy] = useState<number | null>(null);
+  const [reviewer, setReviewer] = useState<Record<number, string>>({});
   const canReview = useRole().can('strategy.approve');
   const load = useCallback(async () => {
     setData(await fetch('/api/strategy/schedule').then((r) => r.json()).catch(() => null));
@@ -663,7 +664,7 @@ function MonthRunning() {
 
   async function decide(id: number, action: 'approve' | 'reject') {
     setBusy(id);
-    const res = await fetch(`/api/strategy/schedule/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback }) });
+    const res = await fetch(`/api/strategy/schedule/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback, reviewer: reviewer[id] || '' }) });
     const json = await res.json().catch(() => ({}));
     setBusy(null);
     if (!res.ok) return setMsg(json.error || 'Could not save.');
@@ -685,20 +686,27 @@ function MonthRunning() {
   const STATUS: Record<string, string> = { planned: 'Planned', drafting: 'Being written', in_review: 'In review', rejected: 'Rejected, rewrite queued', revising: 'Being rewritten', held: 'Held', published: 'Published', failed: 'Failed' };
 
   if (!data?.rows?.length) return null;
+  const overdue = data.rows.filter((r: any) => r.overdue);
   return (
     <div className="space-y-4">
       {msg && <div className="rounded-lg border p-2 text-sm">{msg}</div>}
+      {overdue.length > 0 && (
+        <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-3 text-sm font-medium text-red-700 dark:text-red-400">
+          {overdue.length} blog{overdue.length === 1 ? ' has' : 's have'} waited more than 48 hours for review: {overdue.map((r: any) => r.title).join('; ')}. A reminder goes out every 12 hours until someone decides.
+        </div>
+      )}
       <Section
         title="This month's blogs"
-        description="Every blog is fact-checked against official sources automatically. A manager then has 48 hours to approve or reject it. If nobody rejects it, it is approved and published automatically under one of the partners' names, with its image. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
+        description="Every blog is fact-checked against official sources by two different AI models. A manager then has 48 hours to approve or reject it. Tax, legal and compliance blogs wait for a named CA/CPA reviewer; other blogs are approved and published automatically if nobody rejects them. Each post goes out under one of the partners' names, with its image, reviewer line and a call to action for its service. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
       >
         <DataTable head={['Slot', 'Title', 'Fact check', 'Status', 'Review', '']}>
           {data.rows.map((r: any) => (
-            <tr key={r.id}>
-              <td className={TD_MUTED}>{fmtDate(r.publish_at)}</td>
+            <tr key={r.id} className={r.overdue ? 'bg-red-500/10' : undefined}>
+              <td className={TD_MUTED}>{fmtDate(r.publish_at)}{r.overdue && <div className="font-semibold text-red-600 dark:text-red-400">Review overdue</div>}</td>
               <td className={TD}>
                 {r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}
-                {r.author && <div className="text-xs text-muted-foreground">By {r.author}</div>}
+                {r.author && <div className="text-xs text-muted-foreground">By {r.author}{r.expert_reviewer ? `, reviewed by ${r.expert_reviewer}` : ''}</div>}
+                {r.cta && <div className="text-xs text-muted-foreground">Call to action: {r.cta.service}</div>}
               </td>
               <td className={TD}>{factCheck(r)}</td>
               <td className={TD}>
@@ -709,7 +717,13 @@ function MonthRunning() {
               <td className={TD}>
                 {r.status === 'in_review' && (
                   <div className="space-y-1 text-xs">
-                    {r.reviewed_at ? <div>Approved by {r.reviewed_by}</div> : r.auto_publish_at && <div className="text-muted-foreground">Auto-publishes {fmtDate(r.auto_publish_at.slice(0, 19).replace('T', ' '))} if nobody rejects it</div>}
+                    {r.reviewed_at ? (
+                      <div>Approved by {r.reviewed_by}</div>
+                    ) : r.needs_expert ? (
+                      <div className="font-medium text-amber-700 dark:text-amber-400">Tax, legal or compliance topic: waits for a CA/CPA to approve it. It never publishes on its own.</div>
+                    ) : (
+                      r.auto_publish_at && <div className="text-muted-foreground">Auto-publishes {fmtDate(r.auto_publish_at.slice(0, 19).replace('T', ' '))} if nobody rejects it</div>
+                    )}
                     {r.revision_note?.length > 0 && (
                       <details open>
                         <summary className="cursor-pointer font-medium">Rewrite {r.revisions}: what you asked and what changed</summary>
@@ -724,9 +738,16 @@ function MonthRunning() {
                 {r.status === 'rejected' && r.reject_feedback && <div className="text-xs text-muted-foreground">Feedback from {r.rejected_by}: {r.reject_feedback}</div>}
               </td>
               <td className={TD}>
-                {canReview && r.status === 'in_review' && !r.reviewed_at && (
+                {canReview && ['in_review', 'held'].includes(r.status) && r.draft_id && !r.reviewed_at && (
                   <div className="flex flex-col gap-1">
-                    <Button size="sm" disabled={busy === r.id} onClick={() => decide(r.id, 'approve')}>Approve</Button>
+                    {r.needs_expert && (
+                      <select className="h-8 w-52 rounded-md border bg-background px-1 text-xs" value={reviewer[r.id] || ''} onChange={(e) => setReviewer((m) => ({ ...m, [r.id]: e.target.value }))} aria-label="CA/CPA reviewer">
+                        <option value="">Reviewed by (CA/CPA)...</option>
+                        {(data.reviewers || []).map((n: string) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    )}
+                    {r.needs_expert && !(data.reviewers || []).length && <span className="w-52 text-xs text-muted-foreground">Add CA/CPA reviewers in Settings &gt; Blog rules first.</span>}
+                    <Button size="sm" disabled={busy === r.id || (r.needs_expert && !reviewer[r.id])} onClick={() => decide(r.id, 'approve')}>Approve</Button>
                     <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => setRejecting(rejecting === r.id ? null : r.id)}>Reject</Button>
                   </div>
                 )}

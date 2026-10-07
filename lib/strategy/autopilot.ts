@@ -22,7 +22,11 @@ import { authorNames, pickAuthor, wpAuthorId } from '../authors';
 import { makeCover } from '../cover';
 import { saveFile } from '../storage';
 import { callClaude } from '../anthropic';
-import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh } from './core';
+import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh, needsExpertReview, reviewOverdue, REVIEW_HOURS } from './core';
+import { requireExpert } from '../reviewers';
+import { submitToBing } from '../bing';
+import { withByline, expertSchema } from '../byline';
+import { startTimer, endTimer, timed } from '../jobTimer';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
 const HOST = () => SITE().replace(/^https?:\/\//, '').replace(/^www\./, '');
@@ -39,9 +43,12 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
   });
   const onProgress = progressWriter((stage, percent) => prisma.keywords.update({ where: { id: kw.id }, data: { progress_stage: stage, progress_percent: percent } }));
   let result;
+  startTimer(`blog-${kw.id}`, 'blog', `Blog: ${row.main_keyword}`);
   try {
     result = await write(row.main_keyword, kw.notes, { onProgress });
+    await endTimer(`blog-${kw.id}`, true);
   } catch (err: any) {
+    await endTimer(`blog-${kw.id}`, false);
     // Never leave the keyword stuck as "generating"; the next scheduler run tries again.
     await prisma.keywords.update({ where: { id: kw.id }, data: { status: 'failed', error: String(err.message || err).slice(0, 1000), progress_stage: null, progress_percent: null } });
     await update(row.id, { status: 'planned' });
@@ -61,6 +68,8 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
       word_count: result.validation.wordCount,
       people_also_ask: JSON.stringify(result.peopleAlsoAsk || []),
       keyword_plan: JSON.stringify(result.keywordPlan || null),
+      linkedin_post: result.linkedin || null,
+      length_target: result.lengthTarget ? JSON.stringify(result.lengthTarget) : null,
       status: 'pending_review',
       target_wp_post_id: null,
     },
@@ -69,7 +78,7 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
     await prisma.facts.create({ data: { draft_id: draft.id, fact_id: f.fact_id, claim: f.claim, source_name: f.source_name, source_url: f.source_url, jurisdiction: f.jurisdiction, effective_date: f.effective_date } });
   }
   await prisma.keywords.update({ where: { id: kw.id }, data: { status: 'drafted', progress_stage: null, progress_percent: null } });
-  await update(row.id, { keyword_id: kw.id, draft_id: draft.id, status: 'planned' });
+  await update(row.id, { keyword_id: kw.id, draft_id: draft.id, status: 'planned', cta: result.cta ? JSON.stringify(result.cta) : row.cta || null });
   await activity.log('schedule.drafted', { entityType: 'draft', entityId: draft.id, details: `"${result.title}" for ${row.publish_at} UTC` });
   return draft;
 }
@@ -131,9 +140,11 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   const prev = row.fact_check ? JSON.parse(row.fact_check) : null;
   if (prev && prev.stamp === draft.updated_at) return { ...prev, draft };
   const facts = await prisma.facts.findMany({ where: { draft_id: draft.id }, select: { fact_id: true, claim: true, source_url: true } });
-  const result = await verify(
-    { title: draft.title, meta: draft.meta_description, content: draft.content_html || '', facts },
-    { mustCheckOf: (html) => extractClaims(html).map((c) => c.sentence) }
+  const result = await timed(`factcheck-${draft.id}`, 'fact-check', `Fact check: ${draft.title}`, () =>
+    verify(
+      { title: draft.title, meta: draft.meta_description, content: draft.content_html || '', facts },
+      { mustCheckOf: (html) => extractClaims(html).map((c) => c.sentence) }
+    )
   );
   let saved = draft;
   const changed = result.draft.content !== draft.content_html || result.draft.title !== draft.title || result.draft.meta !== draft.meta_description;
@@ -160,6 +171,15 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
     await notify(`Blog held: ${row.title}`, 'No draft was ready at the publish slot.');
     return 'held';
   }
+  // K2: tax, legal and compliance blogs publish only after a named CA/CPA approves them.
+  if (!row.reviewed_at && (await requireExpert()) && needsExpertReview(row.main_keyword, row.title)) {
+    const why = 'Waiting for a CA/CPA reviewer to approve it in Monthly Strategy (tax, legal and compliance blogs never publish on their own).';
+    if (row.status !== 'in_review' && row.hold_reasons !== JSON.stringify([why])) {
+      await update(row.id, { status: 'held', hold_reasons: JSON.stringify([why]) });
+      await notify(`Blog waiting for CA/CPA approval: ${row.title}`, why);
+    }
+    return 'held';
+  }
   const reasons = [];
   const paused = await publishingPaused();
   if (paused) reasons.push(`Auto-publishing paused: ${paused}.`);
@@ -180,17 +200,17 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   // Reviewed = marked reviewed, approved in Drafts & Review, or edited by a person after review opened
   // (the fact checker's own corrections do not count as a review).
   const reviewed = Boolean(row.reviewed_at) || draft.status === 'approved' || Boolean(row.review_started && draft.updated_at > row.review_started && draft.updated_at !== (row.fact_check ? JSON.parse(row.fact_check).stamp : null));
-  const html = `${checked.content_html}\n${faqSchema(checked.content_html) || ''}`;
   let post;
   let authorName = row.author || null;
   let authorId: number | null = null;
+  if (!row.refresh_url) authorName = row.author || pickAuthor(await authorNames());
+  const html = `${withByline(checked.content_html, authorName, row.expert_reviewer)}\n${faqSchema(checked.content_html) || ''}\n${expertSchema({ title: checked.title, author: authorName, reviewer: row.expert_reviewer }) || ''}`;
   if (row.refresh_url) {
     const { json: found } = await wpRequest('GET', '/wp/v2/posts', { query: { slug: new URL(row.refresh_url).pathname.split('/').filter(Boolean).pop(), _fields: 'id,link' } });
     if (!found?.[0]) throw new Error(`Refresh target not found: ${row.refresh_url}`);
     post = await updatePost(found[0].id, { title: checked.title, contentHtml: html, excerpt: checked.meta_description, metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, status: 'publish' });
   } else {
     // A random partner is the author; a branded cover is made when the draft has no image.
-    authorName = row.author || pickAuthor(await authorNames());
     authorId = await wpAuthorId(authorName).catch(() => null);
     let imageKey = checked.featured_image_path;
     if (!imageKey) {
@@ -200,7 +220,10 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
     const featuredMediaId = imageKey ? await uploadFeaturedImage(imageKey).catch(() => undefined) : undefined;
     post = await publishPost({ title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined });
   }
-  await prisma.drafts.update({ where: { id: checked.id }, data: { status: 'published', wp_post_id: post.id, wp_post_url: post.link, updated_at: sqlNow() } });
+  await prisma.drafts.update({
+    where: { id: checked.id },
+    data: { status: 'published', wp_post_id: post.id, wp_post_url: post.link, linkedin_post: checked.linkedin_post ? checked.linkedin_post.replace(/LINK HERE/g, post.link) : null, updated_at: sqlNow() },
+  });
 
   // After publish: each step is independent and its result is logged.
   const log: any = {};
@@ -213,12 +236,13 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   };
   await step('indexNow', () => submitIndexNow([post.link]));
   await step('searchConsoleSitemap', () => resubmitSitemap());
+  if (process.env.BING_WEBMASTER_API_KEY) await step('bingWebmaster', () => submitToBing([post.link]));
   await step('seRankingTracking', () => addTrackedKeyword(row.main_keyword));
   await step('internalLinks', () => addInternalLinks(post.link, checked.title, row.main_keyword));
 
   log.author = authorName ? { ok: Boolean(authorId), result: authorId ? `${authorName} (WordPress user ${authorId})` : `${authorName} is not a WordPress user yet, so the default author was used` } : undefined;
   await update(row.id, { status: 'published', approval_mode: reviewed ? 'reviewed' : 'auto', wp_post_url: post.link, post_publish_log: JSON.stringify(log), hold_reasons: null, author: authorName });
-  await activity.log('schedule.published', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}" ${reviewed ? 'approved by a reviewer' : 'auto-approved after 48 hours with no rejection'}, by ${authorName || 'the default author'}: ${post.link}` });
+  await activity.log('schedule.published', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}" ${reviewed ? `approved by a reviewer${row.expert_reviewer ? ` (${row.expert_reviewer})` : ''}` : 'auto-approved after 48 hours with no rejection'}, by ${authorName || 'the default author'}: ${post.link}` });
   return 'published';
 }
 
@@ -291,8 +315,9 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
     }
   }
 
+  const expertOn = await requireExpert();
   for (const row of rows) {
-    const action = scheduleAction(row, now);
+    const action = scheduleAction(row, now, 0, { requireExpert: expertOn });
     try {
       if (action === 'open_review') {
         if (!row.draft_id && summary.drafted < maxDrafts) {
@@ -321,6 +346,22 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
     }
   }
 
+  // K9: a review that ran past 48 hours gets a reminder, then one every 12 hours until decided.
+  summary.reminders = 0;
+  for (const row of rows.filter((r) => reviewOverdue(r, now))) {
+    const last = row.reminded_at ? Date.parse(row.reminded_at.replace(' ', 'T') + 'Z') : 0;
+    if (now.getTime() - last < 12 * 3600000) continue;
+    const hours = Math.round((now.getTime() - Date.parse(row.review_started.replace(' ', 'T') + 'Z')) / 3600000);
+    const expert = expertOn && needsExpertReview(row.main_keyword, row.title);
+    await notify(
+      `Overdue review (${hours} hours): ${row.title}`,
+      `This blog has waited ${hours} hours, past the ${REVIEW_HOURS}-hour review time. ${expert ? 'It is a tax, legal or compliance blog, so it will not publish until a CA/CPA approves it.' : 'It publishes on its own if nobody rejects it.'} Approve or reject it in Monthly Strategy.`,
+      { action: 'alert.review_overdue' }
+    );
+    await update(row.id, { reminded_at: sqlNow(now) });
+    summary.reminders++;
+  }
+
   // Rank check once per day, even though the job runs every 15 minutes.
   const today = now.toISOString().slice(0, 10);
   if ((await settings.get('last_rank_check')) !== today) {
@@ -338,6 +379,12 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
   if ((await settings.get('last_speed_run')) !== today && (await prisma.seo_strategies.count({ where: { status: 'approved' } }))) {
     summary.speed = await runSpeedFixes().catch((e) => ({ error: e.message }));
     if (!summary.speed?.error) await settings.set('last_speed_run', today);
+  }
+  // Live website checks (AI text on posts, sitemap in robots.txt, attachment pages), once per day.
+  if ((await settings.get('last_site_check')) !== today) {
+    const { runSiteChecks } = await import('../siteChecks');
+    summary.siteChecks = await runSiteChecks().catch((e) => ({ error: e.message }));
+    if (!summary.siteChecks?.error) await settings.set('last_site_check', today);
   }
     // Fireflies meetings: pull new ones and auto-review them, once per day.
   if (process.env.FIREFLIES_API_KEY && (await settings.get('last_meeting_sync')) !== today) {

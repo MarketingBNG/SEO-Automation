@@ -11,7 +11,7 @@ delete process.env.BLOB_READ_WRITE_TOKEN;
 const calls: string[] = [];
 globalThis.fetch = (async (url: any, init: any = {}) => {
   const u = String(url);
-  calls.push(`${init.method || 'GET'} ${u}`);
+  calls.push(`${init.method || 'GET'} ${u}${init.body && typeof init.body === 'string' ? ` ${init.body}` : ''}`);
   if (u.endsWith('/robots.txt')) return new Response('User-agent: *\nDisallow: /wp-admin/\n', { status: 200 });
   if (u.includes('/wp-json/wp/v2/posts/5') && init.method === 'POST') return Response.json({ id: 5, link: 'https://usaindiacfo.com/old-post/', meta: {} });
   if (u.includes('/wp-json/wp/v2/posts') && (init.method || 'GET') === 'POST') return Response.json({ id: 99, link: 'https://usaindiacfo.com/new-post/', meta: {} });
@@ -211,9 +211,21 @@ async function main() {
   s = await runDaily(new Date('2026-11-03T04:30:00Z'), { verify: fixingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
   assert.equal(r!.status, 'in_review', 'reviewer still has the rest of the 48 hours');
+  // K2: an FBAR (tax) blog never publishes without a CA/CPA, even after 48 hours; a reminder goes out.
   s = await runDaily(new Date('2026-11-04T04:40:00Z'), { verify: fixingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
+  assert.equal(r!.status, 'in_review', 'tax blog waits for a CA/CPA');
+  assert.ok(r!.reminded_at, 'overdue reminder sent');
+  assert.ok(await prisma.activity_log.findFirst({ where: { action: 'alert.review_overdue' } }));
+  console.log('PASS tax blog not auto-published without a CA/CPA; overdue reminder sent');
+
+  // With the expert rule off, the unreviewed blog is auto-approved after 48 hours.
+  const settingsMod = await import('../lib/settings');
+  await settingsMod.set('require_expert_review', '0');
+  s = await runDaily(new Date('2026-11-04T04:45:00Z'), { verify: fixingVerify });
+  r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
   assert.equal(r!.status, 'published', JSON.stringify({ s, reasons: r!.hold_reasons }));
+  await settingsMod.set('require_expert_review', '1');
   assert.ok(['Harsh Jain', 'Naman Gangwal', 'Amit Agarwal', 'Akshay Nahar'].includes(r!.author!), `author ${r!.author}`);
   assert.ok((await prisma.drafts.findUnique({ where: { id: draft.id } }))!.featured_image_path, 'a cover image was made');
   assert.equal(r!.approval_mode, 'auto');
@@ -229,18 +241,21 @@ async function main() {
   const kw2 = await prisma.keywords.create({ data: { keyword: second.main_keyword, status: 'drafted' } });
   const html2 = html.replace('The FBAR filing deadline is April 30 with an automatic extension.', 'Reviewed version of the answer for this question here.');
   const d2 = await prisma.drafts.create({ data: { keyword_id: kw2.id, title: 'Reviewed guide title', meta_description: 'Reviewed meta.', content_html: html2, status: 'pending_review' } });
-  await prisma.blog_schedule.update({ where: { id: second.id }, data: { draft_id: d2.id, status: 'in_review', review_started: '2026-11-04 04:30:00', reviewed_by: 'Reviewer A', reviewed_at: '2026-11-04 12:00:00' } });
+  await prisma.blog_schedule.update({ where: { id: second.id }, data: { draft_id: d2.id, status: 'in_review', review_started: '2026-11-04 04:30:00', reviewed_by: 'Reviewer A', reviewed_at: '2026-11-04 12:00:00', expert_reviewer: 'Akshay Nahar, CA' } });
   await runDaily(new Date(Date.parse(second.publish_at.replace(' ', 'T') + 'Z')), { verify: fixingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: second.id } });
   assert.equal(r!.status, 'published');
   assert.equal(r!.approval_mode, 'reviewed');
-  console.log('PASS approved blog published at its slot as the approved version');
+  const sent = calls.filter((c) => /^POST https:\/\/usaindiacfo\.com\/wp-json\/wp\/v2\/posts(\?| )/.test(c)).pop() || '';
+  assert.ok(sent.includes('Reviewed by') && sent.includes('Akshay Nahar, CA'), 'byline names the CA reviewer');
+  assert.ok(sent.includes('reviewedBy'), 'expert schema added');
+  console.log('PASS approved blog published at its slot with the CA reviewer byline and expert schema');
 
   // A blog whose claims cannot all be verified is held, never published.
   const third = (await prisma.blog_schedule.findMany({ orderBy: { publish_at: 'asc' } }))[2];
   const kw3 = await prisma.keywords.create({ data: { keyword: third.main_keyword, status: 'drafted' } });
   const d3 = await prisma.drafts.create({ data: { keyword_id: kw3.id, title: 'Unverifiable guide', meta_description: 'Meta.', content_html: html, status: 'pending_review' } });
-  await prisma.blog_schedule.update({ where: { id: third.id }, data: { draft_id: d3.id, status: 'in_review' } });
+  await prisma.blog_schedule.update({ where: { id: third.id }, data: { draft_id: d3.id, status: 'in_review', reviewed_at: '2026-11-05 10:00:00', reviewed_by: 'Reviewer A', expert_reviewer: 'Akshay Nahar, CA' } });
   await runDaily(new Date(Date.parse(third.publish_at.replace(' ', 'T') + 'Z')), { verify: failingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: third.id } });
   assert.equal(r!.status, 'held');

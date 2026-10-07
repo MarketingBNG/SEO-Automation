@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
+import { existingTopics, duplicateReason } from '@/lib/duplicates';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../../_lib/http';
 
@@ -37,6 +38,16 @@ export async function POST(req: NextRequest) {
       const notes = notesKey ? String(row[notesKey] || '').trim() : '';
       data.push({ batch_name: batchName, keyword, notes, status: 'pending' });
     }
+    // K10: duplicate topics are rejected with a reason before they enter the pipeline.
+    const known = await existingTopics();
+    const rejected: string[] = [];
+    for (let i = data.length - 1; i >= 0; i--) {
+      const why = await duplicateReason(data[i].keyword, [...known, ...data.slice(0, i).map((d) => ({ keyword: d.keyword, where: 'repeated in this upload' }))]);
+      if (why) {
+        rejected.unshift(why);
+        data.splice(i, 1);
+      }
+    }
     if (data.length) await prisma.keywords.createMany({ data });
     const inserted = data.length;
 
@@ -46,7 +57,7 @@ export async function POST(req: NextRequest) {
       actor: await getActor(),
     });
 
-    return NextResponse.json({ inserted, batchName, keywordColumnUsed: keywordKey }, { status: 200 });
+    return NextResponse.json({ inserted, rejected, batchName, keywordColumnUsed: keywordKey }, { status: 200 });
   } catch (err: any) {
     console.error(err);
     return NextResponse.json({ error: err.message }, { status: 500 });
