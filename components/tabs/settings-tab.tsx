@@ -1,5 +1,7 @@
 'use client';
 
+import { useRole } from '@/hooks/use-role';
+
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { AiCreditsCard } from '@/components/shared/ai-credits-card';
 import {
@@ -164,6 +166,7 @@ function YoastFieldsCard() {
 }
 
 export default function SettingsTab() {
+  const canChange = useRole().can('settings.change');
   const [status, setStatus] = useState<string | null>(null);
 
   // Connection status for each connector, checked automatically when Settings opens.
@@ -538,7 +541,13 @@ export default function SettingsTab() {
   const sum = (o: any) => Object.values(o || {}).reduce((a: any, b: any) => a + b, 0) as number;
 
   return (
-    <div className="grid gap-10">
+    // Only the admin changes settings; everyone else sees them read-only (the server enforces it too).
+    <fieldset disabled={!canChange} className="grid gap-10">
+      {!canChange && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          You can view settings and AI credits here. Only the admin can change them.
+        </div>
+      )}
       <AiCreditsCard />
       <Section title="Publishing" description="Where drafts go live and how their SEO fields are written.">
         <ConnCard
@@ -1142,6 +1151,6 @@ export default function SettingsTab() {
           )}
         </ConnCard>
       </Section>
-    </div>
+    </fieldset>
   );
 }

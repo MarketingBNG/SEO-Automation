@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
 import { useManualTasks, ManualTasksBanner, ManualTaskList } from '@/components/shared/manual-tasks';
+import { useRole } from '@/hooks/use-role';
+import { cn } from 'cn';
 
 // Strategy section (v2): one monthly SEO / AEO / GEO strategy in 11 fixed sections, one approval,
 // then the month runs automatically. All UI text avoids em dashes by design.
@@ -286,6 +288,9 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
   const approved = s.status === 'approved';
   const p = editing ? draft : plan;
   const manual = useManualTasks(s.id, approved);
+  const who = useRole();
+  const canEdit = who.can('strategy.edit');
+  const canApprove = who.can('strategy.approve');
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -572,11 +577,12 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
         {error && <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-2 text-sm">{error}</div>}
         {s.blockers?.length > 0 && !approved && <ul className="ml-5 list-disc text-sm text-muted-foreground">{s.blockers.map((b: string) => <li key={b}>{b}</li>)}</ul>}
         <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={!!busy} onClick={() => fileRef.current?.click()}>
+        {!canEdit && !canApprove && <p className="text-sm text-muted-foreground">You can view this strategy. Changing or approving it is done by a manager or admin.</p>}
+        <div className={cn('flex flex-wrap gap-2', !canEdit && !canApprove && 'hidden')}>
+          <Button variant="outline" disabled={!!busy || !canEdit} onClick={() => fileRef.current?.click()}>
             {busy === 'upload' && <Loader2 className="animate-spin" />}Upload Screaming Frog file
           </Button>
-          {!editing && <Button variant="outline" disabled={!!busy} onClick={() => setEditing(true)}>Edit Strategy</Button>}
+          {!editing && canEdit && <Button variant="outline" disabled={!!busy} onClick={() => setEditing(true)}>Edit Strategy</Button>}
           {editing && (
             <>
               {approved && <Input className="h-8 w-72" placeholder="Why are you changing the approved strategy?" value={editWhy} onChange={(e) => setEditWhy(e.target.value)} />}
@@ -584,10 +590,10 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
               <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
             </>
           )}
-          <Button variant="outline" disabled={editing || !!busy} onClick={updateLatest} title="Adds new automation steps, new backlink targets and fixes from a newer crawl. Does not rebuild the strategy.">
+          <Button variant="outline" disabled={editing || !!busy || !canEdit} onClick={updateLatest} title="Adds new automation steps, new backlink targets and fixes from a newer crawl. Does not rebuild the strategy.">
             {busy === 'update' && <Loader2 className="animate-spin" />}Update with latest changes
           </Button>
-          <Button disabled={approved || editing || !!busy || s.blockers?.length > 0} onClick={approve}>
+          <Button disabled={approved || editing || !!busy || s.blockers?.length > 0 || !canApprove} onClick={approve} title={canApprove ? undefined : 'Only an admin or a manager can approve'}>
             {busy === 'approve' && <Loader2 className="animate-spin" />}{approved ? 'Approved' : 'Approve Strategy'}
           </Button>
         </div>
@@ -601,7 +607,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
           </div>
         )}
 
-        {approved && (
+        {approved && canEdit && (
           <div className="space-y-2 rounded-lg border p-3">
             <div className="text-sm font-semibold">Strategy change (mid-month)</div>
             <Input placeholder="What changed" value={change.what} onChange={(e) => setChange({ ...change, what: e.target.value })} />

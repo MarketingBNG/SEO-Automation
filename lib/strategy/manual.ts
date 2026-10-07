@@ -20,6 +20,7 @@ export type ManualTask = {
   date: string | null;
   done: boolean;
   guide: any | null;
+  assignedTo: string | null;
 };
 
 const parse = (s?: string | null) => {
@@ -42,6 +43,7 @@ export async function listManualTasks(strategyId: number): Promise<ManualTask[]>
       date: l.send_date || null,
       done: l.status === 'done',
       guide: parse(l.guide),
+      assignedTo: l.assigned_to || null,
     })),
     ...fixes.map((f) => ({
       kind: 'fix' as const,
@@ -51,6 +53,7 @@ export async function listManualTasks(strategyId: number): Promise<ManualTask[]>
       date: f.applied_at || null,
       done: f.status === 'done_by_person',
       guide: parse(f.guide),
+      assignedTo: f.assigned_to || null,
     })),
   ];
 }
@@ -105,4 +108,18 @@ export async function guideFor(kind: string, id: number, { regenerate = false, w
   if (kind === 'backlink') await prisma.backlink_tasks.update({ where: { id }, data: { guide: json } });
   else await prisma.technical_fix_tasks.update({ where: { id }, data: { guide: json } });
   return JSON.parse(json);
+}
+
+export async function assignedTo(kind: string, id: number): Promise<string | null> {
+  const row: any = kind === 'backlink'
+    ? await prisma.backlink_tasks.findUnique({ where: { id }, select: { assigned_to: true } })
+    : await prisma.technical_fix_tasks.findUnique({ where: { id }, select: { assigned_to: true } });
+  return row?.assigned_to || null;
+}
+
+export async function assignTask(kind: string, id: number, email: string | null, actor: string) {
+  const data = { assigned_to: email ? email.toLowerCase() : null };
+  if (kind === 'backlink') await prisma.backlink_tasks.update({ where: { id }, data });
+  else await prisma.technical_fix_tasks.update({ where: { id }, data });
+  await activity.log('manual.assigned', { entityType: kind === 'backlink' ? 'backlink_task' : 'technical_fix', entityId: id, details: email ? `Assigned to ${email}` : 'Unassigned', actor });
 }

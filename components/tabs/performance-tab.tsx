@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { CartesianGrid, Line, LineChart as ReLineChart, ReferenceLine, XAxis, YAxis } from 'recharts';
 import { Download, Loader2, RefreshCcw } from 'lucide-react';
+import { useRole } from '@/hooks/use-role';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -276,6 +277,7 @@ function WhyItChanged({ view, days }: { view: string; days: number }) {
 
 export default function PerformanceTab({ view, onOpen }: { view: string; onOpen?: (v: string) => void }) {
   const [days, setDays] = useState(28);
+  const canDownload = useRole().can('reports.download');
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -329,9 +331,11 @@ export default function PerformanceTab({ view, onOpen }: { view: string; onOpen?
               {loading ? <Loader2 className="animate-spin" /> : <RefreshCcw />}
               {loading ? 'Loading…' : 'Refresh'}
             </Button>
+            {canDownload && (
             <a href={`/api/performance/download?days=${days}`} className={buttonVariants()}>
               <Download /> Download report (.docx)
             </a>
+            )}
           </div>
         </CardHeader>
         {(p || error) && (
