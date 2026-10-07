@@ -6,7 +6,7 @@
 import prisma from './prisma';
 import * as settings from './settings';
 import * as activity from './activity';
-import { listSites, getSiteRankings, researchKeywords, addTrackedKeywords, getSubscription } from './seranking';
+import { listSites, getSiteRankings, researchKeywords, addTrackedKeywords, getSubscription, listProjectKeywords } from './seranking';
 import { querySearchAnalytics, comparisonRanges } from './searchConsole';
 import { keywordKey, sameTopic } from './strategy/core';
 
@@ -17,7 +17,9 @@ export async function topUpTrackedKeywords({ add = addTrackedKeywords } = {}) {
   const target = Math.max(20, Number(await settings.get('tracked_keyword_target')) || 1500);
   const sites = await listSites();
   if (!sites?.length) return { skipped: 'No SE Ranking project' };
-  const tracked = new Set((await getSiteRankings(sites[0].id)).map((r) => keywordKey(r.keyword)));
+  // All tracked keywords (the list endpoint also has ones not checked yet; rankings as a fallback).
+  const names = await listProjectKeywords(sites[0].id).catch(async () => (await getSiteRankings(sites[0].id)).map((r) => r.keyword));
+  const tracked = new Set(names.map((k) => keywordKey(k)));
   const need = Math.min(MAX_PER_RUN, target - tracked.size);
   if (need <= 0) return { tracked: tracked.size, target, added: 0 };
 
@@ -57,12 +59,22 @@ export async function topUpTrackedKeywords({ add = addTrackedKeywords } = {}) {
   const canResearch = unitsLeft === null || !Number.isFinite(unitsLeft) || unitsLeft > reserve;
   if (picked.length < need && canResearch) {
     const focus = String((await settings.get('focus_services')) || 'ITIN\nEIN\nUS company formation for Indians\nNRI tax\nFEMA compliance\nvirtual CFO').split(/\n|;/).map((x) => x.trim()).filter(Boolean);
-    for (const seed of focus.slice(0, 12)) {
-      for (const source of ['us', 'in']) {
-        if (picked.length >= need) break;
-        const rows = await researchKeywords('related', seed, { source, limit: 30 }).catch(() => []);
-        for (const r of rows.sort((a, b) => (b.volume || 0) - (a.volume || 0))) take(r.keyword);
+    // Seeds: the focus services, then the strategy's own keywords. Each seed is researched in the US
+    // and India, related keywords first, then similar, long-tail and question keywords, until the
+    // week's quota is reached or the credits fall to the reserve.
+    const seeds = [...new Set([...focus, ...picked.slice(0, 20)])];
+    outer: for (const type of ['related', 'similar', 'longtail', 'questions']) {
+      for (const seed of seeds) {
+        for (const source of ['us', 'in']) {
+          if (picked.length >= need) break outer;
+          const rows = await researchKeywords(type, seed, { source, limit: 100 }).catch(() => []);
+          for (const r of rows.filter((x) => (x.volume || 0) >= 10).sort((a, b) => (b.volume || 0) - (a.volume || 0))) take(r.keyword);
+        }
       }
+      try {
+        const left = Number((await getSubscription())?.units_left);
+        if (Number.isFinite(left) && left <= reserve) break;
+      } catch {}
     }
   }
 

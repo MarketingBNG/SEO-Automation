@@ -140,16 +140,29 @@ async function getBacklinkGap(ourDomain: string, competitors: string[], limit = 
     .slice(0, limit);
 }
 
+// Rank-tracking keywords of a project (POST /project-management/keywords?site_id=, body = array of
+// { keyword }), per SE Ranking's unified API (same paths as its own n8n integration).
+async function postKeywords(siteId: number, keywords: string[]) {
+  const res = await throttledFetch(`${BASE_URL}/project-management/keywords?site_id=${siteId}`, {
+    method: 'POST',
+    headers: { Authorization: `Token ${getApiKey()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(keywords.map((keyword) => ({ keyword }))),
+  });
+  if (!res.ok) throw new Error(`SE Ranking add keywords failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+}
+
+// Every keyword tracked in a project (independent of whether it has been checked yet).
+async function listProjectKeywords(siteId: number): Promise<string[]> {
+  const json: any = await get(`/project-management/keywords?site_id=${siteId}`);
+  const rows = Array.isArray(json) ? json : json?.keywords || json?.data || [];
+  return rows.map((k: any) => String(k.name ?? k.keyword ?? '')).filter(Boolean);
+}
+
 // Adds a keyword to rank tracking in the first SE Ranking project (after a blog is published).
 async function addTrackedKeyword(keyword: string) {
   const sites: any = await listSites();
   if (!sites?.length) throw new Error('No SE Ranking project found');
-  const res = await throttledFetch(`${BASE_URL}/project-management/sites/${sites[0].id}/keywords`, {
-    method: 'POST',
-    headers: { Authorization: `Token ${getApiKey()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keywords: [{ keyword }] }),
-  });
-  if (!res.ok) throw new Error(`SE Ranking add keyword failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  await postKeywords(sites[0].id, [keyword]);
   return true;
 }
 
@@ -160,12 +173,11 @@ async function addTrackedKeywords(keywords: string[]) {
   let added = 0;
   for (let i = 0; i < keywords.length; i += 50) {
     const batch = keywords.slice(i, i + 50);
-    const res = await throttledFetch(`${BASE_URL}/project-management/sites/${sites[0].id}/keywords`, {
-      method: 'POST',
-      headers: { Authorization: `Token ${getApiKey()}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keywords: batch.map((keyword) => ({ keyword })) }),
-    });
-    if (!res.ok) throw new Error(`SE Ranking add keywords failed after ${added} (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    try {
+      await postKeywords(sites[0].id, batch);
+    } catch (e: any) {
+      throw new Error(`${e.message} (after ${added} added)`);
+    }
     added += batch.length;
   }
   return added;
@@ -213,6 +225,6 @@ async function getAiTrackerPresence(siteId: number, llmId: number, dateFrom: str
 }
 
 export {
-  getSubscription, listSites, getSiteRankings, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword, addTrackedKeywords,
+  getSubscription, listSites, getSiteRankings, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword, addTrackedKeywords, listProjectKeywords,
   getAiSearchOverview, listAiTrackerEngines, getAiTrackerStatistics, getAiTrackerPresence,
 };
