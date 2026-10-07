@@ -17,7 +17,9 @@ const ROLE_TEXT: Record<Role, string> = {
   manager: 'Sees reports, approves and edits strategy, assigns tasks, blocks users and analysts',
   analyst: 'Sees and downloads reports, does content work, sees AI credits',
   user: 'Sees the strategy, asks the assistant, does tasks assigned to them',
+  tester: 'For 48 hours: everything except managing the team, then back to user automatically',
 };
+const fmt = (s: string) => new Date(s.replace(' ', 'T') + 'Z').toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
 
 export default function TeamTab() {
   const me = useRole();
@@ -85,6 +87,16 @@ export default function TeamTab() {
                       </select>
                     ) : (
                       <span className="capitalize">{r.role}</span>
+                    )}
+                    {r.role === 'tester' && r.role_expires_at && (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Ends {fmt(r.role_expires_at)}
+                        {isAdmin && (
+                          <button type="button" className="ml-2 text-primary underline" disabled={!!busy} onClick={() => save({ email: r.email, role: 'tester' }, `role-${r.email}`)}>
+                            Renew for 48 hours from now
+                          </button>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className={TD_MUTED}>{r.blocked ? <span className="font-medium text-red-600 dark:text-red-400">Blocked</span> : 'Active'}</td>
