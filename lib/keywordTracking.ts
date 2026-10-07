@@ -6,15 +6,15 @@
 import prisma from './prisma';
 import * as settings from './settings';
 import * as activity from './activity';
-import { listSites, getSiteRankings, researchKeywords, addTrackedKeywords } from './seranking';
+import { listSites, getSiteRankings, researchKeywords, addTrackedKeywords, getSubscription } from './seranking';
 import { querySearchAnalytics, comparisonRanges } from './searchConsole';
 import { keywordKey, sameTopic } from './strategy/core';
 
 const BRAND = /usaindia|usa india cfo|usaindiacfo/i;
-const MAX_PER_RUN = 150;
+const MAX_PER_RUN = 500;
 
 export async function topUpTrackedKeywords({ add = addTrackedKeywords } = {}) {
-  const target = Math.max(20, Number(await settings.get('tracked_keyword_target')) || 400);
+  const target = Math.max(20, Number(await settings.get('tracked_keyword_target')) || 1500);
   const sites = await listSites();
   if (!sites?.length) return { skipped: 'No SE Ranking project' };
   const tracked = new Set((await getSiteRankings(sites[0].id)).map((r) => keywordKey(r.keyword)));
@@ -47,10 +47,17 @@ export async function topUpTrackedKeywords({ add = addTrackedKeywords } = {}) {
     } catch {}
   }
 
-  // 3. Keyword research for each focus service, US and India.
-  if (picked.length < need) {
+  // 3. Keyword research for each focus service, US and India: only with API credits above the reserve
+  //    kept for blog research (Search Console and strategy keywords above cost no credits).
+  let unitsLeft = null;
+  try {
+    unitsLeft = Number((await getSubscription())?.units_left);
+  } catch {}
+  const reserve = Number(await settings.get('seranking_reserve_units')) || 20000;
+  const canResearch = unitsLeft === null || !Number.isFinite(unitsLeft) || unitsLeft > reserve;
+  if (picked.length < need && canResearch) {
     const focus = String((await settings.get('focus_services')) || 'ITIN\nEIN\nUS company formation for Indians\nNRI tax\nFEMA compliance\nvirtual CFO').split(/\n|;/).map((x) => x.trim()).filter(Boolean);
-    for (const seed of focus.slice(0, 8)) {
+    for (const seed of focus.slice(0, 12)) {
       for (const source of ['us', 'in']) {
         if (picked.length >= need) break;
         const rows = await researchKeywords('related', seed, { source, limit: 30 }).catch(() => []);
@@ -62,5 +69,5 @@ export async function topUpTrackedKeywords({ add = addTrackedKeywords } = {}) {
   const list = picked.slice(0, need);
   const added = list.length ? await add(list) : 0;
   await activity.log('seranking.keywords_added', { details: `${added} keyword(s) added to rank tracking (${tracked.size + added} of ${target} target)` });
-  return { tracked: tracked.size + added, target, added, keywords: list };
+  return { tracked: tracked.size + added, target, added, keywords: list, unitsLeft, researchSkipped: !canResearch };
 }

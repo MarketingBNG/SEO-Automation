@@ -697,7 +697,7 @@ function MonthRunning() {
       )}
       <Section
         title="This month's blogs"
-        description="Every blog is fact-checked against official sources by two different AI models. A manager then has 48 hours to approve or reject it. Tax, legal and compliance blogs wait for a named CA/CPA reviewer; other blogs are approved and published automatically if nobody rejects them. Each post goes out under one of the partners' names, with its image, reviewer line and a call to action for its service. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
+        description="Every blog is fact-checked against official sources by two different AI models. A manager then has 48 hours to approve or reject it. If nobody rejects it, it is approved and published automatically under one of the partners' names, with its image and a call to action for its service. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
       >
         <DataTable head={['Slot', 'Title', 'Fact check', 'Status', 'Review', '']}>
           {data.rows.map((r: any) => (

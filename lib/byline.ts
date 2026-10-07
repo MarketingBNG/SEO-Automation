@@ -3,7 +3,7 @@
 export function withByline(html: string, author?: string | null, reviewer?: string | null, now = new Date()): string {
   if (!author && !reviewer) return html;
   const date = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' });
-  const parts = [author ? `By <strong>${author}</strong>` : '', reviewer ? `Reviewed by <strong>${reviewer}</strong>` : '', `Last reviewed ${date}`].filter(Boolean);
+  const parts = [author ? `By <strong>${author}</strong>` : '', reviewer ? `Reviewed by <strong>${reviewer}</strong>` : '', reviewer ? `Last reviewed ${date}` : ''].filter(Boolean);
   const line = `<p class="uic-byline">${parts.join('. ')}.</p>`;
   const clean = String(html).replace(/<p[^>]*>\s*By \[?[^<]*Reviewed by[^<]*<\/p>\s*/i, '');
   const i = clean.indexOf('</p>');
