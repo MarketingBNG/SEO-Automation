@@ -36,7 +36,7 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
           setMsg('Lessons updated.');
         } else {
           const l = st.last || {};
-          setMsg(l.error ? `Could not add keywords: ${l.error}` : l.skipped || `${l.added} keyword(s) added. SE Ranking now tracks ${l.tracked} of the ${l.target} target.${l.researchSkipped ? ' Keyword research was skipped to keep SE Ranking credits for blogs.' : ''}`);
+          setMsg(l.error ? `Could not add keywords: ${l.error}` : l.skipped || `${l.added} keyword(s) added (${l.strategyAdded || 0} from the strategy). SE Ranking now tracks ${l.tracked} of the ${l.target} target.${l.researchSkipped ? ' Keyword research was skipped to keep SE Ranking credits for blogs.' : ''}`);
         }
         break;
       }
@@ -102,7 +102,7 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
 
           <div className="grid gap-2">
             <div className="font-semibold">Keywords tracked in SE Ranking</div>
-            <p className="text-muted-foreground">Every week the dashboard adds up to 500 of the most useful missing keywords until the project tracks this many: strategy keywords and Search Console queries first (no credits), then keyword research for the US and India, which uses SE Ranking API credits only above the reserve kept for blog research. Your plan allows up to 5,000 tracked keywords.</p>
+            <p className="text-muted-foreground">Tracking follows the approved strategy. Every keyword in it is tracked as soon as it is approved or edited. Each week up to 500 more are added until the project tracks this many, only on the strategy's topics: Search Console searches we already appear for (no credits), then keyword research seeded from the strategy's keywords for the US and India (SE Ranking API credits, only above the reserve kept for blog research). The next strategy is built from these rankings. Your plan allows up to 5,000 tracked keywords.</p>
             <div className="flex flex-wrap items-center gap-2">
               <Input className="h-8 w-32" type="number" min={20} max={5000} value={target} onChange={(e) => setTarget(e.target.value)} />
               <Button size="sm" variant="outline" disabled={!!running} onClick={() => runNow('topup')}>
