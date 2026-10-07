@@ -2,7 +2,8 @@
 
 // The assistant's octopus peeks in from the left or right edge of the screen at random moments, on
 // any page of the dashboard, plays its peek clip once and leaves. Clicking it opens the assistant.
-// It never appears in the middle of the screen, and stays away for people who prefer reduced motion.
+// It only ever peeks from a screen edge, never the middle, and stays away for people who prefer
+// reduced motion.
 import { useEffect, useState } from 'react';
 
 type Spot = { side: 'left' | 'right'; top: number; key: number };

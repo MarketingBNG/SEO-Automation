@@ -190,7 +190,7 @@ export default function Dashboard() {
         </main>
       </SidebarInset>
       {/* The assistant's octopus peeks in from a screen edge now and then, on every page. */}
-      {tab !== 'assistant' && <PeekingOctopus onClick={() => setTab('assistant')} />}
+      <PeekingOctopus onClick={() => setTab('assistant')} />
     </SidebarProvider>
   );
 }
