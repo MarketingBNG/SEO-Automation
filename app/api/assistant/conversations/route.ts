@@ -44,12 +44,18 @@ async function buildTranscript(messages) {
           if (changeMatch) item.changeId = Number(changeMatch[1]);
         }
       }
+      // Attached Word documents: shown as a link to the stored file instead of their text.
+      const files: any[] = [];
+      for (const m of texts.join('\n').matchAll(/<attached_document name="([^"]*)"(?: file_id="(\d+)")?>/g)) {
+        const f = m[2] ? await prisma.assistant_files.findUnique({ where: { id: Number(m[2]) }, select: { path: true } }) : null;
+        files.push({ name: m[1], url: f ? `/api/uploads/${f.path}` : null });
+      }
       const text = texts
         .join('\n')
         .replace(/\n*\[Attached image_id[^\]]*\]/g, '')
-        .replace(/<attached_document name="([^"]*)">[\s\S]*?<\/attached_document>/g, '[Attached: $1]')
+        .replace(/<attached_document name="([^"]*)"[^>]*>[\s\S]*?<\/attached_document>/g, '')
         .trim();
-      if ((text && text !== '(image attached)') || images.length) items.push({ kind: 'user', text: text === '(image attached)' ? '' : text, images: images.filter(Boolean) });
+      if ((text && text !== '(image attached)') || images.length || files.length) items.push({ kind: 'user', text: text === '(image attached)' ? '' : text, images: images.filter(Boolean), files });
     } else if (m.role === 'assistant') {
       for (const b of m.content || []) {
         if (b.type === 'text' && b.text.trim()) {
@@ -97,7 +103,7 @@ export async function GET(req: NextRequest) {
   }
 
   const rows = await prisma.assistant_conversations.findMany({
-    select: { id: true, title: true, status: true, updated_at: true },
+    select: { id: true, title: true, status: true, updated_at: true, created_by: true },
     orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
     take: 50,
   });

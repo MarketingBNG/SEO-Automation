@@ -39,8 +39,8 @@ async function saveConversation(conv) {
   });
 }
 
-async function createConversation(title) {
-  const r = await prisma.assistant_conversations.create({ data: { title, status: 'idle' } });
+async function createConversation(title, createdBy = null) {
+  const r = await prisma.assistant_conversations.create({ data: { title, status: 'idle', created_by: createdBy } });
   return loadConversation(r.id);
 }
 
@@ -251,7 +251,7 @@ async function runLoop(conv, emit, signal) {
 
 // A new user message. If actions were waiting for approval, they are declined first (the user
 // moved on), all inside one user turn so the history stays valid.
-async function sendMessage({ conversationId, text, imageIds = [] }, emit, signal) {
+async function sendMessage({ conversationId, text, imageIds = [], actor = null }: any, emit, signal) {
   let conv = conversationId ? await loadConversation(conversationId) : null;
   if (conversationId && !conv) throw new Error('Conversation not found');
   if (conv && conv.status === 'running') throw new Error('The assistant is still working on the previous message. Stop it first.');
@@ -261,7 +261,7 @@ async function sendMessage({ conversationId, text, imageIds = [] }, emit, signal
     if (claim.count !== 1) throw new Error('The assistant is still working on the previous message. Stop it first.');
     conv.status = 'running';
   }
-  if (!conv) conv = await createConversation((text || 'New conversation').slice(0, 70));
+  if (!conv) conv = await createConversation((text || 'New conversation').replace(/<attached_document[\s\S]*$/, '').trim().slice(0, 70) || 'New conversation', actor);
   emit({ type: 'conversation', id: conv.id, title: conv.title });
 
   const content: any[] = [];

@@ -10,8 +10,11 @@ export function renderMarkdown(text: any): string {
   const inline = (s: string) =>
     esc(s)
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\*)/g, '$1<em>$2</em>')
       .replace(/`([^`]+)`/g, '<code>$1</code>')
       .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  const cells = (row: string) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+  const isRule = (row: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(row);
 
   const out: string[] = [];
   let list: string | null = null;
@@ -19,12 +22,32 @@ export function renderMarkdown(text: any): string {
     if (list) out.push(`</${list}>`);
     list = null;
   };
-  for (const raw of String(text || '').split('\n')) {
-    const line = raw.trimEnd();
+  const lines = String(text || '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
+    // Markdown table: a header row, a --- rule, then body rows.
+    if (line.includes('|') && i + 1 < lines.length && isRule(lines[i + 1])) {
+      closeList();
+      const head = cells(line);
+      const body: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) body.push(cells(lines[i++]));
+      i--;
+      out.push(
+        `<div class="md-table"><table><thead><tr>${head.map((h) => `<th>${inline(h)}</th>`).join('')}</tr></thead><tbody>${body
+          .map((r) => `<tr>${head.map((_, k) => `<td>${inline(r[k] || '')}</td>`).join('')}</tr>`)
+          .join('')}</tbody></table></div>`
+      );
+      continue;
+    }
     const bullet = line.match(/^\s*[-*]\s+(.*)$/);
     const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
     const heading = line.match(/^(#{1,4})\s+(.*)$/);
-    if (bullet || numbered) {
+    const quote = line.match(/^>\s?(.*)$/);
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
+      closeList();
+      out.push('<hr/>');
+    } else if (bullet || numbered) {
       const tag = bullet ? 'ul' : 'ol';
       if (list !== tag) {
         closeList();
@@ -34,7 +57,11 @@ export function renderMarkdown(text: any): string {
       out.push(`<li>${inline((bullet || numbered)![1])}</li>`);
     } else if (heading) {
       closeList();
-      out.push(`<h4>${inline(heading[2])}</h4>`);
+      const tag = heading[1].length <= 3 ? 'h3' : 'h4';
+      out.push(`<${tag}>${inline(heading[2])}</${tag}>`);
+    } else if (quote) {
+      closeList();
+      out.push(`<blockquote>${inline(quote[1])}</blockquote>`);
     } else if (!line.trim()) {
       closeList();
     } else {

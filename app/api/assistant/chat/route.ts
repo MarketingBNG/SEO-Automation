@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendMessage } from '@/lib/assistant/engine';
 import { streamNdjson } from '@/lib/assistant/stream';
+import { getActor } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 // Vercel Hobby plan limit. On Pro, raise to 800 for long generations.
@@ -12,9 +13,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'message or an image is required' }, { status: 400 });
   }
   const ids = (imageIds || []).map(Number).filter(Number.isInteger);
+  const actor = await getActor();
 
   return streamNdjson(req, (emit, signal) =>
-    sendMessage({ conversationId: conversationId ? Number(conversationId) : null, text: message || '', imageIds: ids }, emit, signal)
+    sendMessage({ conversationId: conversationId ? Number(conversationId) : null, text: message || '', imageIds: ids, actor }, emit, signal)
   );
 }
 

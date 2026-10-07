@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import mammoth from 'mammoth';
 import prisma from '@/lib/prisma';
 import { saveFile, basename } from '@/lib/storage';
+import { getActor } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
@@ -30,10 +31,17 @@ export async function POST(req: NextRequest) {
 
     if (mimetype === DOCX || /\.docx$/i.test(originalFilename || '')) {
       const { value } = await mammoth.convertToHtml({ buffer: buf });
+      // Keep the original file so it can be opened again from the dashboard.
+      const docName = originalFilename || 'document.docx';
+      const docKey = `assistant/docs/${Date.now()}-${docName.replace(/[^a-z0-9._-]+/gi, '-').slice(-80)}`;
+      await saveFile(docKey, buf, DOCX);
+      const saved = await prisma.assistant_files.create({ data: { kind: 'document', filename: docName, path: docKey, mime: DOCX, size: buf.length, uploaded_by: await getActor() } });
       return NextResponse.json(
         {
           kind: 'document',
-          filename: originalFilename || 'document.docx',
+          fileId: saved.id,
+          fileUrl: `/api/uploads/${docKey}`,
+          filename: docName,
           html: value.slice(0, MAX_DOC_CHARS),
           truncated: value.length > MAX_DOC_CHARS,
         },
@@ -73,6 +81,8 @@ export async function POST(req: NextRequest) {
         height: meta.height || null,
       },
     });
+
+    await prisma.assistant_files.create({ data: { kind: 'image', filename: originalFilename || safeName, path: originalKey, mime: mimetype, size: buf.length, uploaded_by: await getActor() } });
 
     return NextResponse.json(
       {
