@@ -12,6 +12,15 @@ import { technicalFixesFromCrawl, calendarSlots } from './generate';
 import { fixKind } from './fixer';
 import * as settings from '../settings';
 
+// SE Ranking tracks what the strategy targets: its keywords are added in the background right after
+// approval or an edit (no credits used; a missing SE Ranking key just skips it).
+function trackStrategyKeywords() {
+  if (!process.env.SERANKING_API_KEY) return;
+  void import('../keywordTracking')
+    .then(({ syncStrategyKeywords }) => syncStrategyKeywords())
+    .catch((e) => console.error('Strategy keyword tracking failed:', e.message));
+}
+
 export async function latestCrawl() {
   return prisma.technical_crawls.findFirst({ orderBy: { id: 'desc' } });
 }
@@ -92,6 +101,7 @@ export async function editSection(id: number, section: string, value: any, revie
       if (section === 'backlinks') await syncBacklinks(tx, id, plan.backlinks || []);
     }
   });
+  if (approved && ['keywords', 'blogPlan', 'aeoGeo'].includes(section)) trackStrategyKeywords();
   await activity.log(approved ? 'strategy.changed' : 'strategy.edited', { entityType: 'seo_strategy', entityId: id, details: `Section ${section}, version ${version}${approved ? `: ${why}` : ''}`, actor: reviewer });
   return strategyView(await prisma.seo_strategies.findUnique({ where: { id } }));
 }
@@ -194,6 +204,7 @@ export async function approveStrategy(id: number, approver: string) {
       await tx.technical_fix_tasks.create({ data: { strategy_id: id, url: f.url, issue: f.issue, fix: f.fix || '', kind: fixKind(f.issue) } });
     }
   });
+  trackStrategyKeywords();
   await activity.log('strategy.approved', {
     entityType: 'seo_strategy',
     entityId: id,
