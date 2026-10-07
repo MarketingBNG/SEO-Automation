@@ -128,7 +128,7 @@ export function calendarSlots(window: any, days: string[], timeIst: string, coun
 // What runs automatically after approval (Section 7). Kept here so an update can refresh it.
 export const AUTOMATION = [
   { platform: 'Claude API', what: 'Writes each blog with deep research, then fact-checks and corrects it against official sources until two checks in a row are clean', when: '2 days before each slot, again when review opens and after any edit' },
-  { platform: 'Dashboard', what: 'Opens the 24-hour review window and notifies reviewers', when: '24 hours before each publish slot' },
+  { platform: 'Dashboard', what: 'Opens the 48-hour review: a manager approves or rejects with feedback (a rejected blog is rewritten and comes back with a note on what changed); if nobody rejects it, it publishes automatically under a partner\'s name with a cover image', when: '48 hours before each publish slot' },
   { platform: 'Website CMS (WordPress)', what: 'Publishes the reviewed or auto-approved blog with FAQ schema', when: 'At each publish slot' },
   { platform: 'Bing IndexNow', what: 'Submits each new or updated URL', when: 'Right after publishing' },
   { platform: 'Google Search Console', what: 'Sitemap resubmitted so Google recrawls the new URL', when: 'Right after publishing' },

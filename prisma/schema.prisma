@@ -344,7 +344,7 @@ model blog_schedule {
   refresh_url      String?
   keyword_id       Int?
   draft_id         Int?
-  // planned | drafting | in_review | held | published | failed
+  // planned | drafting | in_review | rejected | revising | held | published | failed
   status           String  @default("planned")
   review_started   String?
   reviewed_by      String?
@@ -355,6 +355,11 @@ model blog_schedule {
   post_publish_log String? // JSON
   // Automatic fact check: { stamp (draft updated_at it covers), ok, rounds, log, checkedAt }
   fact_check       String? // JSON
+  author           String? // partner the post is published under
+  reject_feedback  String? // what the reviewer asked to change
+  rejected_by      String?
+  revision_note    String? // JSON [{ asked, changed }] shown to the reviewer after a rewrite
+  revisions        Int     @default(0)
   created_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
   updated_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 

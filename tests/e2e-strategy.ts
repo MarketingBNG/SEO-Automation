@@ -207,13 +207,19 @@ async function main() {
   assert.equal(JSON.parse(r!.fact_check!).ok, true);
   console.log('PASS blog fact-checked and corrected before review opens (April 30 -> April 15)', s.opened);
 
+  // At the slot the 48-hour review is not over yet, so it waits; a rejected blog never publishes on its own.
   s = await runDaily(new Date('2026-11-03T04:30:00Z'), { verify: fixingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
+  assert.equal(r!.status, 'in_review', 'reviewer still has the rest of the 48 hours');
+  s = await runDaily(new Date('2026-11-04T04:40:00Z'), { verify: fixingVerify });
+  r = await prisma.blog_schedule.findUnique({ where: { id: first.id } });
   assert.equal(r!.status, 'published', JSON.stringify({ s, reasons: r!.hold_reasons }));
+  assert.ok(['Harsh Jain', 'Naman Gangwal', 'Amit Agarwal', 'Akshay Nahar'].includes(r!.author!), `author ${r!.author}`);
+  assert.ok((await prisma.drafts.findUnique({ where: { id: draft.id } }))!.featured_image_path, 'a cover image was made');
   assert.equal(r!.approval_mode, 'auto');
   assert.equal(verifyCalls, 1); // unchanged draft is not re-checked
   const log = JSON.parse(r!.post_publish_log!);
-  console.log('PASS unreviewed, fact-checked blog auto-approved and published. After-publish:', Object.fromEntries(Object.entries(log).map(([k, v]: any) => [k, v.ok ? 'ok' : v.error])));
+  console.log('PASS unreviewed blog waited the full 48 hours, then auto-approved and published by', r!.author, 'with a cover image. After-publish:', Object.fromEntries(Object.entries(log).map(([k, v]: any) => [k, v.ok ? 'ok' : v.error])));
   assert.ok(calls.some((c) => c.startsWith('POST https://usaindiacfo.com/wp-json/wp/v2/posts')));
   assert.equal(log.internalLinks.ok, true);
   assert.deepEqual(log.internalLinks.result, ['https://usaindiacfo.com/old-post/']);
@@ -228,7 +234,7 @@ async function main() {
   r = await prisma.blog_schedule.findUnique({ where: { id: second.id } });
   assert.equal(r!.status, 'published');
   assert.equal(r!.approval_mode, 'reviewed');
-  console.log('PASS reviewed-within-24h blog published as the reviewed version');
+  console.log('PASS approved blog published at its slot as the approved version');
 
   // A blog whose claims cannot all be verified is held, never published.
   const third = (await prisma.blog_schedule.findMany({ orderBy: { publish_at: 'asc' } }))[2];
@@ -240,6 +246,28 @@ async function main() {
   assert.equal(r!.status, 'held');
   assert.ok(JSON.parse(r!.hold_reasons!).some((x: string) => x.startsWith('Fact check could not confirm')));
   console.log('PASS unverifiable blog held, not published');
+
+  // Rejected with feedback: rewritten with the feedback, fact-checked, back in review for 48 hours.
+  {
+    const fourth = (await prisma.blog_schedule.findMany({ orderBy: { publish_at: 'asc' } }))[3];
+    const kw4 = await prisma.keywords.create({ data: { keyword: fourth.main_keyword, status: 'drafted' } });
+    const d4 = await prisma.drafts.create({ data: { keyword_id: kw4.id, title: 'First version', meta_description: 'Meta.', content_html: html, status: 'rejected' } });
+    await prisma.blog_schedule.update({ where: { id: fourth.id }, data: { draft_id: d4.id, status: 'rejected', reject_feedback: 'Add a section on penalties for late filing and shorten the intro.', rejected_by: 'Reviewer M' } });
+    let seenNotes = '';
+    const stubWrite = async (_k: string, notes: string) => {
+      seenNotes = notes;
+      return { title: 'Second version', meta: 'Meta.', content: html.replace('<h2>Frequently', '<h2>Penalties for late filing</h2><p>Penalty text.</p><h2>Frequently'), facts: [], validation: { issues: [], warnings: [], wordCount: 300 }, productionState: 'ready', repairAttempts: 0 };
+    };
+    await runDaily(new Date('2026-11-05T09:00:00Z'), { verify: fixingVerify, write: stubWrite });
+    const r4 = (await prisma.blog_schedule.findUnique({ where: { id: fourth.id } }))!;
+    assert.ok(seenNotes.includes('Add a section on penalties'), 'the rewrite was given the feedback');
+    assert.equal(r4.status, 'in_review');
+    assert.equal(r4.revisions, 1);
+    assert.ok(r4.review_started && r4.review_started >= '2026-10-07', 'a new 48-hour window opened');
+    assert.ok(JSON.parse(r4.revision_note!).length >= 1, 'a what-changed note is shown to the reviewer');
+    assert.notEqual(r4.draft_id, d4.id, 'the new draft replaces the rejected one');
+    console.log('PASS rejected blog rewritten with the feedback, fact-checked, back in review with a what-changed note');
+  }
 
   // Strategy progress and cost estimate.
   const { strategyProgress } = await import('../lib/strategy/progress');

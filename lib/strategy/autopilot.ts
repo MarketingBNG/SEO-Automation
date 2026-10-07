@@ -1,5 +1,5 @@
 // @ts-nocheck -- orchestration over untyped integration modules.
-// Runs the approved month automatically: drafts blogs ahead of their slot, opens the 24-hour review
+// Runs the approved month automatically: drafts blogs ahead of their slot, opens the 48-hour review
 // window, auto-approves and publishes on schedule behind the automatic fact check and writing rules,
 // does the after-publish steps, checks ranks daily and compares plan vs actual weekly.
 import prisma from '../prisma';
@@ -18,24 +18,29 @@ import { syncMeetings } from '../clientInsights';
 import { runFixes } from './fixer';
 import { runOutreach } from './outreach';
 import { runSpeedFixes } from './speed';
+import { authorNames, pickAuthor, wpAuthorId } from '../authors';
+import { makeCover } from '../cover';
+import { saveFile } from '../storage';
+import { callClaude } from '../anthropic';
 import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh } from './core';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
 const HOST = () => SITE().replace(/^https?:\/\//, '').replace(/^www\./, '');
-const DRAFT_LEAD_HOURS = 48;
+// Drafts are written 72 hours before the slot so the 48-hour review can start on time.
+const DRAFT_LEAD_HOURS = 72;
 
 const update = (id, data) => prisma.blog_schedule.update({ where: { id }, data: { ...data, updated_at: sqlNow() } });
 
 // Writes the draft for one calendar row (the same pipeline as the Keywords tab).
-async function writeDraft(row) {
+async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
   await update(row.id, { status: 'drafting' });
   const kw = await prisma.keywords.create({
-    data: { batch_name: `Strategy #${row.strategy_id}`, keyword: row.main_keyword, notes: `Planned title: ${row.title}. Channels: ${JSON.parse(row.tags).join(', ')}.${row.refresh_url ? ` Refresh of ${row.refresh_url}.` : ''}`, status: 'generating' },
+    data: { batch_name: `Strategy #${row.strategy_id}`, keyword: row.main_keyword, notes: `Planned title: ${row.title}. Channels: ${JSON.parse(row.tags).join(', ')}.${row.refresh_url ? ` Refresh of ${row.refresh_url}.` : ''}${extraNotes ? `\n\n${extraNotes}` : ''}`, status: 'generating' },
   });
   const onProgress = progressWriter((stage, percent) => prisma.keywords.update({ where: { id: kw.id }, data: { progress_stage: stage, progress_percent: percent } }));
   let result;
   try {
-    result = await researchAndWriteBlog(row.main_keyword, kw.notes, { onProgress });
+    result = await write(row.main_keyword, kw.notes, { onProgress });
   } catch (err: any) {
     // Never leave the keyword stuck as "generating"; the next scheduler run tries again.
     await prisma.keywords.update({ where: { id: kw.id }, data: { status: 'failed', error: String(err.message || err).slice(0, 1000), progress_stage: null, progress_percent: null } });
@@ -177,13 +182,23 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   const reviewed = Boolean(row.reviewed_at) || draft.status === 'approved' || Boolean(row.review_started && draft.updated_at > row.review_started && draft.updated_at !== (row.fact_check ? JSON.parse(row.fact_check).stamp : null));
   const html = `${checked.content_html}\n${faqSchema(checked.content_html) || ''}`;
   let post;
+  let authorName = row.author || null;
+  let authorId: number | null = null;
   if (row.refresh_url) {
     const { json: found } = await wpRequest('GET', '/wp/v2/posts', { query: { slug: new URL(row.refresh_url).pathname.split('/').filter(Boolean).pop(), _fields: 'id,link' } });
     if (!found?.[0]) throw new Error(`Refresh target not found: ${row.refresh_url}`);
     post = await updatePost(found[0].id, { title: checked.title, contentHtml: html, excerpt: checked.meta_description, metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, status: 'publish' });
   } else {
-    const featuredMediaId = checked.featured_image_path ? await uploadFeaturedImage(checked.featured_image_path).catch(() => undefined) : undefined;
-    post = await publishPost({ title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword });
+    // A random partner is the author; a branded cover is made when the draft has no image.
+    authorName = row.author || pickAuthor(await authorNames());
+    authorId = await wpAuthorId(authorName).catch(() => null);
+    let imageKey = checked.featured_image_path;
+    if (!imageKey) {
+      imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(row.main_keyword)}.png`, await makeCover(checked.title, authorName), 'image/png').catch(() => null);
+      if (imageKey) await prisma.drafts.update({ where: { id: checked.id }, data: { featured_image_path: imageKey } });
+    }
+    const featuredMediaId = imageKey ? await uploadFeaturedImage(imageKey).catch(() => undefined) : undefined;
+    post = await publishPost({ title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined });
   }
   await prisma.drafts.update({ where: { id: checked.id }, data: { status: 'published', wp_post_id: post.id, wp_post_url: post.link, updated_at: sqlNow() } });
 
@@ -201,9 +216,49 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   await step('seRankingTracking', () => addTrackedKeyword(row.main_keyword));
   await step('internalLinks', () => addInternalLinks(post.link, checked.title, row.main_keyword));
 
-  await update(row.id, { status: 'published', approval_mode: reviewed ? 'reviewed' : 'auto', wp_post_url: post.link, post_publish_log: JSON.stringify(log), hold_reasons: null });
-  await activity.log('schedule.published', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}" ${reviewed ? 'reviewed version' : 'auto-approved after 24 hours'}: ${post.link}` });
+  log.author = authorName ? { ok: Boolean(authorId), result: authorId ? `${authorName} (WordPress user ${authorId})` : `${authorName} is not a WordPress user yet, so the default author was used` } : undefined;
+  await update(row.id, { status: 'published', approval_mode: reviewed ? 'reviewed' : 'auto', wp_post_url: post.link, post_publish_log: JSON.stringify(log), hold_reasons: null, author: authorName });
+  await activity.log('schedule.published', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}" ${reviewed ? 'approved by a reviewer' : 'auto-approved after 48 hours with no rejection'}, by ${authorName || 'the default author'}: ${post.link}` });
   return 'published';
+}
+
+// A rejected blog is rewritten with the reviewer's feedback, fact-checked again, and returned to
+// review with a short "you asked, we changed" note and a new 48-hour window.
+async function reviseRow(row, verify = verifyAndCorrect, write = researchAndWriteBlog) {
+  const old = row.draft_id ? await prisma.drafts.findUnique({ where: { id: row.draft_id } }) : null;
+  await update(row.id, { status: 'revising' });
+  const plainOld = String(old?.content_html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 12000);
+  const feedback = String(row.reject_feedback || '').trim();
+  let draft;
+  try {
+    draft = await writeDraft(
+      row,
+      `A reviewer REJECTED the previous version. Apply ALL of this feedback exactly:\n${feedback}\n\nPrevious version (keep what was good, fix what the feedback asks):\n${plainOld}`,
+      write
+    );
+  } catch (e) {
+    await update(row.id, { status: 'rejected' });
+    throw e;
+  }
+  let note = [];
+  try {
+    const { text } = await callClaude(
+      'Compare the reviewer feedback with the new blog. For each point the reviewer raised, say in one short plain-English sentence what was changed. No em dashes. Return ONLY ===JSON===[{"asked":"","changed":""}]===END===',
+      [{ role: 'user', content: `Reviewer feedback:\n${feedback}\n\nNew blog:\n${String(draft.content_html || '').replace(/<[^>]+>/g, ' ').slice(0, 15000)}` }],
+      undefined,
+      { maxUses: 1, effort: 'low', feature: 'blog' }
+    );
+    const m = text.match(/===JSON===([\s\S]*?)===END===/);
+    note = m ? JSON.parse(m[1]) : [];
+  } catch {
+    note = [{ asked: feedback, changed: 'The blog was rewritten with this feedback.' }];
+  }
+  const fresh = await prisma.blog_schedule.findUnique({ where: { id: row.id } });
+  await ensureFactChecked(fresh, draft, verify);
+  await update(row.id, { status: 'in_review', review_started: sqlNow(), reviewed_at: null, reviewed_by: null, revision_note: JSON.stringify(note), revisions: (row.revisions || 0) + 1 });
+  await notify(`Rewritten blog ready for review: ${draft.title}`, `It was rewritten with the feedback from ${row.rejected_by || 'the reviewer'}. Approve or reject it in Monthly Strategy within 48 hours.`);
+  await activity.log('schedule.revised', { entityType: 'draft', entityId: draft.id, details: `"${draft.title}" rewritten after rejection (${note.length} point(s) addressed); new 48-hour review` });
+  return draft;
 }
 
 // One server process runs the jobs, so an in-memory flag stops a scheduled call from overlapping a
@@ -211,7 +266,7 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
 let running = false;
 
 // The scheduler job. Meant to run every 15 minutes; every step is idempotent.
-export async function runDaily(now = new Date(), opts: { maxDrafts?: number; verify?: any } = {}) {
+export async function runDaily(now = new Date(), opts: { maxDrafts?: number; verify?: any; write?: any } = {}) {
   if (running) return { skipped: 'A previous run is still in progress.' };
   running = true;
   try {
@@ -221,9 +276,20 @@ export async function runDaily(now = new Date(), opts: { maxDrafts?: number; ver
   }
 }
 
-async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrect }: { maxDrafts?: number; verify?: any }) {
+async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrect, write = researchAndWriteBlog }: { maxDrafts?: number; verify?: any; write?: any }) {
   const summary: any = { opened: 0, published: 0, held: 0, drafted: 0, errors: [] };
   const rows = await prisma.blog_schedule.findMany({ where: { status: { in: ['planned', 'drafting', 'in_review', 'held'] } }, orderBy: { publish_at: 'asc' } });
+
+  // Rejected blogs are rewritten first (one per run; a full rewrite takes a while).
+  const rejected = await prisma.blog_schedule.findFirst({ where: { status: 'rejected' }, orderBy: { updated_at: 'asc' } });
+  if (rejected && summary.drafted < maxDrafts) {
+    try {
+      await reviseRow(rejected, verify, write);
+      summary.drafted++;
+    } catch (e: any) {
+      summary.errors.push(`${rejected.title}: rewrite failed: ${e.message}`);
+    }
+  }
 
   for (const row of rows) {
     const action = scheduleAction(row, now);
@@ -239,7 +305,7 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
           const d = await prisma.drafts.findUnique({ where: { id: fresh.draft_id } });
           if (d) await ensureFactChecked(fresh, d, verify);
           await update(row.id, { status: 'in_review', review_started: sqlNow(now) });
-          await notify(`Blog ready for review: ${row.title}`, `Review and edit it in Drafts & Review within 24 hours. If nobody reviews it, it is auto-approved and published at ${row.publish_at} UTC.`);
+          await notify(`Blog ready for review: ${row.title}`, `Approve or reject it in Monthly Strategy within 48 hours. If nobody rejects it, it is approved and published automatically.`);
           summary.opened++;
         }
       } else if (action === 'publish') {

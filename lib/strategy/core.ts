@@ -214,20 +214,33 @@ export function approvalBlockers(plan: any, validation: ValidationResult | null,
   return out;
 }
 
-// ---------- Blog 24-hour review window ----------
-export const REVIEW_HOURS = 24;
+// ---------- Blog 48-hour review window ----------
+export const REVIEW_HOURS = 48;
 const toMs = (s: string) => Date.parse(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z'));
 
+type ScheduleRow = { status: string; publish_at: string; review_started?: string | null; reviewed_at?: string | null };
+
+// When a blog in review publishes: at its slot if a reviewer approved it; otherwise at its slot or
+// when its 48-hour review window ends, whichever is later, so a reviewer always gets the full 48 hours
+// (including after a rewrite, which opens a new window).
+export function autoPublishAt(row: ScheduleRow): number {
+  const slot = toMs(row.publish_at);
+  if (row.reviewed_at || !row.review_started) return slot;
+  return Math.max(slot, toMs(row.review_started) + REVIEW_HOURS * 3600000);
+}
+
 // What the scheduler should do with one calendar row right now.
-//   open_review: enter review (24h before slot)  publish: slot reached  wait: nothing yet
-// The scheduler runs every 15 minutes, so a blog publishes within 15 minutes after its slot and
-// never before it. `graceMinutes` lets a less frequent scheduler publish slightly early instead.
-export function scheduleAction(row: { status: string; publish_at: string }, now = new Date(), graceMinutes = 0): 'open_review' | 'publish' | 'wait' {
+//   open_review: enter the 48-hour review  publish: time to publish  wait: nothing yet
+// Rejected blogs wait for their rewrite (handled separately); they never publish on their own.
+// The scheduler runs every 15 minutes; `graceMinutes` lets a less frequent scheduler publish early.
+export function scheduleAction(row: ScheduleRow, now = new Date(), graceMinutes = 0): 'open_review' | 'publish' | 'wait' {
   const slot = toMs(row.publish_at);
   const t = now.getTime();
-  if (['published', 'failed'].includes(row.status)) return 'wait';
-  if (t >= slot - graceMinutes * 60000 && ['in_review', 'held', 'drafting', 'planned'].includes(row.status)) return 'publish';
-  if (t >= slot - (REVIEW_HOURS * 60 + graceMinutes) * 60000 && ['planned', 'drafting'].includes(row.status)) return 'open_review';
+  const grace = graceMinutes * 60000;
+  if (['published', 'failed', 'rejected', 'revising'].includes(row.status)) return 'wait';
+  if (row.status === 'in_review') return t >= autoPublishAt(row) - grace ? 'publish' : 'wait';
+  if (t >= slot - grace && ['held', 'drafting', 'planned'].includes(row.status)) return 'publish';
+  if (t >= slot - REVIEW_HOURS * 3600000 - grace && ['planned', 'drafting'].includes(row.status)) return 'open_review';
   return 'wait';
 }
 

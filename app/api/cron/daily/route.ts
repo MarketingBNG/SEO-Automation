@@ -1,4 +1,4 @@
-// Daily cron: drafts upcoming blogs, opens 24-hour review windows, auto-approves and publishes due
+// Daily cron: drafts upcoming blogs, opens 48-hour review windows, auto-approves and publishes due
 // blogs only after the automatic fact check passes, and runs the priority-keyword rank check.
 // Run it every 15 minutes (Coolify Scheduled Task). Every step is idempotent, an overlapping call is skipped,
 // and the rank check runs once per day.
