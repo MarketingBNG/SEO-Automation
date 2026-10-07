@@ -243,6 +243,14 @@ words LINK HERE. 120-200 words, no hashtag spam (3 at most), no emojis, no em da
 // jobs nobody is waiting on.
 // maxParts: how many times a long turn that the API paused (pause_turn, common with many web
 // searches) is continued before giving up.
+// Errors worth retrying: dropped connections, timeouts, overloaded or server errors, rate limits.
+function isTransient(err: any) {
+  const status = Number(err?.status);
+  if ([408, 409, 429, 500, 502, 503, 504, 529].includes(status)) return true;
+  if (status >= 400 && status < 500) return false;
+  return /connection|socket|ECONNRESET|ETIMEDOUT|EPIPE|terminated|network|fetch failed|timed? ?out|overloaded|stream (ended|closed)|premature/i.test(`${err?.name} ${err?.message} ${err?.cause?.code || ''}`);
+}
+
 async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40 }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
@@ -274,23 +282,31 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
       continue;
     }
 
-    const stream = client.beta.messages.stream(
-      {
-        model,
-        max_tokens: 32000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        output_config: { effort },
-        system: systemPrompt,
-        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxUses }],
-        messages: conversation,
-      },
-      { signal }
-    );
-    const response = await stream.finalMessage().catch(async (err: any) => {
-      await onApiError(err);
-      return rethrowFriendly(err, signal);
-    });
+    const params = {
+      model,
+      max_tokens: 32000,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort },
+      system: systemPrompt,
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxUses }],
+      messages: conversation,
+    };
+    // A long research turn can lose its connection or hit a busy API part-way. Those are retried
+    // (same request, up to 4 times with a growing wait) instead of failing the whole blog.
+    let response;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        response = await client.beta.messages.stream(params, { signal }).finalMessage();
+        break;
+      } catch (err: any) {
+        if (signal?.aborted || err?.name === 'AbortError' || err?.name === 'APIUserAbortError') throw err;
+        await onApiError(err);
+        if (attempt >= 4 || !isTransient(err)) return rethrowFriendly(err, signal);
+        console.warn(`Claude call failed (${err?.status || err?.name}: ${String(err?.message).slice(0, 120)}); retry ${attempt + 1} of 4`);
+        await new Promise((r) => setTimeout(r, Math.min(60000, 5000 * 2 ** attempt)));
+      }
+    }
     await recordUsage({ model: response.model || model, usage: response.usage, feature });
     if (response.stop_reason === 'refusal') throw new Error('The AI declined this request.');
 

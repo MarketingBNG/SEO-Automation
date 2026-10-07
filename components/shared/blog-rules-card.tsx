@@ -18,18 +18,27 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [running, setRunning] = useState<string | null>(null);
 
+  // Both jobs run on the server in the background; this polls until they finish.
   async function runNow(kind: 'lessons' | 'topup') {
+    const url = kind === 'lessons' ? '/api/lessons' : '/api/seranking/topup';
     setRunning(kind);
-    setMsg(null);
+    setMsg(kind === 'lessons' ? 'Learning from the latest results on the server. You can leave this page.' : 'Adding keywords on the server. You can leave this page; the timer at the top shows the time left.');
     try {
-      const res = await fetch(kind === 'lessons' ? '/api/lessons' : '/api/seranking/topup', { method: 'POST' });
+      const res = await fetch(url, { method: 'POST' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-      if (kind === 'lessons') {
-        if (j.lessons) setLessons(j.lessons);
-        setMsg(j.skipped || 'Lessons updated.');
-      } else {
-        setMsg(j.skipped || `${j.added} keyword(s) added. SE Ranking now tracks ${j.tracked} of the ${j.target} target.`);
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const st = await fetch(url).then((r) => r.json()).catch(() => null);
+        if (!st || st.running) continue;
+        if (kind === 'lessons') {
+          setLessons(st.lessons || '');
+          setMsg('Lessons updated.');
+        } else {
+          const l = st.last || {};
+          setMsg(l.error ? `Could not add keywords: ${l.error}` : l.skipped || `${l.added} keyword(s) added. SE Ranking now tracks ${l.tracked} of the ${l.target} target.${l.researchSkipped ? ' Keyword research was skipped to keep SE Ranking credits for blogs.' : ''}`);
+        }
+        break;
       }
     } catch (e: any) {
       setMsg(e.message);
@@ -37,20 +46,6 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
       setRunning(null);
     }
   }
-
-  useEffect(() => {
-    fetch('/api/settings')
-      .then((r) => r.json())
-      .then((s) => {
-        setTarget(s.tracked_keyword_target || '1500');
-        setLessons(s.writer_lessons || '');
-        try {
-          const list = JSON.parse(s.service_ctas || '[]');
-          if (Array.isArray(list) && list.length) setCtas(list);
-        } catch {}
-      })
-      .catch(() => {});
-  }, []);
 
   async function save() {
     setBusy(true);

@@ -23,6 +23,9 @@ async function tick() {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   await runDaily(now).catch((e) => console.error('Scheduler: daily run failed:', e.message));
+  // A blog cut off by a server restart (for example a deploy) is started again automatically.
+  const { resumeInterruptedBlog } = await import('./blogJob');
+  await resumeInterruptedBlog().catch((e: any) => console.error('Scheduler: blog resume failed:', e.message));
 
   if (now.getUTCDay() === 1 && (await settings.get('last_weekly_run')) !== today) {
     const r: any = await runWeekly(now).catch((e) => ({ error: e.message }));
@@ -55,11 +58,18 @@ async function tick() {
 export function startScheduler() {
   if (process.env.BUILTIN_SCHEDULER === 'off' || globalThis.__seoScheduler) return;
   // Blog generations run inside this server process; any still marked as running from before a
-  // restart cannot finish, so they are marked failed (with a clear reason) to be generated again.
-  import('./prisma')
-    .then(({ default: prisma }) =>
-      prisma.keywords.updateMany({ where: { status: 'generating' }, data: { status: 'failed', error: 'Interrupted by a server restart or deploy. Click Generate again.', progress_stage: null, progress_percent: null } })
-    )
+  // restart (for example a deploy) cannot finish here. They go back in the queue and the first tick
+  // starts them again automatically (strategy blogs are rewritten by the schedule).
+  import('./blogJob')
+    .then(async ({ requeueOrphanBlogs }) => {
+      await requeueOrphanBlogs({ immediate: true });
+      // Blogs an older version marked failed for the same reason are queued again too.
+      const { default: prisma } = await import('./prisma');
+      await prisma.keywords.updateMany({
+        where: { status: 'failed', error: { startsWith: 'Interrupted by a server restart' }, NOT: { batch_name: { startsWith: 'Strategy #' } } },
+        data: { status: 'pending', error: 'The previous run was cut off by a server restart.' },
+      });
+    })
     .catch(() => {});
   const run = () => tick().catch((e) => console.error('Scheduler error:', e?.message || e));
   // First run a minute after start, so the server is fully up.
