@@ -87,3 +87,11 @@ test('byline and expert schema', () => {
   assert.equal(json.reviewedBy.jobTitle, 'CA');
   assert.equal(json.mainEntity.author.name, 'Harsh Jain');
 });
+
+test('tracked SE Ranking keywords on the topic go into the blog keyword plan', async () => {
+  const { chooseKeywords, planForPrompt } = await import('../lib/keywordPlanner');
+  const plan = { secondary: [], questions: [], relatedSearches: [], surferTerms: [], tracked: [{ keyword: 'fbar penalty for nri', position: 12, volume: 300 }, { keyword: 'itin renewal', position: 5, volume: 900 }, { keyword: 'fbar deadline', position: 3, volume: 50 }] };
+  const chosen: any = chooseKeywords(plan, 'fbar deadline');
+  assert.deepEqual(chosen.tracked.map((t: any) => t.keyword), ['fbar penalty for nri']);
+  assert.match(planForPrompt(chosen), /TRACKED IN SE RANKING[^\n]*fbar penalty for nri/);
+});

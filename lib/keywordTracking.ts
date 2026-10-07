@@ -37,7 +37,9 @@ export async function syncStrategyKeywords({ add = addTrackedKeywords } = {}) {
 }
 
 export async function topUpTrackedKeywords({ add = addTrackedKeywords, strategyOnly = false } = {}) {
-  const target = Math.max(20, Number(await settings.get('tracked_keyword_target')) || 1500);
+  // Never more than the plan limit minus the buffer (5,000 - 500 = 4,500 by default).
+  const cap = Math.max(20, (Number(await settings.get('seranking_keyword_limit')) || 5000) - (Number(await settings.get('seranking_keyword_buffer')) || 500));
+  const target = Math.min(cap, Math.max(20, Number(await settings.get('tracked_keyword_target')) || 1500));
   const sites = await listSites();
   if (!sites?.length) return { skipped: 'No SE Ranking project' };
   // All tracked keywords (the list endpoint also has ones not checked yet; rankings as a fallback).
@@ -57,7 +59,8 @@ export async function topUpTrackedKeywords({ add = addTrackedKeywords, strategyO
   // 1. The approved strategy's keywords: always tracked, whatever the target.
   for (const k of strategy.keywords) take(k);
   const fromStrategy = picked.length;
-  const need = strategyOnly ? fromStrategy : Math.max(fromStrategy, Math.min(MAX_PER_RUN, target - tracked.size));
+  const room = Math.max(0, cap - tracked.size);
+  const need = Math.min(room, strategyOnly ? fromStrategy : Math.max(fromStrategy, Math.min(MAX_PER_RUN, target - tracked.size)));
   // Extra keywords must be on the strategy's topics.
   const takeOnTopic = (k) => {
     if (onTopic(k)) take(k);
@@ -106,5 +109,5 @@ export async function topUpTrackedKeywords({ add = addTrackedKeywords, strategyO
   const strategyAdded = Math.min(fromStrategy, list.length);
   const added = list.length ? await add(list) : 0;
   await activity.log('seranking.keywords_added', { details: `${added} keyword(s) added to rank tracking (${strategyAdded} from the ${strategy.period || 'current'} strategy; ${tracked.size + added} tracked, target ${target})` });
-  return { tracked: tracked.size + added, target, added, strategyAdded, keywords: list, unitsLeft, researchSkipped: !canResearch };
+  return { tracked: tracked.size + added, target, cap, added, strategyAdded, keywords: list, unitsLeft, researchSkipped: !canResearch };
 }

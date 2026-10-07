@@ -1,6 +1,6 @@
 // @ts-nocheck -- PORT NOTE: ported 1:1 from untyped JS; type checking disabled for this file only (logic unchanged).
 import * as questionBankMod from './questionBank';
-import { researchKeywords } from './seranking';
+import { researchKeywords, listSites, getSiteRankings } from './seranking';
 import { liveSearch } from './serphouse';
 import { querySearchAnalytics, comparisonRanges } from './searchConsole';
 import { wpRequest } from './wordpress';
@@ -60,6 +60,23 @@ async function gatherBrief(keyword, { includeSurfer = true, only }: any = {}) {
       // Most Indian searches are on phones, and the research recommends mobile results for India.
       return liveSearch({ q: keyword, loc: 'India', device: 'mobile' });
     },
+    // Keywords we already track in SE Ranking on this topic (with today's position), so the blog
+    // uses the keywords the strategy is measured on.
+    tracked: async () => {
+      const sites = await listSites();
+      if (!sites?.length) return [];
+      const rows = await getSiteRankings(sites[0].id);
+      const seen = new Set();
+      return rows
+        .filter((r) => {
+          const k = String(r.keyword || '').toLowerCase();
+          if (!k || seen.has(k) || k === String(keyword).toLowerCase()) return false;
+          seen.add(k);
+          return terms.some((t) => k.includes(t));
+        })
+        .map((r) => ({ keyword: r.keyword, position: r.position > 0 ? r.position : null, volume: r.volume ?? null }))
+        .slice(0, 15);
+    },
     ownRankings: async () => {
       const { current } = comparisonRanges(90);
       // Every distinctive word must appear (the filters are ANDed), so near-variants still match.
@@ -96,7 +113,7 @@ async function gatherBrief(keyword, { includeSurfer = true, only }: any = {}) {
       : {}),
   };
 
-  const timeouts = { surfer: 100000, serp: 65000, serpIndia: 65000, keywordData: 80000, internalLinks: 45000 };
+  const timeouts = { tracked: 70000, surfer: 100000, serp: 65000, serpIndia: 65000, keywordData: 80000, internalLinks: 45000 };
   const entries = Object.entries(tasks).filter(([name]) => !only || only.includes(name));
   const settled = await Promise.allSettled(entries.map(([name, fn]) => withTimeout(fn(), timeouts[name] || 30000, name)));
   settled.forEach((r, i) => {

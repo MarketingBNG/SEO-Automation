@@ -62,6 +62,14 @@ function chooseKeywords(plan, keyword) {
 
   const surfer = (plan?.surferTerms || []).slice(0, 12);
 
+  // Keywords tracked in SE Ranking on this topic that the plan does not already use: up to 4,
+  // keywords we rank 4-30 for first (closest to moving up), then by search volume.
+  const usedKeys = new Set([...secondary.flatMap((s) => [s.keyword, ...s.variants]), ...questions.map((q) => q.keyword), ...related.map((r) => r.keyword), keyword].map((k) => String(k).toLowerCase()));
+  const tracked = (plan?.tracked || [])
+    .filter((t) => !usedKeys.has(String(t.keyword).toLowerCase()) && !isSubset(coreTerms(t.keyword), primaryTerms) && overlap(coreTerms(t.keyword), primaryTerms) >= 1)
+    .sort((a, b) => Number(b.position >= 4 && b.position <= 30) - Number(a.position >= 4 && a.position <= 30) || (b.volume || 0) - (a.volume || 0))
+    .slice(0, 4);
+
   const placement: any[] = [];
   if (keyword) placement.push({ type: 'primary', keyword, place: 'Title (in the first 5 words), the opening answer (first 100 words), one H2, the meta description once, and the URL slug' });
   secondary.forEach((s, i) =>
@@ -77,8 +85,9 @@ function chooseKeywords(plan, keyword) {
     placement.push({ type: 'question', keyword: q.keyword, source: q.source, place: i === 0 ? 'A FAQ question (keep the wording); also answer it in the body if it is central' : 'A FAQ question (keep the wording), answered in 40 to 60 words' })
   );
   related.forEach((r) => placement.push({ type: 'related', keyword: r.keyword, place: 'Natural wording in a heading or the body text' }));
+  tracked.forEach((t) => placement.push({ type: 'tracked', keyword: t.keyword, position: t.position, place: 'An H2/H3 heading or the body text, once, where it reads naturally' }));
 
-  return { primary: keyword, secondary, coveredByPrimary, questions, related, surfer, placement };
+  return { primary: keyword, secondary, coveredByPrimary, questions, related, surfer, tracked, placement };
 }
 
 // Text block for the writer's prompt.
@@ -97,6 +106,7 @@ function planForPrompt(chosen) {
     chosen.placement.filter((p) => p.type === 'question').forEach((p) => lines.push(`  * "${p.keyword}" (${p.source}): ${p.place}.`));
   }
   if (chosen.related.length) lines.push(`- RELATED SEARCHES (long-tail wording that fits): ${chosen.related.map((r) => `"${r.keyword}"`).join(', ')}.`);
+  if (chosen.tracked?.length) lines.push(`- TRACKED IN SE RANKING (the strategy measures our rankings on these; use each once in a heading or the text, naturally): ${chosen.tracked.map((t) => `"${t.keyword}"${t.position ? ` (we rank ${t.position})` : ''}`).join(', ')}.`);
   if (chosen.surfer.length) lines.push(`- COVERAGE TERMS from the top-ranking pages (cover the ones that fit; never exceed a maximum): ${chosen.surfer.map((t) => `${t.term}${t.min !== null ? ` (${t.min}${t.max ? `-${t.max}` : '+'})` : ''}`).join('; ')}.`);
   return lines.join('\n');
 }
@@ -161,8 +171,9 @@ function coverage(chosen, article) {
   });
   const questions = chosen.questions.map((q) => ({ ...q, status: questionUsage(q.keyword, parts.headings) ? 'used' : 'missing' }));
   const related = chosen.related.map((r) => ({ ...r, ...usage(r.keyword, parts) }));
+  const tracked = (chosen.tracked || []).map((t) => ({ ...t, ...usage(t.keyword, parts) }));
   const covered = secondary.filter((s) => s.status !== 'missing').length;
-  return { secondary, questions, related, coveredSecondary: covered, parts };
+  return { secondary, questions, related, tracked, coveredSecondary: covered, parts };
 }
 
 export { chooseKeywords, planForPrompt, coverage, usage, splitParts, questionUsage, coreTerms, clusterList, norm };

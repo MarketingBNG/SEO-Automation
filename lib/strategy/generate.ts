@@ -48,7 +48,9 @@ DATA RULES (strict):
   (from the data) and how this month fixes it.
 - Keywords: one main keyword per blog; never reuse a keyword from "usedKeywords". At least 60% of
   blogs support a focus service. Intent mix about 50% informational, 35% commercial, 15% comparison.
-  businessValue is 0-5 (5 = query names a paid service the firm sells).
+  businessValue is 0-5 (5 = query names a paid service the firm sells). Every keyword in the plan
+  is tracked in SE Ranking automatically; "seRankingTracking" says how many are tracked now and the
+  maximum (4,500). Keep the keyword plan within the free slots and prefer keywords already tracked.
 - Backlinks: only these methods, spelled exactly: ${SAFE_BACKLINK_METHODS.join('; ')}. Use the
   SE Ranking backlink gap list for outreach targets. Never paid links, link farms, comment spam or PBNs.
   targetSite MUST be one real website domain (for example "examplecpa.com"), never a description,
@@ -322,6 +324,7 @@ export async function generateStrategy({ window = strategyWindow(), actor = 'Mon
     today: new Date().toISOString().slice(0, 10),
     ...rest,
     trackedKeywords: (rankings || []).slice(0, 150),
+    seRankingTracking: { trackedNow: new Set((rankings || []).map((r: any) => keywordKey(r.keyword))).size, maxTracked: 4500, note: 'Plan limit 5,000 tracked keywords with 500 kept free. Every keyword in this plan is tracked automatically.' },
     analysis: snapshot?.analysis ? {
       scoreboard: snapshot.analysis.scoreboard,
       strikingDistance: snapshot.analysis.strikingDistance,
