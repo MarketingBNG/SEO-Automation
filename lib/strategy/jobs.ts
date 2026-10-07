@@ -15,10 +15,13 @@ import { assertCredits } from '../aiCredits';
 // Writes progress at most every 2 seconds (and always for 100%).
 export function progressWriter(write: (stage: string, percent: number) => Promise<unknown>) {
   let last = 0;
+  let lastStage = '';
   return (stage: string, percent: number) => {
     const now = Date.now();
-    if (percent < 100 && now - last < 2000) return;
+    // A new stage is always saved; repeated updates of the same stage at most every 2 seconds.
+    if (percent < 100 && stage === lastStage && now - last < 2000) return;
     last = now;
+    lastStage = stage;
     write(String(stage).slice(0, 300), Math.max(0, Math.min(100, Math.round(percent)))).catch(() => {});
   };
 }
