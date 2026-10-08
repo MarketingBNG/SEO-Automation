@@ -63,11 +63,12 @@ export default function DraftsTab() {
                     <OriginLabel
                       label="Created by dashboard"
                       lines={[
-                        `Written by the dashboard from the ${d.origin.source}, ${d.origin.created} (UTC).`,
+                        `Written by the dashboard from the ${d.origin.source}, ${d.origin.created}.`,
                         d.origin.rewrites ? `Rewritten ${d.origin.rewrites} time(s) after a reviewer's feedback${d.origin.rejectedBy ? ` (last rejected by ${d.origin.rejectedBy})` : ''}.` : 'Not rewritten after review.',
                         d.origin.autoRepairs ? `Fixed automatically ${d.origin.autoRepairs} time(s) before review.` : 'Passed the checks on the first try.',
                         d.status === 'approved' || d.origin.reviewedBy ? `Approved${d.origin.reviewedBy ? ` by ${d.origin.reviewedBy}` : ''}.` : d.status === 'published' ? 'Approved.' : `Review: ${d.status.replace('_', ' ')}.`,
-                        d.origin.onWebsite ? `On the website: ${d.origin.onWebsite}` : 'Not on the website yet.',
+                        d.origin.websiteDate,
+                        ...(d.origin.onWebsite ? [`On the website: ${d.origin.onWebsite}`] : []),
                       ]}
                     />
                   )}
