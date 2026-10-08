@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listPosts } from '@/lib/wordpress';
 import prisma from '@/lib/prisma';
+import { getMe } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
@@ -24,13 +25,16 @@ async function handler(req: NextRequest) {
     const fromDashboard = new Set((await prisma.drafts.findMany({ where: { wp_post_id: { not: null } }, select: { wp_post_id: true } })).map((d) => d.wp_post_id));
     const rewrittenHere = new Set((audits as any[]).filter((a) => a.rewrite_status === 'published').map((a) => a.wp_post_id));
 
+    const me = await getMe();
+    const admin = me?.role === 'admin' || me?.role === 'tester';
     const merged = posts.map((p: any) => ({
       id: p.id,
       title: p.title?.rendered || '(untitled)',
       link: p.link,
       modified: p.modified,
       audit: latestAuditByPost[p.id] || null,
-      origin: fromDashboard.has(p.id) ? 'dashboard' : rewrittenHere.has(p.id) ? 'rewritten' : 'old',
+      // Shown to the admin (and those with admin rights) only.
+      origin: !admin ? null : fromDashboard.has(p.id) ? 'dashboard' : rewrittenHere.has(p.id) ? 'rewritten' : 'old',
     }));
 
     return NextResponse.json({ posts: merged, totalPages, page }, { status: 200 });

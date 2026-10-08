@@ -17,6 +17,7 @@ import { StatusBadge } from '@/components/shared/status-badge';
 import { PeopleAlsoAskList } from '@/components/shared/people-also-ask';
 import { DataTable, FieldLabel, NativeSelect, TD, TD_MUTED } from '@/components/shared/content-ui';
 import { jobsChanged } from '@/components/shared/job-progress';
+import { OriginLabel } from '@/components/shared/origin-details';
 
 export { PeopleAlsoAskList };
 
@@ -58,6 +59,18 @@ export default function DraftsTab() {
                 <td className={TD}>
                   <div className="font-medium">{d.title || <span className="font-normal text-muted-foreground">(untitled)</span>}</div>
                   <div className="text-xs text-muted-foreground">{d.keyword}</div>
+                  {d.origin && (
+                    <OriginLabel
+                      label="Created by dashboard"
+                      lines={[
+                        `Written by the dashboard from the ${d.origin.source}, ${d.origin.created} (UTC).`,
+                        d.origin.rewrites ? `Rewritten ${d.origin.rewrites} time(s) after a reviewer's feedback${d.origin.rejectedBy ? ` (last rejected by ${d.origin.rejectedBy})` : ''}.` : 'Not rewritten after review.',
+                        d.origin.autoRepairs ? `Fixed automatically ${d.origin.autoRepairs} time(s) before review.` : 'Passed the checks on the first try.',
+                        d.status === 'approved' || d.origin.reviewedBy ? `Approved${d.origin.reviewedBy ? ` by ${d.origin.reviewedBy}` : ''}.` : d.status === 'published' ? 'Approved.' : `Review: ${d.status.replace('_', ' ')}.`,
+                        d.origin.onWebsite ? `On the website: ${d.origin.onWebsite}` : 'Not on the website yet.',
+                      ]}
+                    />
+                  )}
                 </td>
                 <td className={TD}>
                   {d.production_state && (
