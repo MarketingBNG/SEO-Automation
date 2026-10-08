@@ -42,12 +42,19 @@ type Running = { key: string; kind: JobKind; label: string; startedAt: number; s
 const g = globalThis as unknown as { __jobTimers?: Map<string, Running> };
 const running = (g.__jobTimers ||= new Map<string, Running>());
 
+// The measured durations, read once per half minute (the progress bar asks for estimates every few
+// seconds, for every step of every running job).
+let historyCache: { at: number; value: Record<string, number[]> } | null = null;
 async function history(): Promise<Record<string, number[]>> {
+  if (historyCache && Date.now() - historyCache.at < 30000) return historyCache.value;
+  let value: Record<string, number[]> = {};
   try {
-    return JSON.parse((await settings.get('job_durations')) || '{}');
+    value = JSON.parse((await settings.get('job_durations')) || '{}');
   } catch {
-    return {};
+    value = {};
   }
+  historyCache = { at: Date.now(), value };
+  return value;
 }
 
 const stageDefault = (kind: string, stageKey: string) => REPAIR_DEFAULTS[stageKey] ?? STAGES[kind]?.find((s) => s.key === stageKey)?.typical ?? 600;
@@ -68,6 +75,7 @@ export async function recordDuration(kind: string, seconds: number) {
   if (!Number.isFinite(seconds) || seconds < 5) return;
   const h = await history();
   h[kind] = [...(h[kind] || []), Math.round(seconds)].slice(-10);
+  historyCache = { at: Date.now(), value: h };
   await settings.set('job_durations', JSON.stringify(h)).catch(() => {});
 }
 

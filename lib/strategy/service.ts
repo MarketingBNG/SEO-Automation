@@ -14,10 +14,11 @@ import * as settings from '../settings';
 
 // SE Ranking tracks what the strategy targets: its keywords are added in the background right after
 // approval or an edit (no credits used; a missing SE Ranking key just skips it).
-const g = globalThis as unknown as { __trackingSync?: boolean };
+const g = globalThis as unknown as { __trackingSync?: boolean; __trackingAttemptAt?: number };
 export function trackStrategyKeywords(strategyId?: number) {
   if (!process.env.SERANKING_API_KEY || g.__trackingSync) return;
   g.__trackingSync = true;
+  g.__trackingAttemptAt = Date.now();
   void import('../keywordTracking')
     .then(async ({ syncStrategyKeywords, strategyTrackingStatus }) => {
       await syncStrategyKeywords();
@@ -37,7 +38,8 @@ async function trackingView(row) {
     s = JSON.parse((await settings.get('strategy_tracking_status')) || 'null');
   } catch {}
   const fresh = s && s.strategyId === row.id && Date.now() - Date.parse(s.checkedAt) < 6 * 3600000;
-  if (!fresh) trackStrategyKeywords(row.id);
+  // A sync that failed is tried again after half an hour, not on every page view.
+  if (!fresh && Date.now() - (g.__trackingAttemptAt || 0) > 30 * 60000) trackStrategyKeywords(row.id);
   return s && s.strategyId === row.id ? { ...s, syncing: Boolean(g.__trackingSync) } : { syncing: Boolean(process.env.SERANKING_API_KEY), notConnected: !process.env.SERANKING_API_KEY };
 }
 

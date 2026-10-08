@@ -41,7 +41,24 @@ function ga4Filter(path, extra) {
   return extra ? { andGroup: { expressions: [landing, extra] } } : landing;
 }
 
-async function getBlogAnalytics(inputUrl, { days = 28, keyword = '' }: any = {}) {
+// Search Console and GA4 answers change slowly, so each answer is kept for 10 minutes (the Drafts
+// page and every opened draft ask for them; ?fresh=1 asks again).
+const CACHE_MS = 10 * 60 * 1000;
+const cache = new Map<string, { at: number; data: any }>();
+async function cached(key: string, fresh: boolean, fn: () => Promise<any>) {
+  const hit = cache.get(key);
+  if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.data;
+  const data = await fn();
+  cache.set(key, { at: Date.now(), data });
+  if (cache.size > 200) cache.delete(cache.keys().next().value as string);
+  return data;
+}
+
+async function getBlogAnalytics(inputUrl, { days = 28, keyword = '', fresh = false }: any = {}) {
+  return cached(`one|${inputUrl}|${days}|${keyword}`, fresh, () => blogAnalytics(inputUrl, { days, keyword }));
+}
+
+async function blogAnalytics(inputUrl, { days = 28, keyword = '' }: any = {}) {
   const { url, path } = parseBlogUrl(inputUrl);
   const live = isLive(inputUrl);
   if (!live) return { url, live: false, message: 'This page is not live yet (it is a WordPress draft or preview), so Google has no data for it. Analytics appear a few days after it is published.' };
@@ -170,7 +187,11 @@ async function getBlogAnalytics(inputUrl, { days = 28, keyword = '' }: any = {})
 }
 
 // All published blogs ranked by Google clicks, with their top keywords and the change vs before.
-async function getBlogTable({ days = 28 }: any = {}) {
+async function getBlogTable({ days = 28, fresh = false }: any = {}) {
+  return cached(`table|${days}`, fresh, () => blogTable({ days }));
+}
+
+async function blogTable({ days = 28 }: any = {}) {
   const w = windows(days);
   const errors: any = {};
   const safe = (name, fn) => fn().catch((e: any) => ((errors[name] = e.message), null));

@@ -221,6 +221,59 @@ export const REVIEW_HOURS = 48;
 const toMs = (s: string) => Date.parse(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z'));
 
 type ScheduleRow = { status: string; publish_at: string; review_started?: string | null; reviewed_at?: string | null; main_keyword?: string | null; title?: string | null };
+type PlanRow = ScheduleRow & { reviewed_by?: string | null; hold_reasons?: string | null; wp_post_url?: string | null; updated_at?: string | null };
+
+const fmtIst = (ms: number) => new Date(ms).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
+export type PublishPlan = { when: string | null; headline: string; detail: string };
+
+// Plain words on when a calendar blog goes live, for the review screens. Same rules as
+// scheduleAction below; the scheduler checks every 15 minutes.
+export function publishPlan(row: PlanRow, now = new Date(), { requireExpert = false }: { requireExpert?: boolean } = {}): PublishPlan {
+  const slot = toMs(row.publish_at);
+  const t = now.getTime();
+  const slotText = fmtIst(slot);
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const passed = slot <= t;
+  switch (row.status) {
+    case 'published':
+      return { when: row.updated_at ? iso(toMs(row.updated_at)) : null, headline: 'Published', detail: row.wp_post_url ? `Live at ${row.wp_post_url}` : 'Live on the website.' };
+    case 'failed':
+      return { when: null, headline: 'Publishing failed', detail: 'The error is in the status column and the activity log. Fix the cause and the next check tries again.' };
+    case 'held': {
+      let reasons: string[] = [];
+      try {
+        reasons = JSON.parse(row.hold_reasons || '[]');
+      } catch {}
+      return { when: null, headline: 'Held, not publishing', detail: reasons.length ? reasons.join(' ') : 'Fix what holds it; the next check publishes it.' };
+    }
+    case 'rejected':
+    case 'revising':
+      return { when: null, headline: row.status === 'rejected' ? 'Rejected, rewrite queued' : 'Being rewritten', detail: 'It comes back for a new 48-hour review with a note on what changed, and publishes only after that review.' };
+    case 'in_review': {
+      const who = row.reviewed_by || 'a reviewer';
+      if (row.reviewed_at) {
+        return passed
+          ? { when: iso(t), headline: `Approved by ${who}`, detail: `Its slot (${slotText}) has passed, so it publishes at the next check, within about 15 minutes.` }
+          : { when: iso(slot), headline: `Approved by ${who}`, detail: `Publishes automatically at ${slotText}.` };
+      }
+      if (requireExpert && needsExpertReview(row.main_keyword, row.title)) {
+        return { when: null, headline: 'Waiting for a CA/CPA to approve it', detail: `Tax, legal or compliance topic: it never publishes on its own. Pick the reviewer and approve it in Monthly Strategy; it then publishes ${passed ? 'at the next check' : `at ${slotText}`}.` };
+      }
+      const auto = autoPublishAt(row);
+      return {
+        when: iso(auto),
+        headline: 'Waiting for approval',
+        detail: auto > slot
+          ? `Approve it and it publishes ${passed ? 'at the next check' : `at ${slotText}`}. If nobody decides, it publishes on its own at ${fmtIst(auto)}, when its 48-hour review ends.`
+          : `Approve it and it publishes at ${slotText}. If nobody decides by then, it publishes on its own at that time.`,
+      };
+    }
+    case 'drafting':
+      return { when: iso(slot), headline: `Scheduled for ${slotText}`, detail: 'Being written now. It then goes into a 48-hour review before it publishes.' };
+    default:
+      return { when: iso(slot), headline: `Scheduled for ${slotText}`, detail: `The draft is written about 72 hours before the slot and comes up for a 48-hour review from ${fmtIst(slot - REVIEW_HOURS * 3600000)}.` };
+  }
+}
 
 // When a blog in review publishes: at its slot if a reviewer approved it; otherwise at its slot or
 // when its 48-hour review window ends, whichever is later, so a reviewer always gets the full 48 hours

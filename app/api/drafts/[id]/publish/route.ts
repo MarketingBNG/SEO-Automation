@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { uploadFeaturedImage, publishPost, seoSlug } from '@/lib/wordpress';
+import { uploadMedia, publishPost, seoSlug } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
@@ -10,7 +10,7 @@ import { CREDENTIAL, expertReviewers, requireExpert } from '@/lib/reviewers';
 import { withByline, expertSchema } from '@/lib/byline';
 import { authorNames, pickAuthor, wpAuthorId } from '@/lib/authors';
 import { publishDraftImages } from '@/lib/inlineMedia';
-import { makeCover } from '@/lib/cover';
+import { makeCover, coverAlt } from '@/lib/cover';
 import { saveFile } from '@/lib/storage';
 
 export const runtime = 'nodejs';
@@ -55,17 +55,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(keyword || draft.title)}.png`, await makeCover(draft.title, author), 'image/png').catch(() => null);
       if (imageKey) await prisma.drafts.update({ where: { id: nid }, data: { featured_image_path: imageKey } });
     }
-    const featuredMediaId = imageKey ? await uploadFeaturedImage(imageKey) : undefined;
+    // It goes to the Media Library with its alt text (what the picture shows), so Google reads it.
+    const cover = imageKey ? await uploadMedia(imageKey, { altText: coverAlt(draft), title: draft.title }) : null;
 
     // Images a person placed in the article move to the WordPress Media Library first.
     const inline = await publishDraftImages(nid, draft.content_html || '');
-    const contentHtml = `${withByline(inline.html, author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null }) || ''}`;
+    const contentHtml = `${withByline(inline.html, author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null, image: cover?.url || null }) || ''}`;
     const post: any = await publishPost({
       title: draft.title,
       contentHtml,
       author: authorId || undefined,
       excerpt: draft.meta_description,
-      featuredMediaId,
+      featuredMediaId: cover?.id,
       status: wpStatus,
       slug: seoSlug(keyword || draft.title),
       metaDescription: draft.meta_description,

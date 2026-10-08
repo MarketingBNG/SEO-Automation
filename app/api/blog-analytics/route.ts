@@ -11,8 +11,9 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const days = Math.min(90, Math.max(7, parseInt(sp.get('days') as any, 10) || 28));
   try {
-    if (sp.get('url')) return NextResponse.json(await getBlogAnalytics(String(sp.get('url')), { days, keyword: String(sp.get('keyword') || '') }), { status: 200 });
-    return NextResponse.json(await getBlogTable({ days }), { status: 200 });
+    const fresh = sp.get('fresh') === '1';
+    if (sp.get('url')) return NextResponse.json(await getBlogAnalytics(String(sp.get('url')), { days, keyword: String(sp.get('keyword') || ''), fresh }), { status: 200 });
+    return NextResponse.json(await getBlogTable({ days, fresh }), { status: 200 });
   } catch (err: any) {
     if (!err.status) console.error(err);
     return NextResponse.json({ error: err.message }, { status: err.status || 500 });

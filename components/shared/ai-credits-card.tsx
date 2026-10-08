@@ -35,7 +35,8 @@ export function AiCreditsCard() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
-    const t = setInterval(load, 30000);
+    // Spend moves slowly; a check every 2 minutes is enough (each one can ask Anthropic's cost report).
+    const t = setInterval(load, 120000);
     return () => clearInterval(t);
   }, [load]);
 

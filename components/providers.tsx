@@ -7,8 +7,9 @@ import { Toaster } from '@/components/ui/sonner';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    // Refreshed every minute so a new role or a block takes effect quickly.
-    <SessionProvider refetchInterval={60}>
+    // Refreshed every 5 minutes and when the window gets focus, so a new role or a block takes
+    // effect soon without a database lookup every minute from every open tab.
+    <SessionProvider refetchInterval={300} refetchOnWindowFocus>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         <TooltipProvider>
           {children}

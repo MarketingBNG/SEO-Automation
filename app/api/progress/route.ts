@@ -10,9 +10,15 @@ export const runtime = 'nodejs';
 
 // Everything running right now, with live progress: strategy generation and blog writing.
 // Polled by the progress bar in the dashboard header.
+// The two clean-up checks (runs lost to a restart) need to happen now and then, not on every poll
+// from every open browser tab.
+const g = globalThis as unknown as { __progressCleanupAt?: number };
 export async function GET() {
-  await markInterrupted();
-  await requeueOrphanBlogs();
+  if (Date.now() - (g.__progressCleanupAt || 0) > 60000) {
+    g.__progressCleanupAt = Date.now();
+    await markInterrupted();
+    await requeueOrphanBlogs();
+  }
   const [strategies, blogs] = await Promise.all([
     prisma.seo_strategies.findMany({ where: { status: { in: ['generating', 'paused', 'stopping'] } }, select: { id: true, period: true, status: true, progress_stage: true, progress_percent: true } }),
     prisma.keywords.findMany({ where: { status: 'generating' }, select: { id: true, keyword: true, progress_stage: true, progress_percent: true, created_at: true } }),
@@ -37,13 +43,14 @@ export async function GET() {
       .filter((t) => !t.key.startsWith('blog-'))
       .map(async (t) => ({ kind: t.kind, id: t.key, label: t.label, stage: 'Working', percent: null, ...(await withEta(t.kind, t.startedAt, 0)) }))
   );
-  const aiPaused = (await settings.get('ai_paused')) === '1';
-  const stamp = `${await settings.get('credit_balance_set_at')}|${await settings.get('credit_balance_usd')}`;
-  const credits80 = !aiPaused && (await settings.get('credit_alert_80_for')) === stamp;
+  const st = await settings.getMany(['ai_paused', 'ai_paused_reason', 'credit_balance_set_at', 'credit_balance_usd', 'credit_alert_80_for']);
+  const aiPaused = st.ai_paused === '1';
+  const stamp = `${st.credit_balance_set_at}|${st.credit_balance_usd}`;
+  const credits80 = !aiPaused && st.credit_alert_80_for === stamp;
   return NextResponse.json({
     aiPaused,
     credits80,
-    aiPausedReason: aiPaused ? await settings.get('ai_paused_reason') : null,
+    aiPausedReason: aiPaused ? st.ai_paused_reason : null,
     jobs: [...strategyJobs, ...blogJobs, ...otherJobs],
   });
 }

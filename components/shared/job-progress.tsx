@@ -5,7 +5,9 @@ import { Loader2 } from 'lucide-react';
 import { Countdown } from './countdown';
 
 // Live progress bars for work running in the background (strategy generation, blog writing),
-// shown under the dashboard header on every tab. Polls /api/progress every 4 seconds.
+// shown under the dashboard header on every tab. Polls /api/progress every 5 seconds while
+// something runs, every 20 seconds when nothing does, and not at all while the browser tab is
+// hidden (the countdown between polls ticks locally).
 export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
   const [jobs, setJobs] = useState<any[]>([]);
   const [paused, setPaused] = useState<string | null>(null);
@@ -13,19 +15,38 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
 
   useEffect(() => {
     let stop = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let busy = false;
     const tick = async () => {
-      const j = await fetch('/api/progress').then((r) => (r.ok ? r.json() : null)).catch(() => null);
-      if (!stop && j) {
-        setJobs(j.jobs || []);
-        setPaused(j.aiPaused ? j.aiPausedReason || 'AI credits are low.' : null);
-        setCredits80(Boolean(j.credits80));
+      if (stop) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      let running = false;
+      if (!busy) {
+        busy = true;
+        const j = await fetch('/api/progress').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        busy = false;
+        if (stop) return;
+        if (j) {
+          setJobs(j.jobs || []);
+          setPaused(j.aiPaused ? j.aiPausedReason || 'AI credits are low.' : null);
+          setCredits80(Boolean(j.credits80));
+          running = (j.jobs || []).length > 0;
+        }
+      }
+      timer = setTimeout(tick, running ? 5000 : 20000);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        if (timer) clearTimeout(timer);
+        tick();
       }
     };
+    document.addEventListener('visibilitychange', onVisible);
     tick();
-    const t = setInterval(tick, 4000);
     return () => {
       stop = true;
-      clearInterval(t);
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
 

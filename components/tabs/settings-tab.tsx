@@ -170,13 +170,28 @@ export default function SettingsTab() {
   const canChange = useRole().can('settings.change');
   const [status, setStatus] = useState<string | null>(null);
 
-  // Connection status for each connector, checked automatically when Settings opens.
-  const [conn, setConn] = useState<Record<string, ConnState>>(() => Object.fromEntries(CONN_TESTS.map((n) => [n, 'checking'])));
-  const markConn = (name: string, json: any) =>
-    setConn((c) => ({ ...c, [name]: json?.ok ? 'ok' : json?.connected === false ? 'off' : 'fail' }));
+  // Connection status for each connector, checked automatically when Settings opens. Each check
+  // calls the live service, so the result is kept in this browser for 10 minutes; the Test buttons
+  // on the cards always check again.
+  const savedConn = (name: string): ConnState => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(`conn:${name}`) || 'null');
+      if (saved && Date.now() - saved.at < 10 * 60 * 1000) return saved.state;
+    } catch {}
+    return 'checking';
+  };
+  const [conn, setConn] = useState<Record<string, ConnState>>(() => Object.fromEntries(CONN_TESTS.map((n) => [n, typeof window === 'undefined' ? 'checking' : savedConn(n)])));
+  const markConn = (name: string, json: any) => {
+    const state: ConnState = json?.ok ? 'ok' : json?.connected === false ? 'off' : 'fail';
+    setConn((c) => ({ ...c, [name]: state }));
+    try {
+      sessionStorage.setItem(`conn:${name}`, JSON.stringify({ at: Date.now(), state }));
+    } catch {}
+  };
   useEffect(() => {
     let alive = true;
     for (const name of CONN_TESTS) {
+      if (savedConn(name) !== 'checking') continue;
       fetch(`/api/${name}/test`)
         .then((r) => r.json())
         .then((json) => alive && markConn(name, json))
@@ -185,6 +200,7 @@ export default function SettingsTab() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [gscStatus, setGscStatus] = useState<string | null>(null);

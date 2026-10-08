@@ -29,6 +29,15 @@ export async function get(key) {
   return DEFAULTS[key] ?? null;
 }
 
+// Several keys in one query (for routes that are polled).
+export async function getMany(keys: string[]): Promise<Record<string, string | null>> {
+  const rows = await prisma.settings.findMany({ where: { key: { in: keys } }, select: { key: true, value: true } });
+  const out: Record<string, string | null> = {};
+  for (const k of keys) out[k] = DEFAULTS[k] ?? null;
+  for (const r of rows) out[r.key] = r.value;
+  return out;
+}
+
 export async function getAll() {
   const rows = await prisma.settings.findMany({ select: { key: true, value: true } });
   const out: Record<string, any> = { ...DEFAULTS };

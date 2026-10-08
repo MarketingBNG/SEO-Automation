@@ -21,8 +21,19 @@ export async function strategyProgress(strategyId: number) {
   const plan = JSON.parse(s.plan_json);
   const blogsPlanned = plan.blogPlan?.calendar?.length || 0;
 
-  // Execution (approved strategies only).
-  const rows = s.status === 'approved' ? await prisma.blog_schedule.findMany({ where: { strategy_id: strategyId } }) : [];
+  // Execution (approved strategies only). The independent lookups run together.
+  const since60 = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  const approved = s.status === 'approved';
+  const [rows, links, fixRows, draftsWritten, strategiesRun, leadsPushed, fixesRun, fixesPlannedRows] = await Promise.all([
+    approved ? prisma.blog_schedule.findMany({ where: { strategy_id: strategyId } }) : [],
+    approved ? prisma.backlink_tasks.findMany({ where: { strategy_id: strategyId }, orderBy: { send_date: 'asc' } }) : [],
+    approved ? prisma.technical_fix_tasks.findMany({ where: { strategy_id: strategyId }, select: { status: true, applied_at: true } }) : [],
+    prisma.drafts.count({ where: { created_at: { gte: since60 } } }),
+    prisma.seo_strategies.count({ where: { plan_json: { not: null }, created_at: { gte: since60 } } }),
+    prisma.backlink_tasks.count({ where: { sent_at: { gte: since60 } } }),
+    prisma.technical_fix_tasks.count({ where: { applied_at: { gte: since60 }, status: 'applied' } }),
+    approved ? prisma.technical_fix_tasks.count({ where: { strategy_id: strategyId, kind: { in: ['title', 'meta', 'thin'] } } }) : null,
+  ]);
   const count = (st) => rows.filter((r) => r.status === st).length;
   const blogs = {
     total: rows.length || blogsPlanned,
@@ -32,10 +43,8 @@ export async function strategyProgress(strategyId: number) {
     drafting: count('drafting'),
     planned: count('planned'),
   };
-  const links = s.status === 'approved' ? await prisma.backlink_tasks.findMany({ where: { strategy_id: strategyId }, orderBy: { send_date: 'asc' } }) : [];
   const backlinks = { total: links.length || (plan.backlinks?.length || 0), done: links.filter((l) => l.status === 'done').length, tasks: links };
   // Technical fixes queued on approval: applied, needing a person, failed, still waiting.
-  const fixRows = s.status === 'approved' ? await prisma.technical_fix_tasks.findMany({ where: { strategy_id: strategyId }, select: { status: true, applied_at: true } }) : [];
   const fixCount = (st) => fixRows.filter((f) => f.status === st).length;
   const lastFix = fixRows.map((f) => f.applied_at).filter(Boolean).sort().pop() || null;
   const fixes = { total: fixRows.length, applied: fixCount('applied'), manual: fixCount('manual'), failed: fixCount('failed'), planned: fixCount('planned'), lastRun: lastFix };
@@ -45,20 +54,17 @@ export async function strategyProgress(strategyId: number) {
   const daysUsed = start ? Math.min(30, Math.max(0, Math.floor((Date.now() - start) / 86400000) + 1)) : null;
 
   // AI cost: measured averages when available.
-  const draftsWritten = await prisma.drafts.count({ where: { created_at: { gte: new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 19).replace('T', ' ') } } });
-  const strategiesRun = await prisma.seo_strategies.count({ where: { plan_json: { not: null }, created_at: { gte: new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 19).replace('T', ' ') } } });
-  const perBlog = await avgCost(['blog'], draftsWritten);
-  const perFact = await avgCost(['fact-check'], draftsWritten);
-  const perStrategy = await avgCost(['strategy'], strategiesRun);
-  const otherDaily = (await avgCost(['reports', 'meetings', 'assistant', 'audit', 'training', 'other'], 60)) ?? null;
-  const since60 = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
-  const leadsPushed = await prisma.backlink_tasks.count({ where: { sent_at: { gte: since60 } } });
-  const fixesRun = await prisma.technical_fix_tasks.count({ where: { applied_at: { gte: since60 }, status: 'applied' } });
-  const perLead = await avgCost(['outreach'], leadsPushed);
-  const perFix = await avgCost(['technical_fix'], fixesRun);
+  const [perBlog, perFact, perStrategy, otherDaily, perLead, perFix] = await Promise.all([
+    avgCost(['blog'], draftsWritten),
+    avgCost(['fact-check'], draftsWritten),
+    avgCost(['strategy'], strategiesRun),
+    avgCost(['reports', 'meetings', 'assistant', 'audit', 'training', 'other'], 60).then((v) => v ?? null),
+    avgCost(['outreach'], leadsPushed),
+    avgCost(['technical_fix'], fixesRun),
+  ]);
   const emailTasks = (links.length ? links : plan.backlinks || []).filter((l) => !/internal|directory|citation/i.test(l.method || '')).length;
-  const fixesPlanned = s.status === 'approved'
-    ? await prisma.technical_fix_tasks.count({ where: { strategy_id: strategyId, kind: { in: ['title', 'meta', 'thin'] } } })
+  const fixesPlanned = approved
+    ? fixesPlannedRows
     : (plan.technical?.fixes || []).filter((f) => f.apply !== false && /title|meta description|thin content/i.test(f.issue || '')).length;
   const lines = [
     { item: 'Strategy research (this strategy)', units: 1, unitCost: perStrategy ?? DEFAULTS.strategy, measured: perStrategy !== null },
