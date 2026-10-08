@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { SafeHtml, asList, decodeEntities, safeHref } from '@/components/shared/article';
+import { OriginLabel } from '@/components/shared/origin-details';
 import {
   ActionMessage, DataTable, NativeSelect, PeopleAlsoAskList, SectionLabel, StatusBadge,
 } from '@/components/shared/ui-bits';
@@ -476,9 +477,17 @@ export default function AuditTab() {
                   <TableRow key={a.id} data-state={a.id === openId ? 'selected' : undefined}>
                     <TableCell className="max-w-md whitespace-normal font-medium">
                       {decodeEntities(a.title) || a.source_url || '(untitled)'}
-                      <span className="ml-1.5 rounded-full border px-1.5 py-px text-[10px] font-medium text-muted-foreground" title={a.wp_post_id ? 'A post that is live on the website' : a.source_url ? 'Checked from a link' : 'Uploaded or pasted by hand'}>
-                        {a.wp_post_id ? 'Live post' : a.source_url ? 'From a link' : 'Manual upload'}
-                      </span>
+                      {a.origin && (
+                        <OriginLabel
+                          label={a.origin.label}
+                          lines={[
+                            a.origin.detail,
+                            `Audited ${a.created_at} (UTC): ${a.audit_status === 'running' ? 'still running' : a.audit_status === 'failed' ? 'failed' : a.verdict === 'READY' ? 'ready' : `${a.issues.length} issue(s) found`}.`,
+                            a.rewrite_status === 'generating' ? 'Rewrite: running now.' : a.rewrite_content_html ? 'Rewrite: done, waiting for your review.' : a.rewrite_error ? `Rewrite: failed (${a.rewrite_error}).` : 'Rewrite: not done yet.',
+                            a.rewrite_status === 'published' ? 'The rewrite replaced the live post.' : a.rewrite_status === 'sent_as_draft' ? 'The rewrite was sent to WordPress as a draft.' : 'Nothing has been sent to the website from this audit.',
+                          ]}
+                        />
+                      )}
                     </TableCell>
                     <TableCell>
                       {a.audit_status === 'running' ? (

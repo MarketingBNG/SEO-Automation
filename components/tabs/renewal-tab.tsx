@@ -162,9 +162,9 @@ export default function RenewalTab() {
                     <TableCell className="max-w-lg whitespace-normal">
                       <div className="flex flex-wrap items-center gap-1.5 font-medium">
                         {p.title}
-                        <span className={`rounded-full border px-1.5 py-px text-[10px] font-medium ${p.origin === 'dashboard' ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400' : p.origin === 'rewritten' ? 'border-blue-500/40 text-blue-700 dark:text-blue-400' : 'border-border text-muted-foreground'}`} title={p.origin === 'dashboard' ? 'Written and published by this dashboard' : p.origin === 'rewritten' ? 'An older post, rewritten and replaced from this dashboard' : 'On the website before the dashboard; not changed by it yet'}>
-                          {p.origin === 'dashboard' ? 'New (dashboard)' : p.origin === 'rewritten' ? 'Rewritten here' : 'Old'}
-                        </span>
+                        {p.origin && <span className={`rounded-full border px-1.5 py-px text-[10px] font-medium ${p.origin === 'dashboard' ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400' : p.origin === 'rewritten' ? 'border-blue-500/40 text-blue-700 dark:text-blue-400' : 'border-border text-muted-foreground'}`} title={p.origin === 'dashboard' ? 'Written and published by this dashboard' : p.origin === 'rewritten' ? 'An older post, rewritten and replaced from this dashboard' : 'On the website before the dashboard; not changed by it yet'}>
+                          {p.origin === 'dashboard' ? 'Created by dashboard' : p.origin === 'rewritten' ? 'Rewritten here' : 'Old'}
+                        </span>}
                       </div>
                       <a className="text-xs break-all text-muted-foreground hover:underline" href={p.link} target="_blank" rel="noreferrer">
                         {p.link}
