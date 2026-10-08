@@ -319,7 +319,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
       <CardHeader>
         <CardTitle>
           {draft.title || 'Untitled draft'}
-          <div className="mt-0.5 text-sm font-normal text-muted-foreground">Keyword: {draft.keyword}</div>
+          <div className="mt-0.5 text-sm font-normal text-muted-foreground">{draft.kind === 'article' ? 'LinkedIn article · ' : ''}Keyword: {draft.keyword}</div>
         </CardTitle>
         <CardAction>
           <Button variant="outline" size="sm" onClick={onClose}>
@@ -514,6 +514,9 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           </div>
         </div>
 
+        {draft.kind === 'article' ? (
+          <p className="text-sm text-muted-foreground">This is a LinkedIn article: approve it, place the images, download it as Word or copy the text, and post it on LinkedIn by hand. It is not published to the website.</p>
+        ) : (
         <div className="flex flex-wrap items-center gap-2">
           <NativeSelect value={wpStatus} onChange={(e) => setWpStatus(e.target.value)}>
             <option value="draft">Send to WordPress as Draft</option>
@@ -531,6 +534,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
             <span className="text-sm text-muted-foreground">You have unsaved changes. Save them first, then publish.</span>
           ) : null}
         </div>
+        )}
 
         {draft.wp_post_url && (
           <p className="text-sm text-muted-foreground">

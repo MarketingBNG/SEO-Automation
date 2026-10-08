@@ -4,7 +4,7 @@
 // Every item links straight to the place where it is handled.
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, CalendarClock, CheckCircle2, Download, FileText, KeyRound, Loader2, Settings, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CheckCircle2, Download, FileText, KeyRound, Lightbulb, Loader2, Settings, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useRole } from '@/hooks/use-role';
@@ -128,6 +128,7 @@ export default function HomeTab() {
 
       <div className="flex flex-wrap gap-2">
         {canWork && <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href="/?tab=keywords"><KeyRound />Write a blog{data.pendingKeywords ? ` (${data.pendingKeywords} keyword${data.pendingKeywords === 1 ? '' : 's'} waiting)` : ''}</Link>}
+        <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href="/?tab=topics"><Lightbulb />Topics for today</Link>
         <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href="/?tab=strategy"><CalendarClock />Monthly Strategy{data.strategy ? ` (${data.strategy.period})` : ''}</Link>
         {canWork && <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href="/?tab=drafts"><FileText />Drafts &amp; Review</Link>}
         {who.can('settings.change') && <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href="/?tab=settings"><Settings />Settings</Link>}

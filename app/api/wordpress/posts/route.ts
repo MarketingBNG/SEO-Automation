@@ -19,6 +19,10 @@ async function handler(req: NextRequest) {
     for (const a of audits as any[]) {
       if (!latestAuditByPost[a.wp_post_id]) latestAuditByPost[a.wp_post_id] = a;
     }
+    // Where each live post came from: written by this dashboard, rewritten here from an older
+    // post, or on the site before the dashboard (and not touched by it).
+    const fromDashboard = new Set((await prisma.drafts.findMany({ where: { wp_post_id: { not: null } }, select: { wp_post_id: true } })).map((d) => d.wp_post_id));
+    const rewrittenHere = new Set((audits as any[]).filter((a) => a.rewrite_status === 'published').map((a) => a.wp_post_id));
 
     const merged = posts.map((p: any) => ({
       id: p.id,
@@ -26,6 +30,7 @@ async function handler(req: NextRequest) {
       link: p.link,
       modified: p.modified,
       audit: latestAuditByPost[p.id] || null,
+      origin: fromDashboard.has(p.id) ? 'dashboard' : rewrittenHere.has(p.id) ? 'rewritten' : 'old',
     }));
 
     return NextResponse.json({ posts: merged, totalPages, page }, { status: 200 });

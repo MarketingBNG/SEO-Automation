@@ -474,14 +474,19 @@ export default function AuditTab() {
               <TableBody>
                 {audits.map((a) => (
                   <TableRow key={a.id} data-state={a.id === openId ? 'selected' : undefined}>
-                    <TableCell className="max-w-md whitespace-normal font-medium">{decodeEntities(a.title) || a.source_url || '(untitled)'}</TableCell>
+                    <TableCell className="max-w-md whitespace-normal font-medium">
+                      {decodeEntities(a.title) || a.source_url || '(untitled)'}
+                      <span className="ml-1.5 rounded-full border px-1.5 py-px text-[10px] font-medium text-muted-foreground" title={a.wp_post_id ? 'A post that is live on the website' : a.source_url ? 'Checked from a link' : 'Uploaded or pasted by hand'}>
+                        {a.wp_post_id ? 'Live post' : a.source_url ? 'From a link' : 'Manual upload'}
+                      </span>
+                    </TableCell>
                     <TableCell>
                       {a.audit_status === 'running' ? (
                         <span className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="size-3 animate-spin" />Auditing…</span>
                       ) : a.audit_status === 'failed' ? (
                         <StatusBadge kind="failed">audit failed</StatusBadge>
                       ) : (
-                        <StatusBadge kind={a.verdict === 'READY' ? 'approved' : 'failed'}>{a.verdict}</StatusBadge>
+                        <StatusBadge kind={a.verdict === 'READY' ? 'approved' : 'failed'}>{a.verdict === 'READY' ? 'Ready' : a.verdict === 'NEEDS_ATTENTION' ? 'Needs attention' : a.verdict || 'No verdict yet'}</StatusBadge>
                       )}
                       {a.rewrite_status === 'generating' && <span className="ml-1 text-xs text-muted-foreground">rewriting…</span>}
                     </TableCell>

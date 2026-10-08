@@ -17,6 +17,8 @@ export default function ActivityTab() {
   const [rows, setRows] = useState<any[]>([]);
   const [people, setPeople] = useState<any[]>([]);
   const [areas, setAreas] = useState<string[]>([]);
+  const [live, setLive] = useState<any[]>([]);
+  const [admin, setAdmin] = useState(true);
   const [person, setPerson] = useState('');
   const [area, setArea] = useState('');
   const [q, setQ] = useState('');
@@ -33,6 +35,8 @@ export default function ActivityTab() {
       setRows(Array.isArray(j.rows) ? j.rows : []);
       setPeople(j.people || []);
       setAreas(j.areas || []);
+      setLive(j.live || []);
+      setAdmin(j.admin !== false);
     } catch {
       setRows([]);
     } finally {
@@ -50,7 +54,9 @@ export default function ActivityTab() {
     <Card>
       <CardHeader>
         <CardTitle>Activity log</CardTitle>
-        <CardDescription>Every major action: who did it, how, and what happened. &quot;Automatic&quot; means the dashboard did it on its own.</CardDescription>
+        <CardDescription>
+          {admin ? 'Every major action by everyone: who did it, how, and what happened.' : 'Your actions and the automatic runs: what happened and whether it worked.'} &quot;Automatic&quot; means the dashboard did it on its own. A green light means it is running right now.
+        </CardDescription>
         <CardAction>
           <Button variant="outline" onClick={load}>
             <RefreshCw className={loading ? 'animate-spin' : undefined} /> Refresh
@@ -58,9 +64,20 @@ export default function ActivityTab() {
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-3">
+        {live.length > 0 && (
+          <ul className="space-y-1 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-2 text-sm">
+            {live.map((l) => (
+              <li key={l.key} className="flex items-center gap-2">
+                <span className="relative flex size-2.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60" /><span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" /></span>
+                <span className="font-medium">Running now:</span> {l.label}
+                <span className="text-xs text-muted-foreground">since {when(String(l.startedAt).replace('T', ' ').slice(0, 19))}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="flex flex-wrap gap-2">
           <select className="h-9 rounded-md border bg-background px-2 text-sm" value={person} onChange={(e) => setPerson(e.target.value)} aria-label="Person">
-            <option value="">Everyone</option>
+            <option value="">{admin ? 'Everyone' : 'Me and automatic runs'}</option>
             <option value="automatic">Automatic (the dashboard itself)</option>
             {people.map((p) => (
               <option key={p.email} value={p.email}>{p.name} ({p.count})</option>
@@ -80,6 +97,7 @@ export default function ActivityTab() {
                 <TableHead>Who</TableHead>
                 <TableHead>Area</TableHead>
                 <TableHead>What happened</TableHead>
+                <TableHead>Result</TableHead>
                 <TableHead>Details</TableHead>
               </TableRow>
             </TableHeader>
@@ -95,12 +113,18 @@ export default function ActivityTab() {
                   </TableCell>
                   <TableCell className="align-top text-muted-foreground">{e.area}</TableCell>
                   <TableCell className="align-top font-medium">{e.what}</TableCell>
+                  <TableCell className="align-top">
+                    <span className={`inline-flex items-center gap-1 text-xs ${e.outcome === 'failed' ? 'text-red-600 dark:text-red-400' : e.outcome === 'started' ? 'text-muted-foreground' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                      <span className={`size-2 rounded-full ${e.outcome === 'failed' ? 'bg-red-500' : e.outcome === 'started' ? 'bg-muted-foreground' : 'bg-emerald-500'}`} />
+                      {e.outcome === 'failed' ? 'Failed' : e.outcome === 'started' ? 'Started' : 'Done'}
+                    </span>
+                  </TableCell>
                   <TableCell className="min-w-[240px] whitespace-normal align-top text-muted-foreground">{e.details}</TableCell>
                 </TableRow>
               ))}
               {!loading && rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">No activity matches these filters.</TableCell>
+                  <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">No activity matches these filters.</TableCell>
                 </TableRow>
               )}
             </TableBody>

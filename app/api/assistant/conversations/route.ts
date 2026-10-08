@@ -3,6 +3,13 @@ import prisma from '@/lib/prisma';
 import { basename } from '@/lib/storage';
 import { loadConversation, IMAGE_MARKER } from '@/lib/assistant/engine';
 import { getTool } from '@/lib/assistant/tools';
+import { getMe } from '@/lib/auth';
+
+// Who may see a conversation: its owner, or an admin (who sees everyone's).
+export function mineOnly(me: any) {
+  if (!me || me.role === 'admin') return null;
+  return { created_by: { in: [me.name, me.email].filter(Boolean) } };
+}
 
 export const runtime = 'nodejs';
 
@@ -78,9 +85,12 @@ async function buildTranscript(messages) {
 
 export async function GET(req: NextRequest) {
   const qid = req.nextUrl.searchParams.get('id');
+  const me = await getMe();
+  const own = mineOnly(me);
   if (qid) {
     const conv = await loadConversation(Number(qid));
     if (!conv) return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+    if (own && !own.created_by.in.includes(conv.created_by)) return NextResponse.json({ error: 'This chat belongs to someone else. Only an admin can open other people\'s chats.' }, { status: 403 });
     // PORT NOTE: `undo IS NOT NULL AS undoable` was SQLite 0/1; kept as 0/1.
     const changes = (
       await prisma.site_changes.findMany({
@@ -103,6 +113,7 @@ export async function GET(req: NextRequest) {
   }
 
   const rows = await prisma.assistant_conversations.findMany({
+    where: own || undefined,
     select: { id: true, title: true, status: true, updated_at: true, created_by: true },
     orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
     take: 50,

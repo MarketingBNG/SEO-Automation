@@ -5,7 +5,7 @@
 import * as settings from './settings';
 import { etaSeconds, blendEta } from './strategy/core';
 
-export type JobKind = 'blog' | 'strategy' | 'fact-check' | 'rewrite' | 'audit' | 'guide' | 'refresh' | 'competitors' | 'keywords' | 'lessons';
+export type JobKind = 'blog' | 'strategy' | 'fact-check' | 'rewrite' | 'audit' | 'article' | 'guide' | 'refresh' | 'competitors' | 'keywords' | 'lessons';
 
 // First-run estimates (seconds) until the dashboard has measured its own.
 const DEFAULT_SECONDS: Record<string, number> = {
@@ -14,6 +14,7 @@ const DEFAULT_SECONDS: Record<string, number> = {
   'fact-check': 20 * 60,
   rewrite: 45 * 60,
   audit: 6 * 60,
+  article: 15 * 60,
   guide: 75,
   refresh: 10 * 60,
   competitors: 4 * 60,
@@ -68,8 +69,10 @@ export async function typicalSeconds(kind: string): Promise<number> {
     const m = kind.match(/^stage:([^.]+)\.(.+)$/);
     return m ? stageDefault(m[1], m[2]) : DEFAULT_SECONDS[kind] ?? 600;
   }
+  // The 75th percentile, not the median: a too-short estimate ("20 minutes left" for an hour of
+  // work) is worse than a slightly long one.
   const sorted = [...list].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.75))];
 }
 
 export async function recordDuration(kind: string, seconds: number) {
