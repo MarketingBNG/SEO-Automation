@@ -38,7 +38,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (wpStatus === 'publish' && (await requireExpert()) && needsExpertReview(kw, draft.title)) {
     const known = await expertReviewers();
     if (!reviewer || (!known.includes(reviewer) && !CREDENTIAL.test(reviewer))) {
-      return NextResponse.json({ error: 'This is a tax, legal or compliance blog. Name the CA/CPA who reviewed it (Settings > Blog rules lists them) before it goes live.', reviewers: known }, { status: 400 });
+      return NextResponse.json({ error: 'This is a tax, legal or compliance blog. Name the CA/CPA who reviewed it before it goes live.', reviewers: known }, { status: 400 });
     }
   }
 

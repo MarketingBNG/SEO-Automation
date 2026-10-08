@@ -16,6 +16,7 @@ import { BlogAnalytics, BlogTable, KeywordPanel } from '@/components/shared/blog
 import { StatusBadge } from '@/components/shared/status-badge';
 import { PeopleAlsoAskList } from '@/components/shared/people-also-ask';
 import { DataTable, FieldLabel, NativeSelect, TD, TD_MUTED } from '@/components/shared/content-ui';
+import { jobsChanged } from '@/components/shared/job-progress';
 
 export { PeopleAlsoAskList };
 
@@ -27,6 +28,7 @@ export default function DraftsTab() {
   // A link such as /?tab=drafts&draft=12 (from Monthly Strategy or Home) opens that draft.
   const wanted = Number(params.get('draft')) || null;
   const [drafts, setDrafts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<any>(wanted);
   const [analyticsPost, setAnalyticsPost] = useState<any>(null);
   const [showPerf, setShowPerf] = useState(false);
@@ -38,6 +40,7 @@ export default function DraftsTab() {
   const load = useCallback(async () => {
     const j = await fetch('/api/drafts/list').then((r) => r.json()).catch(() => null);
     setDrafts(Array.isArray(j) ? j : []);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -76,7 +79,7 @@ export default function DraftsTab() {
                     </Button>
                     <a href={`/api/drafts/${d.id}/download`} download className={buttonVariants({ variant: 'outline', size: 'sm' })} title="The blog as a Word file, laid out as it will be published">
                       <Download />
-                      Word
+                      Download Word
                     </a>
                   </div>
                 </td>
@@ -84,7 +87,7 @@ export default function DraftsTab() {
             ))}
             {drafts.length === 0 && (
               <tr>
-                <td colSpan={6} className={TD_MUTED}>No drafts yet. Generate one from the Keywords tab.</td>
+                <td colSpan={6} className={TD_MUTED}>{loading ? 'Loading…' : 'No drafts yet. Write one from the "Write a blog" page.'}</td>
               </tr>
             )}
           </DataTable>
@@ -299,6 +302,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
+      jobsChanged();
       setMessage(`Published to WordPress: ${json.wpPostUrl}`);
       onChange();
       loadDraft(false);
@@ -313,7 +317,10 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
     <div ref={topRef} className="scroll-mt-16">
     <Card className="ring-2 ring-primary/20">
       <CardHeader>
-        <CardTitle>Review draft: {draft.keyword}</CardTitle>
+        <CardTitle>
+          {draft.title || 'Untitled draft'}
+          <div className="mt-0.5 text-sm font-normal text-muted-foreground">Keyword: {draft.keyword}</div>
+        </CardTitle>
         <CardAction>
           <Button variant="outline" size="sm" onClick={onClose}>
             <X />
@@ -453,7 +460,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           )}
           <a href={`/api/drafts/${draft.id}/download`} download className={buttonVariants({ variant: 'outline' })} title={dirty ? 'The Word file is made from the saved copy. Save first to include your changes.' : 'The blog as a Word file, laid out as it will be published (cover, title, author line, article, FAQ, call to action)'}>
             <Download />
-            Download as Word
+            Download Word
           </a>
           <Button variant="destructive" className="ml-auto" onClick={deleteDraft} disabled={saving}>
             <Trash2 />
@@ -513,7 +520,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           </NativeSelect>
           <Button onClick={publish} disabled={saving || draft.status !== 'approved' || dirty}>
             <Send />
-            Publish to WordPress
+            {draft.schedule && !draft.wp_post_url ? 'Publish now (skips the scheduled slot)' : 'Publish to WordPress'}
           </Button>
           {draft.status === 'published' ? (
             <StatusBadge status="published">published</StatusBadge>

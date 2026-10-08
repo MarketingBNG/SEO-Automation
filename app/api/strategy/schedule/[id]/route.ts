@@ -31,7 +31,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if ((await requireExpert()) && needsExpertReview(row.main_keyword, row.title)) {
       const known = await expertReviewers();
       if (!expert) return NextResponse.json({ error: 'This is a tax, legal or compliance blog. Pick the CA/CPA who reviewed it.', reviewers: known }, { status: 400 });
-      if (!known.includes(expert) && !CREDENTIAL.test(expert)) return NextResponse.json({ error: 'Give the reviewer as "Name, credential" (for example "Akshay Nahar, CA"), or add them in Settings > Expert reviewers.' }, { status: 400 });
+      if (!known.includes(expert) && !CREDENTIAL.test(expert)) return NextResponse.json({ error: 'Give the reviewer as "Name, credential" (for example "Akshay Nahar, CA"), so the byline can name them.' }, { status: 400 });
     }
     const updated = await prisma.blog_schedule.update({ where: { id }, data: { reviewed_by: actor, reviewed_at: sqlNow(), expert_reviewer: expert || null, updated_at: sqlNow() } });
     await prisma.drafts.update({ where: { id: row.draft_id }, data: { status: 'approved', updated_at: sqlNow() } }).catch(() => {});

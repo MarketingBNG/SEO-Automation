@@ -12,6 +12,7 @@ import { useManualTasks, ManualTasksBanner, ManualTaskList } from '@/components/
 import { useRole } from '@/hooks/use-role';
 import { cn } from 'cn';
 import Link from 'next/link';
+import { jobsChanged } from '@/components/shared/job-progress';
 
 // Strategy section (v2): one monthly SEO / AEO / GEO strategy in 11 fixed sections, one approval,
 // then the month runs automatically. All UI text avoids em dashes by design.
@@ -717,10 +718,10 @@ function MonthRunning() {
         </div>
       )}
       <Section
-        title="This month's blogs"
+        title="Blog calendar: approve, and see when each publishes"
         description="Every blog is fact-checked against official sources by two different AI models. A manager then has 48 hours to approve or reject it. If nobody rejects it, it is approved and published automatically under one of the partners' names, with its image and a call to action for its service. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
       >
-        <DataTable head={['Slot', 'Title', 'Fact check', 'Status', 'Review', '']}>
+        <DataTable head={['Publish date', 'Title', 'Fact check', 'Status', 'Publishes', '']}>
           {data.rows.map((r: any) => (
             <tr key={r.id} className={r.overdue ? 'bg-red-500/10' : undefined}>
               <td className={TD_MUTED}>{fmtDate(r.publish_at)}{r.overdue && <div className="font-semibold text-red-600 dark:text-red-400">Review overdue</div>}</td>
@@ -737,7 +738,7 @@ function MonthRunning() {
                     {r.draft_id && (
                       <div className="flex flex-wrap gap-x-3 text-xs">
                         <Link className="text-primary underline" href={`/?tab=drafts&draft=${r.draft_id}`}>Open the draft</Link>
-                        <a className="text-primary underline" href={`/api/drafts/${r.draft_id}/download`} download>Download as Word</a>
+                        <a className="text-primary underline" href={`/api/drafts/${r.draft_id}/download`} download>Download Word</a>
                       </div>
                     )}
                   </div>
@@ -775,8 +776,8 @@ function MonthRunning() {
                         {(data.reviewers || []).map((n: string) => <option key={n} value={n}>{n}</option>)}
                       </select>
                     )}
-                    {r.needs_expert && !(data.reviewers || []).length && <span className="w-52 text-xs text-muted-foreground">Add CA/CPA reviewers in Settings &gt; Blog rules first.</span>}
-                    <Button size="sm" disabled={busy === r.id || (r.needs_expert && !reviewer[r.id])} onClick={() => decide(r.id, 'approve')}>Approve</Button>
+                    {r.needs_expert && !(data.reviewers || []).length && <span className="w-52 text-xs text-muted-foreground">Type the reviewer as &quot;Name, CA&quot;.</span>}
+                    <Button size="sm" disabled={busy === r.id || (r.needs_expert && !reviewer[r.id])} onClick={() => decide(r.id, 'approve')}>Approve blog</Button>
                     <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => setRejecting(rejecting === r.id ? null : r.id)}>Reject</Button>
                   </div>
                 )}
@@ -861,6 +862,7 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
       const res = await fetch('/api/strategy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      jobsChanged();
       setOpenId(json.id);
       await load();
     } catch (e: any) {
