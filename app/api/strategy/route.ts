@@ -13,8 +13,13 @@ import { methodNotAllowed } from '../_lib/http';
 // the page polls GET for progress.
 export const runtime = 'nodejs';
 
+// Runs lost to a restart are marked once a minute, not on every poll.
+const g = globalThis as unknown as { __strategyCleanupAt?: number };
 export async function GET() {
-  await markInterrupted();
+  if (Date.now() - (g.__strategyCleanupAt || 0) > 60000) {
+    g.__strategyCleanupAt = Date.now();
+    await markInterrupted();
+  }
   const [rows, crawl] = await Promise.all([
     prisma.seo_strategies.findMany({
       where: { OR: [{ plan_json: { not: null } }, { status: { in: ['generating', 'paused', 'stopping', 'stopped', 'failed'] } }] },

@@ -251,7 +251,7 @@ export default function RenewalTab() {
                 />
                 <div className="mt-2.5">
                   <a href={`/api/audit/${activeAudit.id}/download`} className={buttonVariants({ variant: 'outline' })}>
-                    <Download /> Download as Word (.docx)
+                    <Download /> Download Word
                   </a>
                 </div>
                 {activeAudit.rewrite_status !== 'published' ? (

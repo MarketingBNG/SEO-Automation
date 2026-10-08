@@ -89,9 +89,20 @@ async function spentAfterId(afterId: number) {
 
 // Real spend from Anthropic's Cost API, when an Admin API key (sk-ant-admin...) is set as
 // ANTHROPIC_ADMIN_KEY. Daily buckets in USD cents (decimal strings); data lags about 5 minutes.
+// Anthropic's cost report is asked at most once per 10 minutes: creditStatus runs before every
+// Claude call and on every Settings refresh, and the report itself takes several requests.
+const spendCache = new Map<string, { at: number; value: { usd: number; from: string } | null }>();
 export async function anthropicSpend(sinceDay: string): Promise<{ usd: number; from: string } | null> {
   const key = process.env.ANTHROPIC_ADMIN_KEY;
   if (!key) return null;
+  const hit = spendCache.get(sinceDay);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value;
+  const value = await fetchAnthropicSpend(key, sinceDay);
+  spendCache.set(sinceDay, { at: Date.now(), value });
+  return value;
+}
+
+async function fetchAnthropicSpend(key: string, sinceDay: string): Promise<{ usd: number; from: string } | null> {
   let total = 0;
   let page: string | null = null;
   for (let i = 0; i < 20; i++) {
@@ -127,12 +138,13 @@ async function checkUsageAlert(s: { balance: number | null; spentSinceBalance: n
 }
 
 export async function creditStatus() {
-  const balance = num(await settings.get('credit_balance_usd'));
-  const setAt = (await settings.get('credit_balance_set_at')) || null;
-  const threshold = num(await settings.get('credit_pause_below_usd'), 5) as number;
-  const paused = (await settings.get('ai_paused')) === '1';
-  const pauseReason = (await settings.get('ai_paused_reason')) || '';
-  const afterId = num(await settings.get('credit_balance_after_id'), 0) as number;
+  const st = await settings.getMany(['credit_balance_usd', 'credit_balance_set_at', 'credit_pause_below_usd', 'ai_paused', 'ai_paused_reason', 'credit_balance_after_id']);
+  const balance = num(st.credit_balance_usd);
+  const setAt = st.credit_balance_set_at || null;
+  const threshold = num(st.credit_pause_below_usd, 5) as number;
+  const paused = st.ai_paused === '1';
+  const pauseReason = st.ai_paused_reason || '';
+  const afterId = num(st.credit_balance_after_id, 0) as number;
   const spent = balance === null ? null : await spentAfterId(afterId);
   const remaining = balance === null ? null : Math.max(0, (balance as number) - (spent as number));
   const ago = (days: number) => new Date(Date.now() - days * 86400000).toISOString().slice(0, 19).replace('T', ' ');

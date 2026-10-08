@@ -4,6 +4,12 @@ import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Countdown } from './countdown';
 
+export const JOBS_CHANGED = 'growth-center:jobs-changed';
+// Call after starting background work so the header bar picks it up without waiting for the next poll.
+export function jobsChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(JOBS_CHANGED));
+}
+
 // Live progress bars for work running in the background (strategy generation, blog writing),
 // shown under the dashboard header on every tab. Polls /api/progress every 5 seconds while
 // something runs, every 20 seconds when nothing does, and not at all while the browser tab is
@@ -41,12 +47,19 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
         tick();
       }
     };
+    // A page that starts work (a blog, a strategy, a publish) fires this so the bar shows it at once.
+    const onChanged = () => {
+      if (timer) clearTimeout(timer);
+      tick();
+    };
     document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener(JOBS_CHANGED, onChanged);
     tick();
     return () => {
       stop = true;
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener(JOBS_CHANGED, onChanged);
     };
   }, []);
 

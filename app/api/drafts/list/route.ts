@@ -11,7 +11,7 @@ export async function GET() {
   const rows = await prisma.drafts.findMany({
     select: { id: true, keyword_id: true, title: true, status: true, production_state: true, repair_attempts: true, word_count: true, created_at: true, updated_at: true, wp_post_url: true, wp_post_id: true, author: true, featured_image_path: true, keyword: { select: { keyword: true, batch_name: true } } },
     orderBy: { id: 'desc' },
-    take: 300,
+    take: 500,
   });
   return NextResponse.json(
     rows.map(({ keyword, ...d }: any) => ({ ...d, keyword: keyword?.keyword ?? null, batch_name: keyword?.batch_name ?? null })),

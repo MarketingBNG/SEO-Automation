@@ -271,6 +271,7 @@ export default function AuditTab() {
   const [error, setError] = useState<string | null>(null);
 
   const [audits, setAudits] = useState<any[]>([]);
+  const [loadingList, setLoadingList] = useState(true);
   const [openId, setOpenId] = useState<any>(null);
 
   const [uploading, setUploading] = useState(false);
@@ -278,6 +279,7 @@ export default function AuditTab() {
   const load = useCallback(async () => {
     const j = await fetch('/api/audit').then((r) => r.json()).catch(() => null);
     setAudits(Array.isArray(j) ? j : []);
+    setLoadingList(false);
   }, []);
 
   async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
@@ -476,7 +478,7 @@ export default function AuditTab() {
                 ))}
                 {audits.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-muted-foreground">No audits yet.</TableCell>
+                    <TableCell colSpan={5} className="text-muted-foreground">{loadingList ? 'Loading…' : 'No audits yet.'}</TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -590,7 +592,7 @@ export default function AuditTab() {
                 <div className="mt-2.5">
                   {canDownload && (
                   <a href={`/api/audit/${open.id}/download`} className={buttonVariants({ variant: 'outline' })}>
-                    <Download /> Download as Word (.docx)
+                    <Download /> Download Word
                   </a>
                   )}
                 </div>

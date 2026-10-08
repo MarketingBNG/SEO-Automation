@@ -59,11 +59,11 @@ function ApprovalCard({ row, reviewers, canReview, onDone }: { row: any; reviewe
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href={`/?tab=drafts&draft=${row.draft_id}`}>
             <FileText />
-            Read the draft
+            Open the draft
           </Link>
           <a className={buttonVariants({ variant: 'outline', size: 'sm' })} href={`/api/drafts/${row.draft_id}/download`} download>
             <Download />
-            Word
+            Download Word
           </a>
           {canReview && row.needs_expert && (
             <select className="h-8 w-52 rounded-md border bg-background px-1 text-xs" value={reviewer} onChange={(e) => setReviewer(e.target.value)} aria-label="CA/CPA reviewer">
@@ -84,7 +84,7 @@ function ApprovalCard({ row, reviewers, canReview, onDone }: { row: any; reviewe
             </>
           )}
         </div>
-        {canReview && row.needs_expert && !reviewers.length && <div className="text-xs text-muted-foreground">Add CA/CPA reviewers in Settings &gt; Blog rules first.</div>}
+        {canReview && row.needs_expert && !reviewers.length && <div className="text-xs text-muted-foreground">Type the reviewer as &quot;Name, CA&quot;.</div>}
         {rejecting && (
           <div className="space-y-1 pt-1">
             <textarea className="w-full max-w-lg rounded-md border bg-background p-2 text-xs" rows={3} placeholder="Why are you rejecting it? What should change?" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
@@ -154,7 +154,7 @@ export default function HomeTab() {
       <Card>
         <CardHeader>
           <CardTitle>Waiting for your approval{waiting ? ` (${waiting})` : ''}</CardTitle>
-          <CardDescription>Each blog shows the cover and the author it goes out with, and exactly when it publishes. A blog in review publishes on its own after 48 hours unless someone rejects it; tax, legal and compliance blogs wait for a CA/CPA.</CardDescription>
+          <CardDescription>Each blog shows the cover and the author it goes out with, and exactly when it publishes. A blog in review publishes on its own after 48 hours unless someone rejects it.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {data.approvals?.length > 0 ? (
@@ -168,7 +168,7 @@ export default function HomeTab() {
           )}
           {canWork && data.looseDrafts?.length > 0 && (
             <div>
-              <div className="mb-1 text-sm font-medium">Drafts from the Keywords tab waiting for review (not on the calendar; they publish only when you press Publish)</div>
+              <div className="mb-1 text-sm font-medium">Drafts written from the &quot;Write a blog&quot; page, waiting for review (not on the calendar; they publish only when you press Publish)</div>
               <ul className="space-y-1 text-sm">
                 {data.looseDrafts.map((d: any) => (
                   <li key={d.id} className="flex flex-wrap items-baseline gap-x-2">

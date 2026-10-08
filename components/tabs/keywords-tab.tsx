@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { DataTable, NativeSelect, TD, TD_MUTED } from '@/components/shared/content-ui';
+import { jobsChanged } from '@/components/shared/job-progress';
 
 // Plain-English reason for a failed blog run.
 function friendlyError(e: string) {
@@ -21,6 +22,7 @@ function friendlyError(e: string) {
 
 export default function KeywordsTab() {
   const [keywords, setKeywords] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState('');
   const [progress, setProgress] = useState<{ stage: string; percent: number } | null>(null); // { stage, percent }
@@ -37,6 +39,7 @@ export default function KeywordsTab() {
   const load = useCallback(async () => {
     const j = await fetch('/api/keywords/list').then((r) => r.json()).catch(() => null);
     setKeywords(Array.isArray(j) ? j : []);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -48,6 +51,7 @@ export default function KeywordsTab() {
     setGenerating(true);
     setMessage('');
     setProgress({ stage: 'Starting…', percent: 2 });
+    setTimeout(jobsChanged, 1500);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -301,7 +305,7 @@ export default function KeywordsTab() {
             ))}
             {keywords.length === 0 && (
               <tr>
-                <td colSpan={4} className={TD_MUTED}>No keywords yet. Add them from the strategy plan or keyword research above.</td>
+                <td colSpan={4} className={TD_MUTED}>{loading ? 'Loading…' : 'No keywords yet. Add them from the strategy plan or keyword research above.'}</td>
               </tr>
             )}
           </DataTable>
