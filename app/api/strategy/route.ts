@@ -20,6 +20,10 @@ export async function GET() {
     g.__strategyCleanupAt = Date.now();
     await markInterrupted();
   }
+  // Failed or stopped runs with no plan are removed once a strategy is approved; they only clutter
+  // the list and Home.
+  const approved = await prisma.seo_strategies.findFirst({ where: { status: 'approved', plan_json: { not: null } }, select: { id: true } });
+  if (approved) await prisma.seo_strategies.deleteMany({ where: { status: { in: ['failed', 'stopped'] }, plan_json: null } }).catch(() => {});
   const [rows, crawl] = await Promise.all([
     prisma.seo_strategies.findMany({
       where: { OR: [{ plan_json: { not: null } }, { status: { in: ['generating', 'paused', 'stopping', 'stopped', 'failed'] } }] },

@@ -35,6 +35,10 @@ async function tick() {
   const { resumeInterruptedBlog } = await import('./blogJob');
   await resumeInterruptedBlog().catch((e: any) => console.error('Scheduler: blog resume failed:', e.message));
 
+  // Topics: once a day after 10:00 IST.
+  const { topicsTick } = await import('./topics');
+  await topicsTick(now).catch((e: any) => console.error('Scheduler: topics failed:', e.message));
+
   if (now.getUTCDay() === 1 && (await settings.get('last_weekly_run')) !== today) {
     const r: any = await runWeekly(now).catch((e) => ({ error: e.message }));
     if (!r?.error) await settings.set('last_weekly_run', today);

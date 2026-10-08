@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
-  Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, House, KeyRound,
+  Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, House, KeyRound, Lightbulb,
   LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
@@ -20,6 +20,7 @@ import { PeekingOctopus } from '@/components/shared/peeking-octopus';
 import { StatusLight } from '@/components/shared/status-light';
 
 import HomeTab from '@/components/tabs/home-tab';
+import TopicsTab from '@/components/tabs/topics-tab';
 import AssistantTab from '@/components/tabs/assistant-tab';
 import KeywordsTab from '@/components/tabs/keywords-tab';
 import DraftsTab from '@/components/tabs/drafts-tab';
@@ -39,6 +40,7 @@ import type { Role } from '@/lib/permissions';
 const TABS = [
   { key: 'home', label: 'Home', icon: House, group: 'Start', hint: 'What waits for you, what publishes next' },
   { key: 'assistant', label: 'Assistant', icon: Bot, group: 'Start', hint: 'Ask anything, change the website' },
+  { key: 'topics', label: 'Topics', icon: Lightbulb, group: 'Blogs', hint: 'What is worth writing about today: researched every morning at 10:00 IST' },
   { key: 'strategy', label: 'Monthly Strategy', icon: CalendarRange, group: 'Blogs', hint: 'The 30-day plan, the blog calendar and approvals' },
   { key: 'drafts', label: 'Drafts & Review', icon: FileText, group: 'Blogs', hint: 'Read, edit, add images, approve, download as Word' },
   { key: 'keywords', label: 'Write a blog', icon: KeyRound, group: 'Blogs', hint: 'Keywords: research them and write a blog for one' },
@@ -62,7 +64,7 @@ const HIDDEN: Record<Role, string[]> = {
   manager: [],
   analyst: ['team'],
   tester: ['team'],
-  user: ['keywords', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
+  user: ['keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
 };
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -194,7 +196,10 @@ export default function Dashboard() {
           <ThemeToggle />
         </header>
         {/* Strategy and blog progress, visible from every tab. */}
-        <JobProgress key={`jobs-${reloadKey}`} onOpen={(kind) => setTab(kind === 'settings' ? 'settings' : kind === 'blog' ? 'keywords' : kind === 'audit' || kind === 'rewrite' ? 'audit' : 'strategy')} />
+        {/* Stays under the header while you scroll, so running work is always in view. */}
+        <div className="sticky top-14 z-10">
+          <JobProgress key={`jobs-${reloadKey}`} onOpen={(kind) => setTab(kind === 'settings' ? 'settings' : kind === 'blog' ? 'keywords' : kind === 'audit' || kind === 'rewrite' ? 'audit' : kind === 'activity' ? 'activity' : 'strategy')} />
+        </div>
 
         <main className="min-w-0 flex-1 p-3 sm:p-6">
           {who.blocked && (
@@ -212,6 +217,7 @@ export default function Dashboard() {
           {[...visited].filter((k) => k !== 'assistant' && visible(k)).map((k) => (
             <div key={k} className={shown === k ? 'block' : 'hidden'}>
               {k === 'home' && <HomeTab />}
+              {k === 'topics' && <TopicsTab />}
               {k === 'keywords' && <KeywordsTab />}
               {k === 'drafts' && <DraftsTab />}
               {k === 'audit' && <AuditTab />}

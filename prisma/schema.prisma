@@ -55,6 +55,7 @@ model drafts {
   author              String? // partner the post is (or will be) published under
   cover_alt           String? // alt text of the cover image; empty means the title
   originality         String? // plagiarism check result (JSON) for the text at `stamp`
+  kind                String  @default("blog") // blog | article (LinkedIn)
   length_target       String? // JSON { min, max, median, basedOn } from the pages ranking now
   keyword             keywords       @relation(fields: [keyword_id], references: [id])
   facts               facts[]
@@ -470,4 +471,25 @@ model team_members {
   updated_by String?
   created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
   updated_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+// Daily topic research: what is worth writing about today (news, updates, the strategy's
+// keywords), with the keywords to use and where it came from.
+model topics {
+  id               Int     @id @default(autoincrement())
+  day              String // YYYY-MM-DD (IST)
+  title            String
+  why              String?
+  keywords         String? // JSON string[]
+  sources          String? // JSON [{title,url}]
+  kind             String? // news | update | evergreen
+  carried_over     String? // note when yesterday's topic is repeated because nothing new came up
+  status           String  @default("new") // new | blog | article | manual
+  draft_id         Int?
+  article_draft_id Int?
+  audit_id         Int?
+  comparison       String? // JSON, for a manually written piece compared with the research
+  created_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([day])
 }

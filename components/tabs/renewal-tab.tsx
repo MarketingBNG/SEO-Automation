@@ -160,7 +160,12 @@ export default function RenewalTab() {
                 {posts.map((p) => (
                   <TableRow key={p.id} data-state={p.id === activePostId ? 'selected' : undefined}>
                     <TableCell className="max-w-lg whitespace-normal">
-                      <div className="font-medium">{p.title}</div>
+                      <div className="flex flex-wrap items-center gap-1.5 font-medium">
+                        {p.title}
+                        <span className={`rounded-full border px-1.5 py-px text-[10px] font-medium ${p.origin === 'dashboard' ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400' : p.origin === 'rewritten' ? 'border-blue-500/40 text-blue-700 dark:text-blue-400' : 'border-border text-muted-foreground'}`} title={p.origin === 'dashboard' ? 'Written and published by this dashboard' : p.origin === 'rewritten' ? 'An older post, rewritten and replaced from this dashboard' : 'On the website before the dashboard; not changed by it yet'}>
+                          {p.origin === 'dashboard' ? 'New (dashboard)' : p.origin === 'rewritten' ? 'Rewritten here' : 'Old'}
+                        </span>
+                      </div>
                       <a className="text-xs break-all text-muted-foreground hover:underline" href={p.link} target="_blank" rel="noreferrer">
                         {p.link}
                       </a>
@@ -173,7 +178,7 @@ export default function RenewalTab() {
                           ) : p.audit.audit_status === 'failed' ? (
                             <StatusBadge kind="failed">audit failed</StatusBadge>
                           ) : (
-                            <StatusBadge kind={p.audit.verdict === 'READY' ? 'approved' : 'failed'}>{p.audit.verdict}</StatusBadge>
+                            <StatusBadge kind={p.audit.verdict === 'READY' ? 'approved' : 'failed'}>{p.audit.verdict === 'READY' ? 'Ready' : p.audit.verdict === 'NEEDS_ATTENTION' ? 'Needs attention' : p.audit.verdict || 'No verdict yet'}</StatusBadge>
                           )}
                           {p.audit.rewrite_status && (
                             <StatusBadge kind={p.audit.rewrite_status === 'published' ? 'published' : 'approved'}>{p.audit.rewrite_status}</StatusBadge>
@@ -185,9 +190,9 @@ export default function RenewalTab() {
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={() => auditThisPost(p)} disabled={busyPostId === p.id}>
-                          {busyPostId === p.id && <Loader2 className="animate-spin" />}
-                          {busyPostId === p.id ? 'Working…' : p.audit ? 'Re-audit' : 'Audit'}
+                        <Button variant="outline" size="sm" onClick={() => auditThisPost(p)} disabled={busyPostId === p.id || p.audit?.audit_status === 'running' || p.audit?.rewrite_status === 'generating'}>
+                          {(busyPostId === p.id || p.audit?.audit_status === 'running') && <Loader2 className="animate-spin" />}
+                          {busyPostId === p.id ? 'Starting…' : p.audit?.audit_status === 'running' ? 'Auditing…' : p.audit?.rewrite_status === 'generating' ? 'Rewriting…' : p.audit ? 'Re-audit' : 'Audit'}
                         </Button>
                         {p.audit && (
                           <Button
@@ -228,7 +233,7 @@ export default function RenewalTab() {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <div className="flex">
-              <StatusBadge kind={activeAudit.verdict === 'READY' ? 'approved' : 'failed'}>{activeAudit.verdict}</StatusBadge>
+              <StatusBadge kind={activeAudit.verdict === 'READY' ? 'approved' : 'failed'}>{activeAudit.verdict === 'READY' ? 'Ready' : activeAudit.verdict === 'NEEDS_ATTENTION' ? 'Needs attention' : activeAudit.verdict || (activeAudit.audit_status === 'running' ? 'Auditing' : 'No verdict yet')}</StatusBadge>
             </div>
             <p className="text-sm">{activeAudit.summary}</p>
 

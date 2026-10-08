@@ -16,6 +16,14 @@ export function jobsChanged() {
 // hidden (the countdown between polls ticks locally).
 export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
   const [jobs, setJobs] = useState<any[]>([]);
+  const [recent, setRecent] = useState<any[]>([]);
+  const [dismissed, setDismissed] = useState<number>(() => {
+    try {
+      return Number(sessionStorage.getItem('jobs:dismissed') || 0);
+    } catch {
+      return 0;
+    }
+  });
   const [paused, setPaused] = useState<string | null>(null);
   const [credits80, setCredits80] = useState(false);
 
@@ -34,6 +42,7 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
         if (stop) return;
         if (j) {
           setJobs(j.jobs || []);
+          setRecent(j.recent || []);
           setPaused(j.aiPaused ? j.aiPausedReason || 'AI credits are low.' : null);
           setCredits80(Boolean(j.credits80));
           running = (j.jobs || []).length > 0;
@@ -63,9 +72,17 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
     };
   }, []);
 
-  if (!jobs.length && !paused && !credits80) return null;
+  const finished = recent.filter((r) => r.id > dismissed);
+  if (!jobs.length && !paused && !credits80 && !finished.length) return null;
+  const dismiss = () => {
+    const top = Math.max(0, ...recent.map((r) => r.id));
+    setDismissed(top);
+    try {
+      sessionStorage.setItem('jobs:dismissed', String(top));
+    } catch {}
+  };
   return (
-    <div className="space-y-1.5 border-b bg-muted/30 px-3 py-2 sm:px-4">
+    <div className="space-y-1.5 border-b bg-background/95 px-3 py-2 shadow-sm backdrop-blur sm:px-4">
       {paused && (
         <button type="button" onClick={() => onOpen?.('settings')} className="block w-full rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-left text-xs">
           <strong>AI work is paused:</strong> {paused} Open Settings &gt; AI credits to add the new balance.
@@ -75,6 +92,17 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
         <button type="button" onClick={() => onOpen?.('settings')} className="block w-full rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-left text-xs">
           <strong>AI credits: 80% of the balance is used.</strong> Top up at console.anthropic.com, then enter the new balance in Settings &gt; AI credits.
         </button>
+      )}
+      {/* Work that finished in the last 15 minutes, so nobody has to wonder whether it happened. */}
+      {finished.length > 0 && (
+        <div className="flex flex-wrap items-start gap-x-3 gap-y-1 text-xs">
+          {finished.slice(0, 3).map((r) => (
+            <button key={r.id} type="button" onClick={() => onOpen?.(r.kind)} className="text-left">
+              <span className={r.ok ? 'font-medium text-emerald-700 dark:text-emerald-400' : 'font-medium text-red-600 dark:text-red-400'}>{r.ok ? 'Done' : 'Failed'}:</span> {r.label}
+            </button>
+          ))}
+          <button type="button" onClick={dismiss} className="ml-auto text-muted-foreground underline">Hide</button>
+        </div>
       )}
       {jobs.map((j) => (
         <button key={`${j.kind}-${j.id}`} type="button" onClick={() => onOpen?.(j.kind)} className="block w-full text-left">
