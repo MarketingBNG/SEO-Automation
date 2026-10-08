@@ -19,7 +19,7 @@ export function withByline(html: string, author?: string | null, reviewer?: stri
 }
 
 // Article schema with the author and the expert reviewer (E-E-A-T signals for tax content).
-export function expertSchema({ title, author, reviewer }: { title: string; author?: string | null; reviewer?: string | null }, now = new Date()): string | null {
+export function expertSchema({ title, author, reviewer, image }: { title: string; author?: string | null; reviewer?: string | null; image?: string | null }, now = new Date()): string | null {
   if (!author && !reviewer) return null;
   const person = (s: string) => {
     const [name, ...cred] = String(s).split(',').map((x) => x.trim());
@@ -29,7 +29,7 @@ export function expertSchema({ title, author, reviewer }: { title: string; autho
     '@context': 'https://schema.org',
     '@type': 'WebPage',
     ...(reviewer ? { reviewedBy: person(reviewer), lastReviewed: now.toISOString().slice(0, 10) } : {}),
-    mainEntity: { '@type': 'Article', headline: title, ...(author ? { author: person(author) } : {}), publisher: { '@type': 'Organization', name: 'USAIndiaCFO', url: 'https://usaindiacfo.com' } },
+    mainEntity: { '@type': 'Article', headline: title, ...(image ? { image } : {}), ...(author ? { author: person(author) } : {}), publisher: { '@type': 'Organization', name: 'USAIndiaCFO', url: 'https://usaindiacfo.com' } },
   };
   return `<script type="application/ld+json">${JSON.stringify(data)}</script>`;
 }

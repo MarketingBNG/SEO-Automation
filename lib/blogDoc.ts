@@ -4,7 +4,7 @@
 // reviewer can check everything from one file or forward it.
 import prisma from './prisma';
 import { readFile, mimeFor } from './storage';
-import { makeCover } from './cover';
+import { makeCover, coverAlt } from './cover';
 import { withByline } from './byline';
 import { htmlToDocx } from './docx';
 import { seoSlug } from './wordpress';
@@ -20,6 +20,7 @@ export type BlogDocInput = {
   author?: string | null;
   reviewer?: string | null;
   cover?: string | null; // data URI
+  coverAlt?: string | null;
   url: string;
   status: string;
   keyword?: string | null;
@@ -65,11 +66,12 @@ export function blogDocHtml(d: BlogDocInput): string {
       <tr><td><b>Meta description</b></td><td>${esc(d.meta)} (${String(d.meta || '').length} characters)</td></tr>
       <tr><td><b>Status</b></td><td>${esc(d.status)}</td></tr>
       <tr><td><b>Author</b></td><td>${esc(d.author || 'assigned when published')}</td></tr>
+      <tr><td><b>Cover image alt text</b></td><td>${esc(d.coverAlt || d.title)}</td></tr>
       ${d.keyword ? `<tr><td><b>Target keyword</b></td><td>${esc(d.keyword)}</td></tr>` : ''}
       ${d.words ? `<tr><td><b>Words</b></td><td>${d.words}</td></tr>` : ''}
     </table>
     <hr/>`;
-  const cover = d.cover ? `<p><img src="${d.cover}" width="624" height="328" alt="Cover image"/></p>` : '';
+  const cover = d.cover ? `<p><img src="${d.cover}" width="624" height="328" alt="${esc(d.coverAlt || d.title).replace(/"/g, '&quot;')}"/></p>` : '';
   return `${info}${cover}<h1>${esc(d.title)}</h1>${body}`;
 }
 
@@ -100,6 +102,7 @@ export async function renderBlogDocx(draftId: number): Promise<{ buffer: Buffer;
     author,
     reviewer: row?.expert_reviewer || null,
     cover,
+    coverAlt: coverAlt(draft),
     url: draft.wp_post_url || `${SITE()}/${seoSlug(keyword || draft.title || '')}/`,
     status: draft.wp_post_url ? 'Published' : row ? `${draft.status.replace('_', ' ')} (strategy blog: ${row.status.replace('_', ' ')})` : draft.status.replace('_', ' '),
     keyword,

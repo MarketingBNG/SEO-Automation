@@ -36,3 +36,9 @@ export async function makeCover(title: string, author?: string | null): Promise<
   }
   return sharp(bg).composite(layers).png().toBuffer();
 }
+
+// The cover's alt text: what the person wrote, else the title (never empty, so Google always has
+// a description of the picture).
+export function coverAlt(d: { cover_alt?: string | null; title?: string | null }): string {
+  return String(d.cover_alt || d.title || 'Blog cover image').trim().slice(0, 200);
+}

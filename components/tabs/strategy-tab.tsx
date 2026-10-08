@@ -176,17 +176,19 @@ function ImplementationStart({ plan, approved, approvedAt }: { plan: any; approv
 }
 
 // How much of the strategy is done, and the estimated AI cost for its 30 days.
-function StrategyProgress({ id, approved }: { id: number; approved: boolean }) {
+function StrategyProgress({ id, approved, active = true }: { id: number; approved: boolean; active?: boolean }) {
   const [d, setD] = useState<any>(null);
   const load = useCallback(async () => {
     setD(await fetch(`/api/strategy/${id}/progress`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
   }, [id]);
+  // Refreshed every minute while the page is open; a hidden page does not ask.
   useEffect(() => {
+    if (!active) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     const t = setInterval(load, 60000);
     return () => clearInterval(t);
-  }, [load]);
+  }, [load, active]);
   if (!d) return null;
   async function toggle(t: any) {
     await fetch(`/api/strategy/backlinks/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: t.status === 'done' ? 'planned' : 'done' }) });
@@ -276,7 +278,7 @@ function StrategyProgress({ id, approved }: { id: number; approved: boolean }) {
   );
 }
 
-export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => void }) {
+export function StrategyView({ s, onChanged, active = true }: { s: any; onChanged: (v: any) => void; active?: boolean }) {
   const plan = s.plan;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<any>(plan);
@@ -381,7 +383,7 @@ export function StrategyView({ s, onChanged }: { s: any; onChanged: (v: any) => 
 
       <ManualTasksBanner m={manual} strategyId={s.id} />
 
-      <StrategyProgress key={s.version} id={s.id} approved={approved} />
+      <StrategyProgress key={s.version} id={s.id} approved={approved} active={active} />
 
       {approved && (
         <Section title="Tasks for your team" description="Work in this strategy that a person has to do: profiles that need a sign-up and verification, and website fixes that need a developer. Each has a step-by-step guide with links and text to copy. Tick each one when done.">
@@ -686,7 +688,7 @@ function MonthRunning() {
     const json = await res.json().catch(() => ({}));
     setBusy(null);
     if (!res.ok) return setMsg(json.error || 'Could not save.');
-    setMsg(action === 'approve' ? 'Approved. It publishes at its slot.' : 'Rejected. It will be rewritten with your feedback and come back to you for review, with a note on what changed.');
+    setMsg(action === 'approve' ? 'Approved. The Review column shows when it publishes.' : 'Rejected. It will be rewritten with your feedback and come back to you for review, with a note on what changed.');
     setRejecting(null);
     setFeedback('');
     load();
@@ -723,14 +725,23 @@ function MonthRunning() {
             <tr key={r.id} className={r.overdue ? 'bg-red-500/10' : undefined}>
               <td className={TD_MUTED}>{fmtDate(r.publish_at)}{r.overdue && <div className="font-semibold text-red-600 dark:text-red-400">Review overdue</div>}</td>
               <td className={TD}>
-                {r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}
-                {r.author && <div className="text-xs text-muted-foreground">By {r.author}{r.expert_reviewer ? `, reviewed by ${r.expert_reviewer}` : ''}</div>}
-                {r.draft_id && (
-                  <a className="text-xs text-primary underline" href={`/api/drafts/${r.draft_id}/download`} download>
-                    Download as Word
-                  </a>
-                )}
-                {r.cta && <div className="text-xs text-muted-foreground">Call to action: {r.cta.service}</div>}
+                <div className="flex gap-2">
+                  {r.cover_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={r.cover_url} alt="" loading="lazy" className="mt-0.5 h-12 w-[88px] shrink-0 rounded border object-cover" title="The cover that goes live with this blog" />
+                  )}
+                  <div className="min-w-0">
+                    {r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}
+                    {r.author && <div className="text-xs text-muted-foreground">By {r.author}{r.expert_reviewer ? `, reviewed by ${r.expert_reviewer}` : ''}</div>}
+                    {r.cta && <div className="text-xs text-muted-foreground">Call to action: {r.cta.service}</div>}
+                    {r.draft_id && (
+                      <div className="flex flex-wrap gap-x-3 text-xs">
+                        <Link className="text-primary underline" href={`/?tab=drafts&draft=${r.draft_id}`}>Open the draft</Link>
+                        <a className="text-primary underline" href={`/api/drafts/${r.draft_id}/download`} download>Download as Word</a>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </td>
               <td className={TD}>{factCheck(r)}</td>
               <td className={TD}>
@@ -739,25 +750,19 @@ function MonthRunning() {
                 {r.hold_reasons?.length > 0 && <ul className="ml-4 list-disc text-xs">{r.hold_reasons.map((h: string, i: number) => <li key={i}>{h}</li>)}</ul>}
               </td>
               <td className={TD}>
-                {r.status === 'in_review' && (
-                  <div className="space-y-1 text-xs">
-                    {r.reviewed_at ? (
-                      <div>Approved by {r.reviewed_by}</div>
-                    ) : r.needs_expert ? (
-                      <div className="font-medium text-amber-700 dark:text-amber-400">Tax, legal or compliance topic: waits for a CA/CPA to approve it. It never publishes on its own.</div>
-                    ) : (
-                      r.auto_publish_at && <div className="text-muted-foreground">Auto-publishes {fmtDate(r.auto_publish_at.slice(0, 19).replace('T', ' '))} if nobody rejects it</div>
-                    )}
-                    {r.revision_note?.length > 0 && (
-                      <details open>
-                        <summary className="cursor-pointer font-medium">Rewrite {r.revisions}: what you asked and what changed</summary>
-                        <ul className="mt-1 ml-4 list-disc">
-                          {r.revision_note.map((n: any, i: number) => <li key={i}><span className="text-muted-foreground">Asked:</span> {n.asked} <br /><span className="text-muted-foreground">Changed:</span> {n.changed}</li>)}
-                        </ul>
-                      </details>
-                    )}
-                    <Link className="underline" href="/?tab=drafts">Read the draft in Drafts &amp; Review</Link>
+                {r.publish_plan && (
+                  <div className={`mb-1 text-xs ${r.status === 'in_review' && r.needs_expert && !r.reviewed_at ? 'font-medium text-amber-700 dark:text-amber-400' : ''}`}>
+                    <strong>{r.publish_plan.headline}.</strong>{' '}
+                    <span className={r.status === 'in_review' && r.needs_expert && !r.reviewed_at ? '' : 'text-muted-foreground'}>{r.publish_plan.detail}</span>
                   </div>
+                )}
+                {r.status === 'in_review' && r.revision_note?.length > 0 && (
+                  <details open className="text-xs">
+                    <summary className="cursor-pointer font-medium">Rewrite {r.revisions}: what you asked and what changed</summary>
+                    <ul className="mt-1 ml-4 list-disc">
+                      {r.revision_note.map((n: any, i: number) => <li key={i}><span className="text-muted-foreground">Asked:</span> {n.asked} <br /><span className="text-muted-foreground">Changed:</span> {n.changed}</li>)}
+                    </ul>
+                  </details>
                 )}
                 {r.status === 'rejected' && r.reject_feedback && <div className="text-xs text-muted-foreground">Feedback from {r.rejected_by}: {r.reject_feedback}</div>}
               </td>
@@ -791,8 +796,11 @@ function MonthRunning() {
 }
 
 export default function StrategyTab({ active = true }: { active?: boolean }) {
+  // The list holds light rows (period, status, progress); the open strategy's full view is loaded
+  // on its own, so polling the list while one generates stays cheap.
   const [list, setList] = useState<any[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [view, setView] = useState<any>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -805,6 +813,25 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (active) load();
   }, [active, load]);
+
+  const row = list.find((s) => s.id === openId);
+  const hasPlan = Boolean(row?.hasPlan);
+  const rowVersion = row?.version;
+  // The open strategy's full view: loaded when it is chosen and again when its plan or version
+  // changes (generation finished, an edit or a refresh elsewhere).
+  useEffect(() => {
+    if (!openId || !hasPlan) return;
+    let alive = true;
+    fetch(`/api/strategy/${openId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .then((v) => {
+        if (alive && v && v.id === openId) setView(v);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [openId, hasPlan, rowVersion]);
 
   // While a strategy is generating in the background, refresh every 3 seconds for its progress.
   const generating = list.find((s) => ['generating', 'paused', 'stopping'].includes(s.status));
@@ -843,7 +870,8 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
     }
   }
 
-  const current = list.find((s) => s.id === openId);
+  const current = row;
+  const open = view && view.id === openId ? view : null;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -889,8 +917,21 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
         </div>
       )}
       {error && <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-2 text-sm">{error}</div>}
-      {current?.plan ? (
-        <StrategyView key={current.id} s={current} onChanged={(v) => setList((l) => l.map((x) => (x.id === v.id ? v : x)))} />
+      {open ? (
+        <StrategyView
+          key={open.id}
+          s={open}
+          active={active}
+          onChanged={(v) => {
+            setView(v);
+            setList((l) => l.map((x) => (x.id === v.id ? { ...x, status: v.status, version: v.version, hasPlan: Boolean(v.plan) } : x)));
+          }}
+        />
+      ) : hasPlan ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Loading the strategy…
+        </div>
       ) : (
         <>
           <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm font-bold">

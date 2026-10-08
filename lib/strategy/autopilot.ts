@@ -6,7 +6,7 @@ import prisma from '../prisma';
 import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { researchAndWriteBlog, verifyAndCorrect } from '../anthropic';
-import { publishPost, updatePost, seoSlug, wpRequest, uploadFeaturedImage } from '../wordpress';
+import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia } from '../wordpress';
 import { listSites, getSiteRankings, addTrackedKeyword } from '../seranking';
 import { getTermsForKeyword } from '../surfer';
 import { submitIndexNow, resubmitSitemap } from '../indexing';
@@ -19,7 +19,7 @@ import { runFixes } from './fixer';
 import { runOutreach } from './outreach';
 import { runSpeedFixes } from './speed';
 import { authorNames, pickAuthor, wpAuthorId } from '../authors';
-import { makeCover } from '../cover';
+import { makeCover, coverAlt } from '../cover';
 import { publishDraftImages } from '../inlineMedia';
 import { saveFile } from '../storage';
 import { callClaude } from '../anthropic';
@@ -230,21 +230,26 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   if (!row.refresh_url) authorName = authorName || pickAuthor(await authorNames());
   // Images a person placed in the article move to the WordPress Media Library first.
   const inline = await publishDraftImages(checked.id, checked.content_html || '');
-  const html = `${withByline(inline.html, authorName, row.expert_reviewer)}\n${faqSchema(checked.content_html) || ''}\n${expertSchema({ title: checked.title, author: authorName, reviewer: row.expert_reviewer }) || ''}`;
-  if (row.refresh_url) {
-    const { json: found } = await wpRequest('GET', '/wp/v2/posts', { query: { slug: new URL(row.refresh_url).pathname.split('/').filter(Boolean).pop(), _fields: 'id,link' } });
-    if (!found?.[0]) throw new Error(`Refresh target not found: ${row.refresh_url}`);
-    post = await updatePost(found[0].id, { title: checked.title, contentHtml: html, excerpt: checked.meta_description, metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, status: 'publish' });
-  } else {
-    // A random partner is the author; a branded cover is made when the draft has no image.
+  // The cover (uploaded, or the branded one made from the title and author) goes to the Media
+  // Library with its alt text, so Google reads what the picture shows; its address also goes into
+  // the article schema.
+  let cover: { id: number; url: string } | null = null;
+  if (!row.refresh_url) {
     authorId = await wpAuthorId(authorName).catch(() => null);
     let imageKey = checked.featured_image_path;
     if (!imageKey) {
       imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(row.main_keyword)}.png`, await makeCover(checked.title, authorName), 'image/png').catch(() => null);
       if (imageKey) await prisma.drafts.update({ where: { id: checked.id }, data: { featured_image_path: imageKey } });
     }
-    const featuredMediaId = imageKey ? await uploadFeaturedImage(imageKey).catch(() => undefined) : undefined;
-    post = await publishPost({ title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined });
+    cover = imageKey ? await uploadMedia(imageKey, { altText: coverAlt(checked), title: checked.title }).catch(() => null) : null;
+  }
+  const html = `${withByline(inline.html, authorName, row.expert_reviewer)}\n${faqSchema(checked.content_html) || ''}\n${expertSchema({ title: checked.title, author: authorName, reviewer: row.expert_reviewer, image: cover?.url || null }) || ''}`;
+  if (row.refresh_url) {
+    const { json: found } = await wpRequest('GET', '/wp/v2/posts', { query: { slug: new URL(row.refresh_url).pathname.split('/').filter(Boolean).pop(), _fields: 'id,link' } });
+    if (!found?.[0]) throw new Error(`Refresh target not found: ${row.refresh_url}`);
+    post = await updatePost(found[0].id, { title: checked.title, contentHtml: html, excerpt: checked.meta_description, metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, status: 'publish' });
+  } else {
+    post = await publishPost({ title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId: cover?.id, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined });
   }
   await prisma.drafts.update({
     where: { id: checked.id },
@@ -267,6 +272,7 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   await step('internalLinks', () => addInternalLinks(post.link, checked.title, row.main_keyword));
 
   if (inline.uploaded.length) log.inlineImages = { ok: true, result: `${inline.uploaded.length} image(s) in the Media Library${inline.uploaded.some((u) => u.reused) ? ' (some reused from an earlier attempt)' : ''}` };
+  if (!row.refresh_url) log.cover = cover ? { ok: true, result: `Cover in the Media Library with alt text "${coverAlt(checked)}"` } : { ok: false, result: 'The cover could not be uploaded, so the post has no featured image. Upload one in Drafts & Review and republish, or set it in WordPress.' };
   log.author = authorName ? { ok: Boolean(authorId), result: authorId ? `${authorName} (WordPress user ${authorId})` : `${authorName} is not a WordPress user yet, so the default author was used` } : undefined;
   await update(row.id, { status: 'published', approval_mode: reviewed ? 'reviewed' : 'auto', wp_post_url: post.link, post_publish_log: JSON.stringify(log), hold_reasons: null, author: authorName });
   await activity.log('schedule.published', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}" ${reviewed ? `approved by a reviewer${row.expert_reviewer ? ` (${row.expert_reviewer})` : ''}` : 'auto-approved after 48 hours with no rejection'}, by ${authorName || 'the default author'}: ${post.link}` });

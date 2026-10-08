@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
-  Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, KeyRound,
+  Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, House, KeyRound,
   LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
@@ -18,6 +18,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { JobProgress } from '@/components/shared/job-progress';
 import { PeekingOctopus } from '@/components/shared/peeking-octopus';
 
+import HomeTab from '@/components/tabs/home-tab';
 import AssistantTab from '@/components/tabs/assistant-tab';
 import KeywordsTab from '@/components/tabs/keywords-tab';
 import DraftsTab from '@/components/tabs/drafts-tab';
@@ -33,23 +34,24 @@ import TeamTab from '@/components/tabs/team-tab';
 import { useRole } from '@/hooks/use-role';
 import type { Role } from '@/lib/permissions';
 
-// Same 14 tabs, same order and keys as the original dashboard.
+// The pages, grouped by the job they do. Keys are unchanged, so old links (/?tab=drafts) still work.
 const TABS = [
-  { key: 'assistant', label: 'Assistant', icon: Bot, group: 'Content' },
-  { key: 'keywords', label: 'Keywords', icon: KeyRound, group: 'Content' },
-  { key: 'drafts', label: 'Drafts & Review', icon: FileText, group: 'Content' },
-  { key: 'audit', label: 'Blog Audit', icon: FileSearch, group: 'Content' },
-  { key: 'renewal', label: 'Blog Renewal', icon: RefreshCcw, group: 'Content' },
-  { key: 'overall', label: 'Overall Report', icon: BarChart3, group: 'Performance' },
-  { key: 'seo', label: 'SEO', icon: Search, group: 'Performance' },
-  { key: 'aeo', label: 'AEO', icon: MessageSquareQuote, group: 'Performance' },
-  { key: 'geo', label: 'GEO', icon: Globe, group: 'Performance' },
-  { key: 'strategy', label: 'Monthly Strategy', icon: CalendarRange, group: 'Performance' },
-  { key: 'training', label: 'Training', icon: BrainCircuit, group: 'Workspace' },
-  { key: 'meetings', label: 'Meetings', icon: Users, group: 'Workspace' },
-  { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Workspace' },
-  { key: 'team', label: 'Team', icon: ShieldCheck, group: 'Workspace' },
-  { key: 'settings', label: 'Settings', icon: Settings, group: 'Workspace' },
+  { key: 'home', label: 'Home', icon: House, group: 'Start', hint: 'What waits for you, what publishes next' },
+  { key: 'assistant', label: 'Assistant', icon: Bot, group: 'Start', hint: 'Ask anything, change the website' },
+  { key: 'strategy', label: 'Monthly Strategy', icon: CalendarRange, group: 'Blogs', hint: 'The 30-day plan, the blog calendar and approvals' },
+  { key: 'drafts', label: 'Drafts & Review', icon: FileText, group: 'Blogs', hint: 'Read, edit, add images, approve, download as Word' },
+  { key: 'keywords', label: 'Keywords', icon: KeyRound, group: 'Blogs', hint: 'Research keywords and write a blog for one' },
+  { key: 'audit', label: 'Blog Audit', icon: FileSearch, group: 'Blogs', hint: 'Check and rewrite an existing blog' },
+  { key: 'renewal', label: 'Blog Renewal', icon: RefreshCcw, group: 'Blogs', hint: 'Refresh old posts on the website' },
+  { key: 'overall', label: 'Overall Report', icon: BarChart3, group: 'Reports', hint: 'All channels, month on month' },
+  { key: 'seo', label: 'SEO', icon: Search, group: 'Reports', hint: 'Google rankings and clicks' },
+  { key: 'aeo', label: 'AEO', icon: MessageSquareQuote, group: 'Reports', hint: 'Answer engines' },
+  { key: 'geo', label: 'GEO', icon: Globe, group: 'Reports', hint: 'AI search visibility' },
+  { key: 'training', label: 'Training', icon: BrainCircuit, group: 'Workspace', hint: '' },
+  { key: 'meetings', label: 'Meetings', icon: Users, group: 'Workspace', hint: '' },
+  { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Workspace', hint: 'Everything the dashboard did, with errors' },
+  { key: 'team', label: 'Team', icon: ShieldCheck, group: 'Workspace', hint: '' },
+  { key: 'settings', label: 'Settings', icon: Settings, group: 'Workspace', hint: 'Connections, blog rules, SE Ranking, AI credits' },
 ] as const;
 
 // Pages each role sees. Users only see the strategy and the assistant; the team page is for admins
@@ -63,23 +65,22 @@ const HIDDEN: Record<Role, string[]> = {
 };
 
 type TabKey = (typeof TABS)[number]['key'];
-const GROUPS = ['Content', 'Performance', 'Workspace'] as const;
+const GROUPS = ['Start', 'Blogs', 'Reports', 'Workspace'] as const;
 const PERFORMANCE_VIEWS: string[] = ['overall', 'seo', 'aeo', 'geo'];
 const isTab = (v: string | null): v is TabKey => !!v && TABS.some((t) => t.key === v);
 
 export default function Dashboard() {
-  const router = useRouter();
   const params = useSearchParams();
   const { data: session } = useSession();
   const initial = params.get('tab');
-  const [tab, setTabState] = useState<TabKey>(isTab(initial) ? initial : 'assistant');
+  const [tab, setTabState] = useState<TabKey>(isTab(initial) ? initial : 'home');
   const [askText, setAskText] = useState('');
   // Bumped by the Refresh button: the open tab is mounted again, so it loads fresh data.
   const [reloadKey, setReloadKey] = useState(0);
   const [assistantSeed, setAssistantSeed] = useState<{ text: string; nonce: number } | null>(null);
-  // The strategy tab mounts on first visit and then stays mounted, so a running generation keeps
-  // its progress and Stop button when you look at another tab.
-  const [strategyVisited, setStrategyVisited] = useState(initial === 'strategy');
+  // A page mounts on first visit and then stays mounted (hidden), so coming back is instant and a
+  // running generation keeps its progress and Stop button while you look at another page.
+  const [visited, setVisited] = useState<Set<string>>(() => new Set([isTab(initial) ? initial : 'home']));
 
   // Links such as /?tab=drafts from inside a page switch the open page too.
   const paramTab = params.get('tab');
@@ -88,12 +89,16 @@ export default function Dashboard() {
     if (isTab(paramTab) && paramTab !== tab) setTabState(paramTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramTab]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab)));
+  }, [tab]);
 
   function setTab(next: string) {
     if (!isTab(next)) return;
     setTabState(next);
-    if (next === 'strategy') setStrategyVisited(true);
-    router.replace(`/?tab=${next}`, { scroll: false });
+    // A plain history update: no server round trip for a sidebar click (useSearchParams stays in sync).
+    window.history.replaceState(null, '', `/?tab=${next}`);
   }
 
   function askAssistant(e: FormEvent) {
@@ -107,8 +112,8 @@ export default function Dashboard() {
 
   const who = useRole();
   const visible = (key: string) => !HIDDEN[who.role].includes(key);
-  // A page the role cannot see (for example from an old link) falls back to the assistant.
-  const shown: TabKey = who.loaded && !visible(tab) ? 'assistant' : tab;
+  // A page the role cannot see (for example from an old link) falls back to Home.
+  const shown: TabKey = who.loaded && !visible(tab) ? 'home' : tab;
   const current = TABS.find((t) => t.key === shown)!;
 
   return (
@@ -132,7 +137,7 @@ export default function Dashboard() {
                 <SidebarMenu>
                   {TABS.filter((t) => t.group === g && visible(t.key)).map((t) => (
                     <SidebarMenuItem key={t.key}>
-                      <SidebarMenuButton isActive={shown === t.key} tooltip={t.label} onClick={() => setTab(t.key)}>
+                      <SidebarMenuButton isActive={shown === t.key} tooltip={t.hint ? `${t.label}: ${t.hint}` : t.label} title={t.hint || undefined} onClick={() => setTab(t.key)}>
                         <t.icon />
                         <span>{t.label}</span>
                       </SidebarMenuButton>
@@ -199,25 +204,25 @@ export default function Dashboard() {
           <div className={shown === 'assistant' ? 'block' : 'hidden'}>
             <AssistantTab seed={assistantSeed} />
           </div>
-          {/* Everything except the Assistant reloads when Refresh is pressed. */}
+          {/* Everything except the Assistant reloads when Refresh is pressed. Visited pages stay
+              mounted but hidden, so switching back shows them at once. */}
           <div key={`tabs-${reloadKey}`} className="contents">
-          {shown === 'keywords' && <KeywordsTab />}
-          {shown === 'drafts' && <DraftsTab />}
-          {shown === 'audit' && <AuditTab />}
-          {shown === 'renewal' && <RenewalTab />}
-          {(strategyVisited || shown === 'strategy') && (
-            <div className={shown === 'strategy' ? 'block' : 'hidden'}>
-              <StrategyTab active={shown === 'strategy'} />
+          {[...visited].filter((k) => k !== 'assistant' && visible(k)).map((k) => (
+            <div key={k} className={shown === k ? 'block' : 'hidden'}>
+              {k === 'home' && <HomeTab />}
+              {k === 'keywords' && <KeywordsTab />}
+              {k === 'drafts' && <DraftsTab />}
+              {k === 'audit' && <AuditTab />}
+              {k === 'renewal' && <RenewalTab />}
+              {k === 'strategy' && <StrategyTab active={shown === 'strategy'} />}
+              {PERFORMANCE_VIEWS.includes(k) && <PerformanceTab view={k as 'overall' | 'seo' | 'aeo' | 'geo'} onOpen={setTab} />}
+              {k === 'training' && <TrainingTab />}
+              {k === 'meetings' && <MeetingsTab />}
+              {k === 'activity' && <ActivityTab />}
+              {k === 'settings' && <SettingsTab />}
+              {k === 'team' && <TeamTab />}
             </div>
-          )}
-          {PERFORMANCE_VIEWS.includes(shown) && (
-            <PerformanceTab key={shown} view={shown as 'overall' | 'seo' | 'aeo' | 'geo'} onOpen={setTab} />
-          )}
-          {shown === 'training' && <TrainingTab />}
-          {shown === 'meetings' && <MeetingsTab />}
-          {shown === 'activity' && <ActivityTab />}
-          {shown === 'settings' && <SettingsTab />}
-          {shown === 'team' && <TeamTab />}
+          ))}
           </div>
         </main>
       </SidebarInset>

@@ -1,7 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { CheckCircle2, Download, ExternalLink, FolderOpen, Loader2, Save, Send, ThumbsDown, ThumbsUp, Trash2, Upload, X } from 'lucide-react';
+import { useCallback, useDeferredValue, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { BarChart3, CalendarClock, CheckCircle2, Download, ExternalLink, FolderOpen, Loader2, Save, Send, ThumbsDown, ThumbsUp, Trash2, Upload, X } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { ArticleImages } from '@/components/shared/article-images';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,9 +22,18 @@ export { PeopleAlsoAskList };
 const PREVIEW_BOX = 'overflow-y-auto rounded-lg border bg-muted/30 p-3 text-sm';
 
 export default function DraftsTab() {
+  const params = useSearchParams();
+  const router = useRouter();
+  // A link such as /?tab=drafts&draft=12 (from Monthly Strategy or Home) opens that draft.
+  const wanted = Number(params.get('draft')) || null;
   const [drafts, setDrafts] = useState<any[]>([]);
-  const [openId, setOpenId] = useState<any>(null);
+  const [openId, setOpenId] = useState<any>(wanted);
   const [analyticsPost, setAnalyticsPost] = useState<any>(null);
+  const [showPerf, setShowPerf] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (wanted) setOpenId(wanted);
+  }, [wanted]);
 
   const load = useCallback(async () => {
     const j = await fetch('/api/drafts/list').then((r) => r.json()).catch(() => null);
@@ -83,12 +94,23 @@ export default function DraftsTab() {
       {openId && (
         <DraftEditor
           draftId={openId}
-          onClose={() => setOpenId(null)}
+          onClose={() => {
+            setOpenId(null);
+            if (wanted) router.replace('/?tab=drafts', { scroll: false });
+          }}
           onChange={load}
         />
       )}
 
-      <BlogTable onOpen={(r) => setAnalyticsPost(r)} />
+      {/* The all-blogs Google table asks Search Console and WordPress, so it loads only when wanted. */}
+      {showPerf ? (
+        <BlogTable onOpen={(r) => setAnalyticsPost(r)} />
+      ) : (
+        <Button variant="outline" onClick={() => setShowPerf(true)}>
+          <BarChart3 />
+          Show how each published blog performs
+        </Button>
+      )}
       {/* Per-blog analytics opens in a dialog on top of the page, so the click always shows it. */}
       <Dialog open={!!analyticsPost} onOpenChange={(open) => !open && setAnalyticsPost(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
@@ -121,7 +143,11 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [coverAlt, setCoverAlt] = useState('');
+  // The preview re-renders after typing pauses, not on every keystroke (it sanitises the whole article).
+  const previewHtml = useDeferredValue(content);
   const [wpStatus, setWpStatus] = useState('draft');
+  const topRef = useRef<HTMLDivElement>(null);
 
   // resetFields=false refreshes the draft's status, facts and image but keeps whatever is typed in
   // the Title / Meta / Content boxes, so marking a fact or uploading a creative never drops edits.
@@ -130,20 +156,24 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json.error) {
       setMessage(json.error || 'Draft not found');
-      return;
+      return null;
     }
     setDraft(json);
     if (resetFields) {
       setTitle(json.title || '');
       setMeta(json.meta_description || '');
       setContent(json.content_html || '');
+      setCoverAlt(json.cover_alt || '');
     }
+    return json;
   }, [draftId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- same effect as the old app
     setMessage('');
     loadDraft();
+    // Opened from a link on another page: bring the editor into view.
+    topRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }, [loadDraft]);
 
   async function verifyFact(factId: any, status: string) {
@@ -182,9 +212,36 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setMessage(status ? `Marked as ${status}.` : 'Saved.');
       onChange();
       // The server now holds what was sent, so keep the boxes (anything typed meanwhile stays).
+      const fresh = await loadDraft(false);
+      if (status === 'approved') {
+        const plan = fresh?.schedule?.publish_plan;
+        setMessage(
+          json.calendar
+            ? `Approved. ${json.calendar}`
+            : plan
+              ? `Approved. ${plan.headline}. ${plan.detail}`
+              : 'Approved. This blog is not on the monthly calendar, so nothing publishes on its own: use "Publish to WordPress" below when you are ready.'
+        );
+      } else {
+        setMessage(status ? `Marked as ${status}.` : 'Saved.');
+      }
+    } catch (err: any) {
+      setMessage('Error: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveCoverAlt() {
+    setSaving(true);
+    setMessage('');
+    try {
+      const res = await fetch(`/api/drafts/${draft.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cover_alt: coverAlt }) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      setMessage('Cover alt text saved. It goes to WordPress with the image when the blog publishes.');
       loadDraft(false);
     } catch (err: any) {
       setMessage('Error: ' + err.message);
@@ -216,10 +273,11 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
     try {
       const fd = new FormData();
       fd.append('image', imageFile);
+      fd.append('alt', coverAlt);
       const res = await fetch(`/api/drafts/${draft.id}/image`, { method: 'POST', body: fd });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setMessage('Creative uploaded.');
+      setMessage('Cover uploaded.');
       setImageFile(null);
       onChange();
       loadDraft(false);
@@ -252,6 +310,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   }
 
   return (
+    <div ref={topRef} className="scroll-mt-16">
     <Card className="ring-2 ring-primary/20">
       <CardHeader>
         <CardTitle>Review draft: {draft.keyword}</CardTitle>
@@ -272,6 +331,8 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           <span className="text-muted-foreground">{draft.word_count} words</span>
           <span className="text-muted-foreground">{draft.repair_attempts} auto-repair attempt(s)</span>
         </div>
+
+        <GoesLive draft={draft} />
 
         {draft.production_state === 'NEEDS_ATTENTION' && draft.validation_issues && (
           <NoteList heading="Unresolved issues after auto-repair (fix manually before approving):">
@@ -368,7 +429,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           </div>
           <div className="flex min-w-0 flex-col">
             <FieldLabel>Preview</FieldLabel>
-            <SafeHtml className={`prose-article ${PREVIEW_BOX} max-h-[640px] flex-1 bg-background`} html={content} />
+            <SafeHtml className={`prose-article ${PREVIEW_BOX} max-h-[640px] flex-1 bg-background`} html={previewHtml} />
           </div>
         </div>
 
@@ -420,10 +481,17 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           <p className="mb-2 text-xs text-muted-foreground">
             {draft.featured_image_path
               ? 'Your uploaded cover. It is shown on the blog page, in listings and on social shares.'
-              : `No cover uploaded, so this branded cover (title and author${draft.author ? `, ${draft.author}` : ''}) is used automatically. Upload your own to replace it.`}
+              : `No cover uploaded, so this branded cover (title and author${draft.author ? `, ${draft.author}` : ''}) is used automatically. Upload your own to replace it.`}{' '}
+            It goes to the WordPress Media Library with the alt text below, so Google reads what the picture shows.
           </p>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="mb-2 max-h-72 max-w-full rounded-lg border object-contain" src={`/api/drafts/${draft.id}/cover?v=${encodeURIComponent(draft.updated_at || '')}`} alt="Cover image" />
+          <img className="mb-2 max-h-72 max-w-full rounded-lg border object-contain" src={`/api/drafts/${draft.id}/cover?v=${encodeURIComponent(draft.updated_at || '')}`} alt={draft.cover_alt_shown || 'Cover image'} />
+          <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input value={coverAlt} onChange={(e) => setCoverAlt(e.target.value)} maxLength={200} className="sm:max-w-lg" placeholder={`Alt text: what the picture shows. Empty uses the title (${draft.title || 'untitled'})`} aria-label="Cover alt text" />
+            <Button variant="outline" onClick={saveCoverAlt} disabled={saving || coverAlt === (draft.cover_alt || '')}>
+              Save alt text
+            </Button>
+          </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               type="file"
@@ -433,7 +501,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
             />
             <Button variant="outline" onClick={uploadImage} disabled={!imageFile || saving}>
               <Upload />
-              Upload creative
+              Upload cover
             </Button>
           </div>
         </div>
@@ -478,5 +546,62 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
         {message && <p className="text-sm text-muted-foreground">{message}</p>}
       </CardContent>
     </Card>
+    </div>
+  );
+}
+
+// The cover, the author, the address and when the blog goes live, in one place, so a reviewer
+// sees what they are approving.
+function GoesLive({ draft }: { draft: any }) {
+  const s = draft.schedule;
+  const plan = s?.publish_plan;
+  const headline = plan ? plan.headline : draft.status === 'published' ? 'Published' : draft.status === 'approved' ? 'Approved, waiting for you to publish it' : 'Not scheduled';
+  const detail = plan
+    ? plan.detail
+    : draft.status === 'published'
+      ? draft.wp_post_url ? `Live at ${draft.wp_post_url}` : 'Live on the website.'
+      : draft.status === 'approved'
+        ? 'This blog is not on the monthly calendar, so nothing publishes on its own. Use "Publish to WordPress" at the bottom: live at once, or as a WordPress draft.'
+        : 'This blog is not on the monthly calendar. Approve it, then publish it with "Publish to WordPress" at the bottom.';
+  return (
+    <div className="grid gap-3 rounded-xl border bg-muted/20 p-3 sm:grid-cols-[200px_1fr]">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={`/api/drafts/${draft.id}/cover?v=${encodeURIComponent(draft.updated_at || '')}`} alt={draft.cover_alt_shown || 'Cover image'} className="w-full rounded-lg border object-cover" />
+      <div className="space-y-1 text-sm">
+        <div className="flex items-center gap-1.5 font-semibold">
+          <CalendarClock className="size-4" />
+          What goes live
+        </div>
+        <div>
+          <span className="text-muted-foreground">When: </span>
+          <strong>{headline}.</strong>
+          {detail && <span className="text-muted-foreground"> {detail}</span>}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Author: </span>
+          {draft.author || s?.author || 'a partner, chosen when the draft is written'}
+          {s?.expert_reviewer ? `, reviewed by ${s.expert_reviewer}` : ''}
+        </div>
+        <div className="break-all">
+          <span className="text-muted-foreground">Address: </span>
+          {draft.planned_url}
+        </div>
+        {s?.cta?.service && (
+          <div>
+            <span className="text-muted-foreground">Call to action: </span>
+            {s.cta.service}
+          </div>
+        )}
+        <div>
+          <span className="text-muted-foreground">Cover: </span>
+          {draft.featured_image_path ? 'your uploaded image' : 'the branded cover made from the title and author'}. Alt text &quot;{draft.cover_alt_shown}&quot; (change it under Cover, below).
+        </div>
+        {s && (
+          <Link className="text-primary underline" href="/?tab=strategy">
+            Open in Monthly Strategy
+          </Link>
+        )}
+      </div>
+    </div>
   );
 }
