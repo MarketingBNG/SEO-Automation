@@ -54,6 +54,7 @@ model drafts {
   linkedin_post       String? // ready-to-post LinkedIn text for the blog
   author              String? // partner the post is (or will be) published under
   cover_alt           String? // alt text of the cover image; empty means the title
+  originality         String? // plagiarism check result (JSON) for the text at `stamp`
   length_target       String? // JSON { min, max, median, basedOn } from the pages ranking now
   keyword             keywords       @relation(fields: [keyword_id], references: [id])
   facts               facts[]

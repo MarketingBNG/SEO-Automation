@@ -85,6 +85,8 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
       target_wp_post_id: null,
     },
   });
+  // Plagiarism check in the background, so the result is ready for the review.
+  void import('../originality').then((m) => m.checkDraftOriginality(draft.id)).catch(() => {});
   for (const f of result.facts) {
     await prisma.facts.create({ data: { draft_id: draft.id, fact_id: f.fact_id, claim: f.claim, source_name: f.source_name, source_url: f.source_url, jurisdiction: f.jurisdiction, effective_date: f.effective_date } });
   }
@@ -214,6 +216,11 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   if (!fc.ok) reasons.push(`Fact check could not confirm every claim from a primary source after ${fc.rounds} rounds. Not published.`);
   const score = await surferScore(row.main_keyword, checked.content_html || '');
   for (const i of writingRuleIssues({ title: checked.title, meta: checked.meta_description, html: checked.content_html || '', surferScore: score, siteHost: HOST() })) reasons.push(i);
+  // Never publish copied text: the blog is compared with the pages ranking for its keyword and
+  // with our own posts (a check that cannot run does not block; its result shows on the draft).
+  const { ensureOriginality, originalityReason } = await import('../originality');
+  const orig = await ensureOriginality(checked.id).catch(() => null);
+  if (orig && !orig.ok) reasons.push(originalityReason(orig));
   if (reasons.length) {
     const first = row.status !== 'held';
     await update(row.id, { status: 'held', hold_reasons: JSON.stringify(reasons) });
