@@ -307,6 +307,14 @@ export default function AuditTab() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+  // Audits and rewrites run on the server in the background; while one runs, the list refreshes
+  // every 5 seconds until it is ready (or failed).
+  const anyRunning = audits.some((a) => a.audit_status === 'running' || a.rewrite_status === 'generating');
+  useEffect(() => {
+    if (!anyRunning) return;
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [anyRunning, load]);
 
   async function runAudit() {
     setRunning(true);
@@ -318,7 +326,7 @@ export default function AuditTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}). Try again.` }));
       if (!res.ok) throw new Error(json.error);
       setOpenId(json.id);
       setTitle('');
@@ -350,8 +358,9 @@ export default function AuditTab() {
     note(id, null);
     try {
       const res = await fetch(`/api/audit/${id}/rewrite`, { method: 'POST' });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}). Try again.` }));
       if (!res.ok) throw new Error(json.error);
+      // Started in the background; the list polls until the rewrite is ready.
       load();
     } catch (err: any) {
       note(id, { text: 'Error: ' + err.message });
@@ -467,7 +476,14 @@ export default function AuditTab() {
                   <TableRow key={a.id} data-state={a.id === openId ? 'selected' : undefined}>
                     <TableCell className="max-w-md whitespace-normal font-medium">{decodeEntities(a.title) || a.source_url || '(untitled)'}</TableCell>
                     <TableCell>
-                      <StatusBadge kind={a.verdict === 'READY' ? 'approved' : 'failed'}>{a.verdict}</StatusBadge>
+                      {a.audit_status === 'running' ? (
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="size-3 animate-spin" />Auditing…</span>
+                      ) : a.audit_status === 'failed' ? (
+                        <StatusBadge kind="failed">audit failed</StatusBadge>
+                      ) : (
+                        <StatusBadge kind={a.verdict === 'READY' ? 'approved' : 'failed'}>{a.verdict}</StatusBadge>
+                      )}
+                      {a.rewrite_status === 'generating' && <span className="ml-1 text-xs text-muted-foreground">rewriting…</span>}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{a.issues.length}</TableCell>
                     <TableCell className="text-muted-foreground">{a.created_at}</TableCell>
@@ -554,16 +570,23 @@ export default function AuditTab() {
 
             <Separator className="my-1" />
 
-            {!open.content_html ? (
+            {open.audit_status === 'running' ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Auditing this blog on the server (usually a few minutes). You can leave this page; the result appears here and in the header bar.</p>
+            ) : open.audit_status === 'failed' ? (
+              <p className="text-sm text-destructive">The audit failed: {open.audit_error || 'unknown error'}. Run it again.</p>
+            ) : !open.content_html ? (
               <p className="text-sm text-muted-foreground">
                 This audit has no saved content to rewrite from (an old audit from before this
                 feature). Re-run the audit to enable rewriting.
               </p>
+            ) : open.rewrite_status === 'generating' ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Rewriting on the server (usually 2 to 5 minutes). You can leave this page; the rewrite appears here when it is ready.</p>
             ) : !open.rewrite_content_html ? (
-              <div>
+              <div className="space-y-1">
+                {open.rewrite_error && <p className="text-sm text-destructive">The last rewrite failed: {open.rewrite_error}</p>}
                 <Button onClick={() => doRewrite(open.id)} disabled={Boolean(openBusy)}>
                   {openBusy === 'rewrite' ? <Loader2 className="animate-spin" /> : <Wand2 />}
-                  {openBusy === 'rewrite' ? 'Rewriting… (can take 1-2 min)' : 'Rewrite to fix these issues'}
+                  {open.rewrite_error ? 'Try the rewrite again' : 'Rewrite to fix these issues'}
                 </Button>
               </div>
             ) : (

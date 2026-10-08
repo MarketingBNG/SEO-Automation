@@ -40,13 +40,25 @@ export default function RenewalTab() {
     loadPosts();
   }, [loadPosts]);
 
-  async function loadAudit(auditId: any) {
+  const loadAudit = useCallback(async (auditId: any) => {
     const res = await fetch('/api/audit');
     const all = await res.json();
     const a = all.find((x: any) => x.id === auditId);
     if (a) setAudits((prev) => ({ ...prev, [auditId]: a }));
     return a;
-  }
+  }, []);
+  // Audits and rewrites run on the server in the background; poll while the open one runs.
+  const openAuditId = posts.find((p: any) => p.id === activePostId)?.audit?.id;
+  const openAudit = openAuditId ? audits[openAuditId] : null;
+  const openRunning = openAudit?.audit_status === 'running' || openAudit?.rewrite_status === 'generating';
+  useEffect(() => {
+    if (!openRunning || !openAuditId) return;
+    const t = setInterval(async () => {
+      const a = await loadAudit(openAuditId).catch(() => null);
+      if (a && a.audit_status !== 'running' && a.rewrite_status !== 'generating') loadPosts();
+    }, 5000);
+    return () => clearInterval(t);
+  }, [openRunning, openAuditId, loadAudit, loadPosts]);
 
   async function auditThisPost(post: any) {
     setBusyPostId(post.id);
@@ -57,7 +69,7 @@ export default function RenewalTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wpPostId: post.id }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}). Try again.` }));
       if (!res.ok) throw new Error(json.error);
       setAudits((prev) => ({ ...prev, [json.id]: json }));
       setActivePostId(post.id);
@@ -74,7 +86,7 @@ export default function RenewalTab() {
     setMessage(null);
     try {
       const res = await fetch(`/api/audit/${auditId}/rewrite`, { method: 'POST' });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}). Try again.` }));
       if (!res.ok) throw new Error(json.error);
       setAudits((prev) => ({ ...prev, [auditId]: json }));
     } catch (err: any) {
@@ -156,7 +168,13 @@ export default function RenewalTab() {
                     <TableCell>
                       {p.audit ? (
                         <div className="flex flex-wrap gap-1">
-                          <StatusBadge kind={p.audit.verdict === 'READY' ? 'approved' : 'failed'}>{p.audit.verdict}</StatusBadge>
+                          {p.audit.audit_status === 'running' ? (
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="size-3 animate-spin" />Auditing…</span>
+                          ) : p.audit.audit_status === 'failed' ? (
+                            <StatusBadge kind="failed">audit failed</StatusBadge>
+                          ) : (
+                            <StatusBadge kind={p.audit.verdict === 'READY' ? 'approved' : 'failed'}>{p.audit.verdict}</StatusBadge>
+                          )}
                           {p.audit.rewrite_status && (
                             <StatusBadge kind={p.audit.rewrite_status === 'published' ? 'published' : 'approved'}>{p.audit.rewrite_status}</StatusBadge>
                           )}
@@ -225,11 +243,18 @@ export default function RenewalTab() {
 
             <Separator className="my-1" />
 
-            {!activeAudit.rewrite_content_html ? (
-              <div>
+            {activeAudit.audit_status === 'running' ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Auditing this post on the server (usually a few minutes). You can leave this page.</p>
+            ) : activeAudit.audit_status === 'failed' ? (
+              <p className="text-sm text-destructive">The audit failed: {activeAudit.audit_error || 'unknown error'}. Press Re-audit.</p>
+            ) : activeAudit.rewrite_status === 'generating' ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Rewriting on the server (usually 2 to 5 minutes). You can leave this page.</p>
+            ) : !activeAudit.rewrite_content_html ? (
+              <div className="space-y-1">
+                {activeAudit.rewrite_error && <p className="text-sm text-destructive">The last rewrite failed: {activeAudit.rewrite_error}</p>}
                 <Button onClick={() => rewriteAudit(activeAudit.id)} disabled={busyActive}>
                   {busyActive && <Loader2 className="animate-spin" />}
-                  {busyActive ? 'Rewriting… (can take 1-2 min)' : 'Rewrite to fix these issues'}
+                  {activeAudit.rewrite_error ? 'Try the rewrite again' : 'Rewrite to fix these issues'}
                 </Button>
               </div>
             ) : (

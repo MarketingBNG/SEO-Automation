@@ -152,6 +152,9 @@ model blog_audits {
   rewrite_meta            String? // JSON
   people_also_ask         String? // JSON
   rewrite_people_also_ask String? // JSON
+  audit_status            String? // running | ready | failed (null for rows made before background audits)
+  audit_error             String?
+  rewrite_error           String?
 }
 
 model image_library {
