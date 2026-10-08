@@ -231,9 +231,19 @@ async function main() {
   const html2 = html.replace('The FBAR filing deadline is April 30 with an automatic extension.', 'Reviewed version of the answer for this question here.');
   const d2 = await prisma.drafts.create({ data: { keyword_id: kw2.id, title: 'Reviewed guide title', meta_description: 'Reviewed meta.', content_html: html2, status: 'pending_review' } });
   await prisma.blog_schedule.update({ where: { id: second.id }, data: { draft_id: d2.id, status: 'in_review', review_started: '2026-11-04 04:30:00', reviewed_by: 'Reviewer A', reviewed_at: '2026-11-04 12:00:00', expert_reviewer: 'Akshay Nahar, CA' } });
+  // A near copy of the first (published) blog is held by the plagiarism check.
   await runDaily(new Date(Date.parse(second.publish_at.replace(' ', 'T') + 'Z')), { verify: fixingVerify });
   r = await prisma.blog_schedule.findUnique({ where: { id: second.id } });
-  assert.equal(r!.status, 'published');
+  assert.equal(r!.status, 'held');
+  assert.match(r!.hold_reasons || '', /Plagiarism check/);
+  console.log('PASS a blog that copies a published post is held by the plagiarism check');
+  // Written in its own words (every third word changed inside paragraphs), it publishes.
+  const own = html2.replace(/<p>([^<]+)<\/p>/g, (_m: string, t: string) => `<p>${t.split(' ').map((w: string, i: number) => (i % 3 === 1 && /^[a-z]+$/i.test(w) ? `${w}s` : w)).join(' ')}</p>`);
+  await prisma.drafts.update({ where: { id: d2.id }, data: { content_html: own, updated_at: '2026-11-05 00:00:00' } });
+  await prisma.blog_schedule.update({ where: { id: second.id }, data: { status: 'in_review', hold_reasons: null } });
+  await runDaily(new Date(Date.parse(second.publish_at.replace(' ', 'T') + 'Z')), { verify: fixingVerify });
+  r = await prisma.blog_schedule.findUnique({ where: { id: second.id } });
+  assert.equal(r!.status, 'published', r!.hold_reasons || '');
   assert.equal(r!.approval_mode, 'reviewed');
   const sent = calls.filter((c) => /^POST https:\/\/usaindiacfo\.com\/wp-json\/wp\/v2\/posts(\?| )/.test(c)).pop() || '';
   assert.ok(sent.includes('Reviewed by') && sent.includes('Akshay Nahar, CA'), 'byline names the CA reviewer');

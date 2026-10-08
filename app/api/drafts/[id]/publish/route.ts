@@ -12,6 +12,7 @@ import { authorNames, pickAuthor, wpAuthorId } from '@/lib/authors';
 import { publishDraftImages } from '@/lib/inlineMedia';
 import { makeCover, coverAlt } from '@/lib/cover';
 import { saveFile } from '@/lib/storage';
+import { ensureOriginality, originalityReason } from '@/lib/originality';
 
 export const runtime = 'nodejs';
 
@@ -27,6 +28,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (/\[(PRACTITIONER NOTE NEEDED|VERIFY|AUTHOR NAME|REVIEWER NAME|VISUAL SUGGESTION)/i.test(draft.content_html || '')) {
     return NextResponse.json({ error: 'The draft still has a reviewer placeholder ([AUTHOR NAME], [REVIEWER NAME], [PRACTITIONER NOTE NEEDED], [VISUAL SUGGESTION] or [VERIFY]). Replace or remove it before publishing.' }, { status: 400 });
   }
+
+  const orig = await ensureOriginality(nid).catch(() => null);
+  if (orig && !orig.ok) return NextResponse.json({ error: originalityReason(orig) }, { status: 400 });
 
   const leftovers = aiLeftovers(draft.title, draft.meta_description, draft.content_html);
   if (leftovers.length) return NextResponse.json({ error: `Remove the AI notes first. ${leftovers.join(' ')}` }, { status: 400 });

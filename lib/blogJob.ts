@@ -77,6 +77,8 @@ export async function runBlogJob(keyword: any, controller: AbortController, send
         status: 'pending_review',
       },
     });
+    // Plagiarism check in the background, so the result is ready when someone reviews the draft.
+    void import('./originality').then((m) => m.checkDraftOriginality(draft.id)).catch(() => {});
 
     const draftId = draft.id;
 

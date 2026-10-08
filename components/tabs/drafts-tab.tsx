@@ -604,12 +604,65 @@ function GoesLive({ draft }: { draft: any }) {
           <span className="text-muted-foreground">Cover: </span>
           {draft.featured_image_path ? 'your uploaded image' : 'the branded cover made from the title and author'}. Alt text &quot;{draft.cover_alt_shown}&quot; (change it under Cover, below).
         </div>
+        <OriginalityLine draft={draft} />
         {s && (
           <Link className="text-primary underline" href="/?tab=strategy">
             Open in Monthly Strategy
           </Link>
         )}
       </div>
+    </div>
+  );
+}
+
+// Plagiarism check: the blog compared with the pages ranking for its keyword and our own posts.
+function OriginalityLine({ draft }: { draft: any }) {
+  const [result, setResult] = useState<any>(() => {
+    try {
+      return draft.originality ? JSON.parse(draft.originality) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const stale = result?.stamp && result.stamp !== draft.updated_at;
+  async function run() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/drafts/${draft.id}/originality`, { method: 'POST' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setResult({ ...j, stamp: draft.updated_at });
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const m = result?.matches?.[0];
+  return (
+    <div>
+      <span className="text-muted-foreground">Plagiarism: </span>
+      {busy ? (
+        'checking against Google top results and our own blogs…'
+      ) : !result ? (
+        'not checked yet.'
+      ) : result.ok ? (
+        <span className="text-emerald-700 dark:text-emerald-400">original ({result.sources} pages compared{m ? `; closest: ${m.longestRun} words in a row with ${m.source}` : ''}){stale ? ', text changed since' : ''}.</span>
+      ) : (
+        <span className="font-medium text-red-600 dark:text-red-400">
+          copied text found: {m?.longestRun} words in a row ({Math.round((m?.share || 0) * 100)}% of the blog) match {m?.source}. Rewrite it before publishing.
+          {m?.sample && <span className="block font-normal italic text-muted-foreground">&quot;{m.sample}&quot;</span>}
+        </span>
+      )}
+      {result?.note && <span className="block text-xs text-muted-foreground">{result.note}</span>}
+      {' '}
+      <button type="button" className="text-primary underline" disabled={busy} onClick={run}>
+        {result ? 'Check again' : 'Check now'}
+      </button>
+      {err && <span className="block text-xs text-red-600">{err}</span>}
     </div>
   );
 }
