@@ -5,7 +5,7 @@
 import * as settings from './settings';
 import { etaSeconds, blendEta } from './strategy/core';
 
-export type JobKind = 'blog' | 'strategy' | 'fact-check' | 'rewrite' | 'guide' | 'refresh' | 'competitors' | 'keywords' | 'lessons';
+export type JobKind = 'blog' | 'strategy' | 'fact-check' | 'rewrite' | 'audit' | 'guide' | 'refresh' | 'competitors' | 'keywords' | 'lessons';
 
 // First-run estimates (seconds) until the dashboard has measured its own.
 const DEFAULT_SECONDS: Record<string, number> = {
@@ -13,6 +13,7 @@ const DEFAULT_SECONDS: Record<string, number> = {
   strategy: 30 * 60,
   'fact-check': 20 * 60,
   rewrite: 45 * 60,
+  audit: 6 * 60,
   guide: 75,
   refresh: 10 * 60,
   competitors: 4 * 60,

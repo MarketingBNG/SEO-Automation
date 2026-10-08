@@ -12,7 +12,7 @@ async function handler(req: NextRequest) {
 
     const audits = await prisma.blog_audits.findMany({
       where: { wp_post_id: { not: null } },
-      select: { wp_post_id: true, id: true, verdict: true, rewrite_status: true },
+      select: { wp_post_id: true, id: true, verdict: true, rewrite_status: true, audit_status: true, audit_error: true },
       orderBy: { id: 'desc' },
     });
     const latestAuditByPost: Record<string, any> = {};
