@@ -20,6 +20,7 @@ import { runOutreach } from './outreach';
 import { runSpeedFixes } from './speed';
 import { authorNames, pickAuthor, wpAuthorId } from '../authors';
 import { makeCover } from '../cover';
+import { publishDraftImages } from '../inlineMedia';
 import { saveFile } from '../storage';
 import { callClaude } from '../anthropic';
 import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh, needsExpertReview, reviewOverdue, REVIEW_HOURS } from './core';
@@ -38,6 +39,9 @@ const update = (id, data) => prisma.blog_schedule.update({ where: { id }, data: 
 // Writes the draft for one calendar row (the same pipeline as the Keywords tab).
 async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
   await update(row.id, { status: 'drafting' });
+  // The partner the post goes out under is fixed when the draft is written, so the Word preview, the
+  // cover and the live post all show the same name.
+  const draftAuthor = row.author || (row.refresh_url ? null : pickAuthor(await authorNames()));
   const kw = await prisma.keywords.create({
     data: { batch_name: `Strategy #${row.strategy_id}`, keyword: row.main_keyword, notes: `Planned title: ${row.title}. Channels: ${JSON.parse(row.tags).join(', ')}.${row.refresh_url ? ` Refresh of ${row.refresh_url}.` : ''}${extraNotes ? `\n\n${extraNotes}` : ''}`, status: 'generating' },
   });
@@ -76,6 +80,7 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
       keyword_plan: JSON.stringify(result.keywordPlan || null),
       linkedin_post: result.linkedin || null,
       length_target: result.lengthTarget ? JSON.stringify(result.lengthTarget) : null,
+      author: draftAuthor,
       status: 'pending_review',
       target_wp_post_id: null,
     },
@@ -93,6 +98,7 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
     keyword_id: kw.id,
     draft_id: draft.id,
     status: 'planned',
+    author: draftAuthor,
     cta: result.cta ? JSON.stringify(result.cta) : row.cta || null,
     fact_check: inlineClean ? JSON.stringify({ inlineStamp: draft.updated_at, inlineModel: result.factCheck.model, inlineClaims: result.factCheck.checks.length }) : null,
   });
@@ -219,10 +225,12 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   // (the fact checker's own corrections do not count as a review).
   const reviewed = Boolean(row.reviewed_at) || draft.status === 'approved' || Boolean(row.review_started && draft.updated_at > row.review_started && draft.updated_at !== (row.fact_check ? JSON.parse(row.fact_check).stamp : null));
   let post;
-  let authorName = row.author || null;
+  let authorName = row.author || checked.author || null;
   let authorId: number | null = null;
-  if (!row.refresh_url) authorName = row.author || pickAuthor(await authorNames());
-  const html = `${withByline(checked.content_html, authorName, row.expert_reviewer)}\n${faqSchema(checked.content_html) || ''}\n${expertSchema({ title: checked.title, author: authorName, reviewer: row.expert_reviewer }) || ''}`;
+  if (!row.refresh_url) authorName = authorName || pickAuthor(await authorNames());
+  // Images a person placed in the article move to the WordPress Media Library first.
+  const inline = await publishDraftImages(checked.id, checked.content_html || '');
+  const html = `${withByline(inline.html, authorName, row.expert_reviewer)}\n${faqSchema(checked.content_html) || ''}\n${expertSchema({ title: checked.title, author: authorName, reviewer: row.expert_reviewer }) || ''}`;
   if (row.refresh_url) {
     const { json: found } = await wpRequest('GET', '/wp/v2/posts', { query: { slug: new URL(row.refresh_url).pathname.split('/').filter(Boolean).pop(), _fields: 'id,link' } });
     if (!found?.[0]) throw new Error(`Refresh target not found: ${row.refresh_url}`);
@@ -258,6 +266,7 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   await step('seRankingTracking', () => addTrackedKeyword(row.main_keyword));
   await step('internalLinks', () => addInternalLinks(post.link, checked.title, row.main_keyword));
 
+  if (inline.uploaded.length) log.inlineImages = { ok: true, result: `${inline.uploaded.length} image(s) in the Media Library${inline.uploaded.some((u) => u.reused) ? ' (some reused from an earlier attempt)' : ''}` };
   log.author = authorName ? { ok: Boolean(authorId), result: authorId ? `${authorName} (WordPress user ${authorId})` : `${authorName} is not a WordPress user yet, so the default author was used` } : undefined;
   await update(row.id, { status: 'published', approval_mode: reviewed ? 'reviewed' : 'auto', wp_post_url: post.link, post_publish_log: JSON.stringify(log), hold_reasons: null, author: authorName });
   await activity.log('schedule.published', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}" ${reviewed ? `approved by a reviewer${row.expert_reviewer ? ` (${row.expert_reviewer})` : ''}` : 'auto-approved after 48 hours with no rejection'}, by ${authorName || 'the default author'}: ${post.link}` });

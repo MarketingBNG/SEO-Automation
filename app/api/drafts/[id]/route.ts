@@ -67,6 +67,9 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
     await tx.facts.deleteMany({ where: { draft_id: nid } });
     await tx.draft_images.deleteMany({ where: { draft_id: nid } });
     await tx.drafts.deleteMany({ where: { id: nid } });
+    // A strategy blog whose draft is deleted goes back to planned, so the autopilot writes it again.
+    await tx.blog_schedule.updateMany({ where: { draft_id: nid, status: { in: ['drafting', 'in_review'] } }, data: { status: 'planned', review_started: null, reviewed_at: null, fact_check: null } });
+    await tx.blog_schedule.updateMany({ where: { draft_id: nid }, data: { draft_id: null } });
     await tx.keywords.updateMany({
       where: { id: existing.keyword_id, status: { in: ['drafted', 'failed'] } },
       data: { status: 'pending', error: null },

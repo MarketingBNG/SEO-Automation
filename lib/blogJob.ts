@@ -9,6 +9,7 @@ import { startTimer, endTimer, setStage, timerFor } from './jobTimer';
 import * as activity from './activity';
 import { progressWriter } from './strategy/jobs';
 import { blogRuns } from './blogRuns';
+import { authorNames, pickAuthor } from './authors';
 import { startedAt } from './jobTimer';
 
 export async function runBlogJob(keyword: any, controller: AbortController, send: (evt: any) => void = () => {}) {
@@ -71,6 +72,8 @@ export async function runBlogJob(keyword: any, controller: AbortController, send
         keyword_plan: JSON.stringify(result.keywordPlan || null),
         linkedin_post: result.linkedin || null,
         length_target: result.lengthTarget ? JSON.stringify(result.lengthTarget) : null,
+        // The partner it will be published under is fixed now, so previews match the live post.
+        author: pickAuthor(await authorNames()),
         status: 'pending_review',
       },
     });

@@ -52,6 +52,7 @@ model drafts {
   people_also_ask     String? // JSON
   keyword_plan        String? // JSON
   linkedin_post       String? // ready-to-post LinkedIn text for the blog
+  author              String? // partner the post is (or will be) published under
   length_target       String? // JSON { min, max, median, basedOn } from the pages ranking now
   keyword             keywords       @relation(fields: [keyword_id], references: [id])
   facts               facts[]
@@ -162,6 +163,8 @@ model image_library {
   mime_type    String?
   width        Int?
   height       Int?
+  wp_media_id  Int? // Media Library copy, once the image has been published
+  wp_url       String?
   draft_images draft_images[]
 }
 
