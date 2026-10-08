@@ -9,6 +9,9 @@ import { aiLeftovers, needsExpertReview, faqSchema } from '@/lib/strategy/core';
 import { CREDENTIAL, expertReviewers, requireExpert } from '@/lib/reviewers';
 import { withByline, expertSchema } from '@/lib/byline';
 import { authorNames, pickAuthor, wpAuthorId } from '@/lib/authors';
+import { publishDraftImages } from '@/lib/inlineMedia';
+import { makeCover } from '@/lib/cover';
+import { saveFile } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 
@@ -40,15 +43,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   try {
-    let featuredMediaId;
-    if (draft.featured_image_path) {
-      featuredMediaId = await uploadFeaturedImage(draft.featured_image_path);
-    }
-
     const keyword = kw;
-    const author = pickAuthor(await authorNames());
+    const author = draft.author || pickAuthor(await authorNames());
+    if (!draft.author) await prisma.drafts.update({ where: { id: nid }, data: { author } });
     const authorId = await wpAuthorId(author).catch(() => null);
-    const contentHtml = `${withByline(draft.content_html, author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null }) || ''}`;
+
+    // The cover: the uploaded one, or the branded cover made from the title and author (the same
+    // one the preview and the Word file show).
+    let imageKey = draft.featured_image_path;
+    if (!imageKey) {
+      imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(keyword || draft.title)}.png`, await makeCover(draft.title, author), 'image/png').catch(() => null);
+      if (imageKey) await prisma.drafts.update({ where: { id: nid }, data: { featured_image_path: imageKey } });
+    }
+    const featuredMediaId = imageKey ? await uploadFeaturedImage(imageKey) : undefined;
+
+    // Images a person placed in the article move to the WordPress Media Library first.
+    const inline = await publishDraftImages(nid, draft.content_html || '');
+    const contentHtml = `${withByline(inline.html, author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null }) || ''}`;
     const post: any = await publishPost({
       title: draft.title,
       contentHtml,

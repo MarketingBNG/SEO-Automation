@@ -6,8 +6,16 @@ export function withByline(html: string, author?: string | null, reviewer?: stri
   const parts = [author ? `By <strong>${author}</strong>` : '', reviewer ? `Reviewed by <strong>${reviewer}</strong>` : '', reviewer ? `Last reviewed ${date}` : ''].filter(Boolean);
   const line = `<p class="uic-byline">${parts.join('. ')}.</p>`;
   const clean = String(html).replace(/<p[^>]*>\s*By \[?[^<]*Reviewed by[^<]*<\/p>\s*/i, '');
-  const i = clean.indexOf('</p>');
-  return i > 0 ? clean.slice(0, i + 4) + '\n' + line + clean.slice(i + 4) : line + clean;
+  // After the first paragraph that has words (an image-only paragraph at the top is skipped).
+  const re = /<p\b[^>]*>([\s\S]*?)<\/p>/gi;
+  let at = -1;
+  for (let m = re.exec(clean); m; m = re.exec(clean)) {
+    if (m[1].replace(/<[^>]+>/g, '').trim()) {
+      at = m.index + m[0].length;
+      break;
+    }
+  }
+  return at > 0 ? clean.slice(0, at) + '\n' + line + clean.slice(at) : line + clean;
 }
 
 // Article schema with the author and the expert reviewer (E-E-A-T signals for tax content).

@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { CheckCircle2, ExternalLink, FolderOpen, Loader2, Save, Send, ThumbsDown, ThumbsUp, Trash2, Upload, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { CheckCircle2, Download, ExternalLink, FolderOpen, Loader2, Save, Send, ThumbsDown, ThumbsUp, Trash2, Upload, X } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { ArticleImages } from '@/components/shared/article-images';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -57,10 +58,16 @@ export default function DraftsTab() {
                 <td className={`${TD_MUTED} tabular-nums`}>{d.word_count || '-'}</td>
                 <td className={`${TD_MUTED} whitespace-nowrap`}>{d.updated_at}</td>
                 <td className={TD}>
-                  <Button variant="outline" size="sm" onClick={() => setOpenId(d.id)}>
-                    <FolderOpen />
-                    Open
-                  </Button>
+                  <div className="flex flex-wrap gap-1">
+                    <Button variant="outline" size="sm" onClick={() => setOpenId(d.id)}>
+                      <FolderOpen />
+                      Open
+                    </Button>
+                    <a href={`/api/drafts/${d.id}/download`} download className={buttonVariants({ variant: 'outline', size: 'sm' })} title="The blog as a Word file, laid out as it will be published">
+                      <Download />
+                      Word
+                    </a>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -383,6 +390,10 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
               </Button>
             </>
           )}
+          <a href={`/api/drafts/${draft.id}/download`} download className={buttonVariants({ variant: 'outline' })} title={dirty ? 'The Word file is made from the saved copy. Save first to include your changes.' : 'The blog as a Word file, laid out as it will be published (cover, title, author line, article, FAQ, call to action)'}>
+            <Download />
+            Download as Word
+          </a>
           <Button variant="destructive" className="ml-auto" onClick={deleteDraft} disabled={saving}>
             <Trash2 />
             Delete draft
@@ -391,16 +402,28 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
 
         <Separator />
 
+        <ArticleImages
+          draftId={draft.id}
+          dirty={dirty}
+          published={draft.status === 'published'}
+          refreshKey={draft.updated_at || ''}
+          onChanged={(msg) => {
+            setMessage(msg);
+            loadDraft(true);
+          }}
+        />
+
+        <Separator />
+
         <div>
-          <FieldLabel>Creative / featured image</FieldLabel>
-          {draft.featured_image_path && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              className="mb-2 max-h-72 max-w-full rounded-lg border object-contain"
-              src={`/api/uploads/${draft.featured_image_path.split(/[\\/]/).pop()}`}
-              alt="creative"
-            />
-          )}
+          <FieldLabel>Cover (featured image)</FieldLabel>
+          <p className="mb-2 text-xs text-muted-foreground">
+            {draft.featured_image_path
+              ? 'Your uploaded cover. It is shown on the blog page, in listings and on social shares.'
+              : `No cover uploaded, so this branded cover (title and author${draft.author ? `, ${draft.author}` : ''}) is used automatically. Upload your own to replace it.`}
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="mb-2 max-h-72 max-w-full rounded-lg border object-contain" src={`/api/drafts/${draft.id}/cover?v=${encodeURIComponent(draft.updated_at || '')}`} alt="Cover image" />
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               type="file"

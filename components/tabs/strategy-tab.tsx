@@ -725,6 +725,11 @@ function MonthRunning() {
               <td className={TD}>
                 {r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}
                 {r.author && <div className="text-xs text-muted-foreground">By {r.author}{r.expert_reviewer ? `, reviewed by ${r.expert_reviewer}` : ''}</div>}
+                {r.draft_id && (
+                  <a className="text-xs text-primary underline" href={`/api/drafts/${r.draft_id}/download`} download>
+                    Download as Word
+                  </a>
+                )}
                 {r.cta && <div className="text-xs text-muted-foreground">Call to action: {r.cta.service}</div>}
               </td>
               <td className={TD}>{factCheck(r)}</td>
