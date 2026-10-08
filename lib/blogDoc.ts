@@ -113,3 +113,73 @@ export async function renderBlogDocx(draftId: number): Promise<{ buffer: Buffer;
   const filename = `${seoSlug(draft.title || keyword || 'blog').slice(0, 60) || 'blog'}.docx`;
   return { buffer, filename };
 }
+
+// A post that is already live on the website, as a Word file in the same layout. Only pictures on
+// the company's own site are fetched (with a time and size limit); anything else is named.
+export async function renderLiveBlogDocx(inputUrl: string): Promise<{ buffer: Buffer; filename: string }> {
+  const site = new URL(SITE());
+  let url: URL;
+  try {
+    url = new URL(inputUrl);
+  } catch {
+    throw Object.assign(new Error('That is not a web address.'), { status: 400 });
+  }
+  if (url.hostname.replace(/^www\./, '') !== site.hostname.replace(/^www\./, '')) throw Object.assign(new Error('Only posts on the company website can be downloaded.'), { status: 400 });
+  const { findPostByUrl, wpRequest } = await import('./wordpress');
+  const post: any = await findPostByUrl(url.toString()).catch(() => null);
+  if (!post) throw Object.assign(new Error('That post was not found on the website.'), { status: 404 });
+  const plain = (s: string) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/&#8217;/g, '’').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  const title = plain(post.title?.rendered);
+  let content = String(post.content?.rendered || '');
+
+  const sameSite = (src: string) => {
+    try {
+      return new URL(src, site).hostname.replace(/^www\./, '') === site.hostname.replace(/^www\./, '');
+    } catch {
+      return false;
+    }
+  };
+  const fetchImage = async (src: string): Promise<string | null> => {
+    try {
+      const res = await fetch(new URL(src, site), { signal: AbortSignal.timeout(15000) });
+      const type = res.headers.get('content-type') || '';
+      if (!res.ok || !/^image\/(png|jpe?g|webp|gif)/i.test(type)) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf.length > 8 * 1024 * 1024 ? null : `data:${type.split(';')[0]};base64,${buf.toString('base64')}`;
+    } catch {
+      return null;
+    }
+  };
+  // Body pictures: srcset and lazy-load attributes are dropped, own-site sources embedded.
+  const srcs = [...new Set([...content.matchAll(/<img\b[^>]*\bsrc="([^"]+)"/gi)].map((m) => m[1]).filter(sameSite))].slice(0, 25);
+  const embedded = new Map<string, string>();
+  for (const src of srcs) {
+    const data = await fetchImage(src);
+    if (data) embedded.set(src, data);
+  }
+  content = content.replace(/\s(srcset|sizes|loading|decoding)="[^"]*"/gi, '').replace(/<img\b([^>]*)\bsrc="([^"]+)"/gi, (m, pre, src) => (embedded.has(src) ? `<img${pre}src="${embedded.get(src)}"` : m));
+
+  let cover: string | null = null;
+  let coverAltText: string | null = null;
+  if (post.featured_media) {
+    const media: any = await wpRequest('GET', `/wp/v2/media/${post.featured_media}`, { query: { _fields: 'source_url,alt_text' } }).then((r: any) => r.json).catch(() => null);
+    if (media?.source_url && sameSite(media.source_url)) cover = await fetchImage(media.source_url);
+    coverAltText = media?.alt_text || null;
+  }
+  const authorName = post.author ? await wpRequest('GET', `/wp/v2/users/${post.author}`, { query: { _fields: 'name' } }).then((r: any) => r.json?.name || null).catch(() => null) : null;
+  const html = blogDocHtml({
+    title,
+    meta: plain(post.excerpt?.rendered),
+    content,
+    author: null, // the live post already carries its byline
+    cover,
+    coverAlt: coverAltText,
+    url: post.link || url.toString(),
+    status: `Published${post.modified ? ` (last updated ${String(post.modified).slice(0, 10)})` : ''}${authorName ? `, author on WordPress: ${authorName}` : ''}`,
+    keyword: null,
+    words: plain(content).split(' ').filter(Boolean).length,
+    images: {},
+  });
+  const buffer = await htmlToDocx(html, { title: title || 'Blog', margins: { top: 720, bottom: 720, left: 900, right: 900 } });
+  return { buffer, filename: `${seoSlug(title || 'blog').slice(0, 60) || 'blog'}.docx` };
+}

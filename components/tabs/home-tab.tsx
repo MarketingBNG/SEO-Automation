@@ -217,7 +217,7 @@ export default function HomeTab() {
                 {data.recent.map((d: any) => (
                   <li key={d.id}>
                     <a className="font-medium text-primary hover:underline" href={d.wp_post_url} target="_blank" rel="noreferrer">{d.title}</a>
-                    <div className="text-xs text-muted-foreground">{d.author ? `By ${d.author}. ` : ''}{fmtDate(d.updated_at)}. <Link className="underline" href={`/?tab=drafts&draft=${d.id}`}>How it performs</Link></div>
+                    <div className="text-xs text-muted-foreground">{d.author ? `By ${d.author}. ` : ''}{fmtDate(d.updated_at)}. <Link className="underline" href={`/?tab=drafts&draft=${d.id}`}>How it performs</Link> · <a className="underline" href={`/api/wordpress/download?url=${encodeURIComponent(d.wp_post_url)}`} download>Download Word</a></div>
                   </li>
                 ))}
               </ul>

@@ -22,7 +22,15 @@ async function tick() {
   ]);
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
-  await runDaily(now).catch((e) => console.error('Scheduler: daily run failed:', e.message));
+  // Heartbeat for the status light in the dashboard header: written at the start of every tick
+  // (even when a long run from an earlier tick is still going), and the outcome when it ends.
+  await settings.set('scheduler_heartbeat', now.toISOString()).catch(() => {});
+  const daily: any = await runDaily(now).catch((e) => ({ errors: [`Daily run failed: ${e.message}`] }));
+  if (daily && !daily.skipped) {
+    const errors: string[] = [...(daily.errors || [])];
+    for (const k of ['fixes', 'outreach', 'speed', 'siteChecks', 'meetings', 'rankAlerts']) if (daily[k]?.error) errors.push(`${k}: ${daily[k].error}`);
+    await settings.set('scheduler_last_run', JSON.stringify({ at: new Date().toISOString(), errors: errors.slice(0, 10), opened: daily.opened || 0, published: daily.published || 0, drafted: daily.drafted || 0, held: daily.held || 0 })).catch(() => {});
+  }
   // A blog cut off by a server restart (for example a deploy) is started again automatically.
   const { resumeInterruptedBlog } = await import('./blogJob');
   await resumeInterruptedBlog().catch((e: any) => console.error('Scheduler: blog resume failed:', e.message));

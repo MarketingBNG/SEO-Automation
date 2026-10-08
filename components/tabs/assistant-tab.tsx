@@ -101,21 +101,35 @@ export function PreviewView({ preview }: { preview: any }) {
   );
 }
 
+const MAX_PARALLEL = 5;
+type Run = { key: string; convId: any; live: any[]; error: string | null; controller: AbortController };
+
 export default function AssistantTab({ seed }: { seed: { text: string; nonce: number } | null }) {
   const [conversations, setConversations] = useState<any[]>([]);
   const [conv, setConv] = useState<any>(null);
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<any[]>([]);
-  const [running, setRunning] = useState(false);
+  // Several chats can work at the same time (up to MAX_PARALLEL). Each running chat keeps its own
+  // live stream here; the screen shows the one you are looking at, and you can switch freely.
+  const runsRef = useRef(new Map<string, Run>());
+  // A copy of the running chats for rendering (refs are not read during render).
+  const [runs, setRuns] = useState<Run[]>([]);
+  const bump = () => setRuns([...runsRef.current.values()].map((r) => ({ ...r })));
+  const newKeyRef = useRef(0);
+  const [viewKey, setViewKeyState] = useState<string | null>(null);
+  const viewKeyRef = useRef<string | null>(null);
+  const setViewKey = (k: any) => {
+    const v = k === null || k === undefined ? null : String(k);
+    viewKeyRef.current = v;
+    setViewKeyState(v);
+  };
   const { data: session } = useSession();
   const firstName = String(session?.user?.name || '').trim().split(/\s+/)[0] || '';
   // Picked after mount so the server and browser render the same first frame.
   const [suggestions, setSuggestions] = useState<string[]>(ASSISTANT_SUGGESTIONS.slice(0, 4));
-  const [live, setLive] = useState<any[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [uiError, setError] = useState<string | null>(null);
   const [decisions, setDecisions] = useState<Record<string, any>>({});
   const currentIdRef = useRef<any>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -148,45 +162,52 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [conv, live]);
+  }, [conv, viewKey, runs]);
 
   function openConversation(id: any) {
-    if (running) return;
     currentIdRef.current = id;
+    setViewKey(id);
     setDecisions({});
     setError(null);
     loadConv(id);
   }
 
   function newChat() {
-    if (running) return;
     currentIdRef.current = null;
+    setViewKey(null);
     setConv(null);
     setDecisions({});
     setError(null);
   }
 
-  function appendLive(kind: string, text: string) {
-    setLive((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && last.kind === kind) return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-      return [...prev, { kind, text }];
-    });
+  function appendLive(run: Run, kind: string, text: string) {
+    const prev = run.live;
+    const last = prev[prev.length - 1];
+    run.live = last && last.kind === kind ? [...prev.slice(0, -1), { ...last, text: last.text + text }] : [...prev, { kind, text }];
   }
 
-  function handleEvent(e: any) {
+  function handleEvent(run: Run, e: any) {
+    const setLive = (f: (prev: any[]) => any[]) => {
+      run.live = f(run.live);
+    };
     switch (e.type) {
       case 'conversation':
-        currentIdRef.current = e.id;
+        run.convId = e.id;
+        // A new chat you are looking at takes its real id, so switching back finds it.
+        if (viewKeyRef.current === run.key) {
+          currentIdRef.current = e.id;
+          setViewKey(e.id);
+        }
+        loadList();
         break;
       case 'text_delta':
-        appendLive('assistant', e.text);
+        appendLive(run, 'assistant', e.text);
         break;
       case 'progress_start':
         setLive((prev) => [...prev, { kind: 'progress', text: '' }]);
         break;
       case 'progress_delta':
-        appendLive('progress', e.text);
+        appendLive(run, 'progress', e.text);
         break;
       case 'assistant_turn_end':
         setLive((prev) => [...prev, { kind: 'break' }]);
@@ -208,14 +229,15 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
         );
         break;
       case 'error':
-        setError(e.error);
+        run.error = e.error;
         break;
       default:
         break;
     }
+    bump();
   }
 
-  async function consume(res: Response) {
+  async function consume(run: Run, res: Response) {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -225,24 +247,35 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() as string;
-      for (const line of lines) if (line.trim()) handleEvent(JSON.parse(line));
+      for (const line of lines) if (line.trim()) handleEvent(run, JSON.parse(line));
     }
   }
 
-  async function finishRun() {
-    setRunning(false);
-    abortRef.current = null;
-    if (currentIdRef.current) await loadConv(currentIdRef.current);
-    setLive([]);
+  async function finishRun(run: Run) {
+    const shown = viewKeyRef.current === String(run.convId ?? run.key);
+    if (shown && run.convId) await loadConv(run.convId);
+    if (shown && run.error) setError(run.error);
+    runsRef.current.delete(run.key);
+    bump();
     loadList();
   }
 
   async function stream(url: string, body: any, optimisticUser?: any) {
-    setRunning(true);
+    if (runsRef.current.size >= MAX_PARALLEL) {
+      setError(`${MAX_PARALLEL} chats are already working. Wait for one to finish, or stop one.`);
+      return;
+    }
     setError(null);
-    setLive(optimisticUser ? [optimisticUser] : []);
     const controller = new AbortController();
-    abortRef.current = controller;
+    const key = body.conversationId ? String(body.conversationId) : `new-${++newKeyRef.current}`;
+    const run: Run = { key, convId: body.conversationId || null, live: optimisticUser ? [optimisticUser] : [], error: null, controller };
+    runsRef.current.set(key, run);
+    if (!body.conversationId) {
+      currentIdRef.current = null;
+      setConv(null);
+      setViewKey(key);
+    }
+    bump();
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -254,17 +287,17 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
         const json = await res.json().catch(() => ({}));
         throw new Error(json.error || `Request failed (${res.status})`);
       }
-      await consume(res);
+      await consume(run, res);
     } catch (err: any) {
-      if (err.name !== 'AbortError') setError(err.message);
+      if (err.name !== 'AbortError') run.error = err.message;
     } finally {
-      await finishRun();
+      await finishRun(run);
     }
   }
 
   async function send(textArg?: string, conversationId?: any) {
     const text = (textArg ?? input).trim();
-    if (running || attachments.some((a) => a.uploading)) return;
+    if (attachments.some((a) => a.uploading)) return;
     const images = attachments.filter((a) => a.kind === 'image' && a.id);
     const docs = attachments.filter((a) => a.kind === 'document');
     if (!text && !images.length && !docs.length) return;
@@ -277,7 +310,9 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
     await stream(
       '/api/assistant/chat',
       {
-        conversationId: conversationId === undefined ? currentIdRef.current : conversationId,
+        // A chat that is still working cannot take a second message, so the new one starts its
+        // own chat and both run at the same time.
+        conversationId: conversationId === undefined ? ([...runsRef.current.values()].some((r) => String(r.convId ?? r.key) === viewKeyRef.current) ? null : currentIdRef.current) : conversationId,
         message: [text, docText].filter(Boolean).join('\n\n'),
         imageIds: images.map((a) => a.id),
       },
@@ -363,6 +398,12 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
 
   const changesById = Object.fromEntries((conv?.changes || []).map((c: any) => [c.id, c]));
   const items = conv?.items || [];
+  // The chat on screen: its live stream if it is working.
+  const viewRun = runs.find((r) => String(r.convId ?? r.key) === viewKey) || null;
+  const running = Boolean(viewRun);
+  const live: any[] = viewRun?.live || [];
+  const error = viewRun?.error || uiError;
+  const activeRuns = runs.length;
   // Searching while a tool (data lookup) is running, thinking while writing the answer.
   const lastLive = live[live.length - 1];
   const toolCount = live.filter((x) => x.kind === 'tool').length;
@@ -435,10 +476,15 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
   return (
     <div className="grid gap-4 lg:h-[calc(100svh-7.5rem)] lg:grid-cols-[260px_1fr]">
       <aside className="flex flex-col gap-3 rounded-xl border bg-card p-3 lg:min-h-0">
-        <Button onClick={newChat} disabled={running} className="w-full">
+        <Button onClick={newChat} disabled={activeRuns >= MAX_PARALLEL} className="w-full">
           <MessageSquarePlus />
           New chat
         </Button>
+        {activeRuns > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {activeRuns} of {MAX_PARALLEL} chats working. Open another chat or start a new one; they all keep running.
+          </p>
+        )}
         <div className="flex max-h-48 flex-col gap-0.5 overflow-y-auto lg:max-h-none lg:flex-1">
           {conversations.map((c) => (
             <button
@@ -620,21 +666,24 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
             }}
           />
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={running} title="Attach an image or a Word document">
+            <Button variant="outline" onClick={() => fileRef.current?.click()} title="Attach an image or a Word document">
               <Paperclip />
               Attach
             </Button>
-            {running ? (
-              <Button variant="destructive" onClick={() => abortRef.current?.abort()}>
+            {running && (
+              <Button variant="destructive" onClick={() => viewRun?.controller.abort()}>
                 <Square />
                 Stop
               </Button>
-            ) : (
-              <Button onClick={() => send()} disabled={!input.trim() && !attachments.some((a) => !a.uploading)}>
-                <Send />
-                Send
-              </Button>
             )}
+            <Button
+              onClick={() => send()}
+              disabled={(!input.trim() && !attachments.some((a) => !a.uploading)) || activeRuns >= MAX_PARALLEL}
+              title={running ? 'This chat is still working, so your message starts a new chat that runs alongside it' : undefined}
+            >
+              <Send />
+              {running ? 'Send as new chat' : 'Send'}
+            </Button>
           </div>
         </div>
       </section>
