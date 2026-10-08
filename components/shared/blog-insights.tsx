@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { BarChart3, Check, Loader2, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { BarChart3, Check, Download, Loader2, X } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { cn } from 'cn';
@@ -485,7 +485,12 @@ export function BlogTable({ onOpen }: { onOpen: (row: any) => void }) {
                   <td className={cn(tdMuted, 'tabular-nums')}>{fmt(r.impressions)}</td>
                   <td className={tdMuted}>{r.position ?? '-'}</td>
                   <td className={tdMuted}>{r.topKeywords.map((k: any) => `${k.query} (#${k.position})`).join(', ') || '-'}{r.keywordCount > 3 ? ` +${r.keywordCount - 3} more` : ''}</td>
-                  <td className={td}><Button type="button" variant="outline" size="sm" onClick={() => onOpen(r)}><BarChart3 />Analytics</Button></td>
+                  <td className={td}>
+                    <div className="flex flex-wrap gap-1">
+                      <Button type="button" variant="outline" size="sm" onClick={() => onOpen(r)}><BarChart3 />Analytics</Button>
+                      <a href={`/api/wordpress/download?url=${encodeURIComponent(r.url)}`} download className={buttonVariants({ variant: 'outline', size: 'sm' })} title="The live post as a Word file"><Download />Download Word</a>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </DataTable>

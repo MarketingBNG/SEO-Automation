@@ -17,6 +17,7 @@ import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { JobProgress } from '@/components/shared/job-progress';
 import { PeekingOctopus } from '@/components/shared/peeking-octopus';
+import { StatusLight } from '@/components/shared/status-light';
 
 import HomeTab from '@/components/tabs/home-tab';
 import AssistantTab from '@/components/tabs/assistant-tab';
@@ -189,6 +190,7 @@ export default function Dashboard() {
             <RefreshCw className="size-4" />
             <span className="hidden md:inline">Refresh</span>
           </Button>
+          <StatusLight />
           <ThemeToggle />
         </header>
         {/* Strategy and blog progress, visible from every tab. */}

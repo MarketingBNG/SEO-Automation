@@ -429,14 +429,15 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
               <FieldLabel>Meta description</FieldLabel>
               <Input type="text" value={meta} onChange={(e) => setMeta(e.target.value)} />
             </div>
-            <div className="flex flex-1 flex-col">
-              <FieldLabel>Content (HTML)</FieldLabel>
-              <Textarea rows={16} className="min-h-80 flex-1 font-mono text-xs [field-sizing:fixed]" value={content} onChange={(e) => setContent(e.target.value)} />
-            </div>
+            {/* The raw HTML is long, so it stays folded until someone needs to edit it. */}
+            <details className="rounded-lg border p-2">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Edit content (HTML){dirty ? ' · unsaved changes' : ''}</summary>
+              <Textarea rows={12} className="mt-2 h-72 font-mono text-xs [field-sizing:fixed]" value={content} onChange={(e) => setContent(e.target.value)} />
+            </details>
           </div>
           <div className="flex min-w-0 flex-col">
             <FieldLabel>Preview</FieldLabel>
-            <SafeHtml className={`prose-article ${PREVIEW_BOX} max-h-[640px] flex-1 bg-background`} html={previewHtml} />
+            <SafeHtml className={`prose-article ${PREVIEW_BOX} max-h-[480px] flex-1 bg-background`} html={previewHtml} />
           </div>
         </div>
 
