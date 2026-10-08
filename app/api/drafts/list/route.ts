@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { methodNotAllowed } from '../../_lib/http';
 import { getMe } from '@/lib/auth';
+import { publishPlan } from '@/lib/strategy/core';
 
 // Where a draft came from, from the batch its keyword was queued in.
 function sourceOf(batch: string | null, kind: string) {
@@ -25,8 +26,13 @@ export async function GET() {
   // Origin and history are for the admin (and those with admin rights) only.
   const me = await getMe();
   const admin = me?.role === 'admin' || me?.role === 'tester';
-  const sched = admin ? await prisma.blog_schedule.findMany({ where: { draft_id: { in: rows.map((r) => r.id) } }, select: { draft_id: true, revisions: true, status: true, reviewed_by: true, rejected_by: true } }) : [];
+  const ids = rows.map((r) => r.id);
+  const sched = admin ? await prisma.blog_schedule.findMany({ where: { draft_id: { in: ids } } }) : [];
   const byDraft = new Map(sched.map((s) => [s.draft_id, s]));
+  // When each published draft actually went to the website (from the activity log).
+  const pubLog = admin ? await prisma.activity_log.findMany({ where: { action: { in: ['wordpress.published', 'schedule.published'] }, entity_type: 'draft', entity_id: { in: ids } }, select: { entity_id: true, created_at: true }, orderBy: { id: 'asc' } }) : [];
+  const publishedAt = new Map(pubLog.map((l) => [l.entity_id, l.created_at]));
+  const ist = (s: string) => new Date(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z')).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
   return NextResponse.json(
     rows.map(({ keyword, ...d }: any) => {
       const base = { ...d, keyword: keyword?.keyword ?? null, batch_name: keyword?.batch_name ?? null };
@@ -37,11 +43,21 @@ export async function GET() {
         origin: {
           createdBy: 'dashboard',
           source: sourceOf(keyword?.batch_name ?? null, d.kind),
-          created: d.created_at,
+          created: ist(d.created_at),
           rewrites: s?.revisions || 0,
           reviewedBy: s?.reviewed_by || null,
           rejectedBy: s?.rejected_by || null,
           onWebsite: d.wp_post_url || null,
+          // The website date: when it went up, or when it is due to go up.
+          websiteDate: d.wp_post_url
+            ? publishedAt.get(d.id) || s?.status === 'published'
+              ? `Published on the website ${ist(publishedAt.get(d.id) || s!.updated_at)}.`
+              : 'Published on the website (date not recorded).'
+            : s
+              ? `Website date: ${publishPlan(s, new Date()).headline}. ${publishPlan(s, new Date()).detail}`
+              : d.status === 'approved'
+                ? 'Website date: not scheduled. It goes up only when someone presses Publish in Drafts & Review.'
+                : 'Website date: not scheduled. Approve it, then press Publish in Drafts & Review.',
           autoRepairs: d.repair_attempts || 0,
         },
       };
