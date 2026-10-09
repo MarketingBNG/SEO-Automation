@@ -46,6 +46,40 @@ async function gatherInputs() {
 
 const SYSTEM = `You are a senior website strategist and conversion copywriter for USAIndiaCFO (usaindiacfo.com), a cross-border finance, tax, accounting and compliance firm for Indian founders with US companies, US companies with Indian subsidiaries, and NRIs. You plan the company's NEW website: the pages, the sections on each page in order, the main navigation tabs, and the final copy for every section. Ground every choice in the data given (what people search for, which pages already earn clicks, the services, the strategy keywords) and in web research on 4 to 6 direct competitors' websites (look at their home pages and service pages). Rules: the home page hero opens with ONE clear headline line (under 12 words) that says what the business does and for whom, then a one-sentence subline and the primary call to action. Plain, specific, credible words; no hype, no AI filler, no em dashes. Never invent facts, client names, numbers, awards or testimonials: where real proof is needed write a bracketed note for the team, e.g. [Add 3 real client quotes with name, company and permission]. Write in English.`;
 
+// Escapes a double quote inside a string when the next non-space character cannot end a JSON string.
+export function fixStrayQuotes(t: string) {
+  let out = '';
+  let inStr = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inStr && c === '\\') { out += c + (t[i + 1] ?? ''); i++; continue; }
+    if (c === '"') {
+      if (!inStr) { inStr = true; out += c; continue; }
+      const next = t.slice(i + 1).match(/^\s*(.)/)?.[1];
+      if (next && !',:}]'.includes(next)) { out += '\\"'; continue; }
+      inStr = false; out += c; continue;
+    }
+    if (inStr && c === '\n') { out += '\\n'; continue; }
+    out += c;
+  }
+  return out;
+}
+
+async function parsePlan(text: string) {
+  try {
+    return parseJson(text);
+  } catch (first: any) {
+    const raw = (text.match(/===JSON===([\s\S]*?)(?:===END===|$)/)?.[1] ?? text).trim();
+    try {
+      return parseJson(`===JSON===${fixStrayQuotes(raw)}===END===`);
+    } catch {
+      // Last resort: a short pass with no web search that only repairs the JSON.
+      const fix = (await callClaude('You repair broken JSON. Keep every value and its wording exactly; only fix syntax (escape quotes, add missing commas or brackets). Return ONLY the JSON between ===JSON=== and ===END===.', [{ role: 'user', content: `Parser error: ${first?.message}\n\n${raw}` }], undefined, { maxUses: 1, effort: 'low', feature: 'strategy' })) as { text: string };
+      return parseJson(fix.text);
+    }
+  }
+}
+
 export async function runSitePlan(actor?: string | null, brief = '') {
   if (g.__sitePlanRun) throw Object.assign(new Error('A plan is already being made.'), { status: 409 });
   g.__sitePlanRun = true;
@@ -60,9 +94,9 @@ export async function runSitePlan(actor?: string | null, brief = '') {
  "pages":[{"name":"Home","slug":"/","purpose":"...","primaryKeyword":"...","sections":[{"name":"Hero","purpose":"...","layout":"what it looks like: columns, cards, image, form","content":"the final copy as HTML (<h2>, <h3>, <p>, <ul>), ready to paste"}]}],
  "competitors":[{"name":"...","url":"https://...","takeaway":"what to learn or avoid"}],
  "notes":["things the team must supply: photos, client quotes, numbers, licences"]}
-Plan every page the new site needs (at least: Home, About Us, each core service, Pricing or How we work, Resources/Blog, FAQ, Contact; add Testimonials, Events or Webinars, Careers, Industries or Case studies only where they earn their place). For each page give every section in order with its full copy.`;
+Plan every page the new site needs (at least: Home, About Us, each core service, Pricing or How we work, Resources/Blog, FAQ, Contact; add Testimonials, Events or Webinars, Careers, Industries or Case studies only where they earn their place). For each page give every section in order with its full copy. Inside any string value never use a double quote: use single quotes for HTML attributes and quotations, so the JSON stays valid.`;
     const { text } = (await callClaude(SYSTEM, [{ role: 'user', content: prompt }], undefined, { maxUses: 15, effort: 'high', feature: 'strategy' })) as { text: string };
-    const plan = parseJson(text);
+    const plan = await parsePlan(text);
     await settings.set('site_plan', JSON.stringify({ ...plan, inputsUsed: { searches: inputs.searches?.length || 0, pages: inputs.pages?.length || 0, currentPages: inputs.currentPages?.length || 0, keywords: inputs.strategyKeywords?.length || 0, errors: [inputs.searchConsoleError, inputs.wordpressError].filter(Boolean) }, madeAt: new Date().toISOString() }));
     await settings.set('site_plan_status', JSON.stringify({ state: 'ready', at: new Date().toISOString() }));
     await activity.log('siteplan.generated', { details: `${(plan.pages || []).length} pages planned`, actor });
