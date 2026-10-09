@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
-  Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, House, KeyRound, Lightbulb,
+  Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, House, KeyRound, LayoutTemplate, Lightbulb,
   LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
@@ -21,6 +21,7 @@ import { StatusLight } from '@/components/shared/status-light';
 
 import HomeTab from '@/components/tabs/home-tab';
 import TopicsTab from '@/components/tabs/topics-tab';
+import SitePlannerTab from '@/components/tabs/site-planner-tab';
 import AssistantTab from '@/components/tabs/assistant-tab';
 import KeywordsTab from '@/components/tabs/keywords-tab';
 import DraftsTab from '@/components/tabs/drafts-tab';
@@ -54,17 +55,20 @@ const TABS = [
   { key: 'meetings', label: 'Meeting insights', icon: Users, group: 'Workspace', hint: 'What clients said in meetings, for blog ideas' },
   { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Workspace', hint: 'Everything the dashboard did, with errors' },
   { key: 'team', label: 'Team', icon: ShieldCheck, group: 'Workspace', hint: '' },
+  { key: 'siteplan', label: 'Website Planner', icon: LayoutTemplate, group: 'Workspace', hint: 'Temporary: plan the new website (admin only)' },
   { key: 'settings', label: 'Settings', icon: Settings, group: 'Workspace', hint: 'Connections, blog rules, SE Ranking, AI credits' },
 ] as const;
 
 // Pages each role sees. Users only see the strategy and the assistant; the team page is for admins
 // and managers. (The server enforces the same rules on every action.)
+// The Website Planner is temporary and for the admin only; it disappears after its closing time.
+const PLANNER_UNTIL = Date.parse('2026-10-10T18:30:00Z');
 const HIDDEN: Record<Role, string[]> = {
   admin: [],
-  manager: [],
-  analyst: ['team'],
-  tester: ['team'],
-  user: ['keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
+  manager: ['siteplan'],
+  analyst: ['team', 'siteplan'],
+  tester: ['team', 'siteplan'],
+  user: ['siteplan', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
 };
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -114,7 +118,9 @@ export default function Dashboard() {
   }
 
   const who = useRole();
-  const visible = (key: string) => !HIDDEN[who.role].includes(key);
+  // Read once when the page loads (the clock is not read during render).
+  const [plannerClosed] = useState(() => Date.now() > PLANNER_UNTIL);
+  const visible = (key: string) => !HIDDEN[who.role].includes(key) && !(key === 'siteplan' && plannerClosed);
   // A page the role cannot see (for example from an old link) falls back to Home.
   const shown: TabKey = who.loaded && !visible(tab) ? 'home' : tab;
   const current = TABS.find((t) => t.key === shown)!;
@@ -218,6 +224,7 @@ export default function Dashboard() {
             <div key={k} className={shown === k ? 'block' : 'hidden'}>
               {k === 'home' && <HomeTab />}
               {k === 'topics' && <TopicsTab />}
+              {k === 'siteplan' && <SitePlannerTab />}
               {k === 'keywords' && <KeywordsTab />}
               {k === 'drafts' && <DraftsTab />}
               {k === 'audit' && <AuditTab />}
