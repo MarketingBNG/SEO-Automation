@@ -493,3 +493,60 @@ model topics {
 
   @@index([day])
 }
+
+// Associate Training: who is in it and at which level (1 to 5). Everyone starts at 1.
+model training_profiles {
+  id         Int     @id @default(autoincrement())
+  email      String  @unique
+  name       String?
+  level      Int     @default(1)
+  streak     Int     @default(0) // tests in a row at 80% or more; two in a row moves the level up
+  lesson_id  Int? // the lesson given to read today; tomorrow's test asks about it
+  active     Boolean @default(true)
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
+// One short study lesson per day per level, with the questions for the next day's test.
+model training_lessons {
+  id           Int     @id @default(autoincrement())
+  day          String // YYYY-MM-DD (IST)
+  level        Int
+  title        String
+  content_html String
+  sources      String? // JSON [{title,url}]
+  questions    String // JSON [{id,q,options[],answer,explain}]
+  created_at   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@unique([day, level])
+}
+
+// A person's test for a day: questions on the last lesson plus wrong answers due again.
+model training_tests {
+  id           Int     @id @default(autoincrement())
+  email        String
+  day          String
+  level        Int
+  lesson_id    Int?
+  questions    String // JSON, with answers (never sent to the page before submitting)
+  answers      String? // JSON {questionId: optionIndex}
+  score        Int?
+  total        Int
+  status       String  @default("open") // open | done | missed
+  created_at   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  submitted_at String?
+
+  @@unique([email, day])
+}
+
+// A question answered wrong (or not answered): asked again two days later until it is right.
+model training_misses {
+  id         Int     @id @default(autoincrement())
+  email      String
+  question   String // JSON question
+  due_day    String
+  tries      Int     @default(1)
+  cleared    Boolean @default(false)
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([email, cleared, due_day])
+}

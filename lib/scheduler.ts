@@ -39,6 +39,10 @@ async function tick() {
   const { topicsTick } = await import('./topics');
   await topicsTick(now).catch((e: any) => console.error('Scheduler: topics failed:', e.message));
 
+  // Associate Training: lessons and tests once a day after 09:00 IST.
+  const { trainingTick } = await import('./associateTraining');
+  await trainingTick(now).catch((e: any) => console.error('Scheduler: training failed:', e.message));
+
   if (now.getUTCDay() === 1 && (await settings.get('last_weekly_run')) !== today) {
     const r: any = await runWeekly(now).catch((e) => ({ error: e.message }));
     if (!r?.error) await settings.set('last_weekly_run', today);
