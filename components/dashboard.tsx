@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
-  Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, KeyRound, Lightbulb,
+  Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
   LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
@@ -30,6 +30,7 @@ import PerformanceTab from '@/components/tabs/performance-tab';
 import StrategyTab from '@/components/tabs/strategy-tab';
 import TrainingTab from '@/components/tabs/training-tab';
 import AssociateTrainingTab from '@/components/tabs/associate-training-tab';
+import WebsiteContentTab from '@/components/tabs/website-content-tab';
 import MeetingsTab from '@/components/tabs/meetings-tab';
 import ActivityTab from '@/components/tabs/activity-tab';
 import SettingsTab from '@/components/tabs/settings-tab';
@@ -51,6 +52,7 @@ const TABS = [
   { key: 'seo', label: 'SEO', icon: Search, group: 'Reports', hint: 'Google rankings and clicks' },
   { key: 'aeo', label: 'AEO', icon: MessageSquareQuote, group: 'Reports', hint: 'Answer engines' },
   { key: 'geo', label: 'GEO', icon: Globe, group: 'Reports', hint: 'AI search visibility' },
+  { key: 'sitecontent', label: 'Website Content', icon: PanelsTopLeft, group: 'Workspace', hint: 'Pages and blog posts of the new website, read through the content API' },
   { key: 'associates', label: 'Associate Training', icon: GraduationCap, group: 'Workspace', hint: 'A short lesson every day, a test the next day, levels that grow' },
   { key: 'training', label: 'Writing rules', icon: BrainCircuit, group: 'Workspace', hint: 'Training: the writing guidelines the blogs follow' },
   { key: 'meetings', label: 'Meeting insights', icon: Users, group: 'Workspace', hint: 'What clients said in meetings, for blog ideas' },
@@ -66,7 +68,7 @@ const HIDDEN: Record<Role, string[]> = {
   manager: [],
   analyst: ['team'],
   tester: ['team'],
-  user: ['keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
+  user: ['sitecontent', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
 };
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -222,6 +224,7 @@ export default function Dashboard() {
               {k === 'home' && <HomeTab />}
               {k === 'topics' && <TopicsTab />}
               {k === 'associates' && <AssociateTrainingTab />}
+              {k === 'sitecontent' && <WebsiteContentTab />}
               {k === 'keywords' && <KeywordsTab />}
               {k === 'drafts' && <DraftsTab />}
               {k === 'audit' && <AuditTab />}

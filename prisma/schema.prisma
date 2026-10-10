@@ -550,3 +550,28 @@ model training_misses {
 
   @@index([email, cleared, due_day])
 }
+
+// Content of the new custom website (pages and blog posts), read by the site through /api/site/v1.
+model site_content {
+  id               Int     @id @default(autoincrement())
+  type             String // page | post
+  slug             String  @unique // URL path, e.g. "/" or "/services/virtual-cfo" or "/blog/us-llc-tax-guide"
+  title            String
+  meta_description String?
+  canonical        String?
+  og_image         String? // JSON {url,alt,width,height}
+  schema           String? // JSON array of JSON-LD objects
+  sections         String? // JSON {key: {heading, html, items, image, cta}} for pages
+  html             String? // article body for posts
+  cover            String? // JSON {url,alt,width,height}
+  author           String? // JSON {name,bio,image}
+  categories       String? // JSON string[]
+  tags             String? // JSON string[]
+  status           String  @default("published") // published | draft
+  published_at     String?
+  updated_by       String?
+  created_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'::text)"))
+  updated_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'::text)"))
+
+  @@index([type, status])
+}
