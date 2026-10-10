@@ -5,7 +5,8 @@ import { actionFor, can, deniedMessage, isRole } from '@/lib/permissions';
 // Replaces the old middleware.js Basic Auth: every page and API route needs a signed-in
 // @usaindiacfo.com Google account. Vercel Cron calls carry `Authorization: Bearer CRON_SECRET`.
 
-const PUBLIC_PREFIXES = ['/api/auth', '/login'];
+// /api/site/v1 is the website's content API: it checks its own keys (SITE_API_KEY, SITE_IMPORT_KEY).
+const PUBLIC_PREFIXES = ['/api/auth', '/login', '/api/site/v1'];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
