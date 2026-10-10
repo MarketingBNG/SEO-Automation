@@ -73,6 +73,7 @@ export function actionFor(method: string, path: string): Action | null {
   if (/^\/api\/seranking\/topup/.test(p)) return 'settings.change';
   if (/^\/api\/assistant\/(chat|upload)/.test(p)) return 'assistant.ask';
   if (/^\/api\/assistant\/(decide|undo)/.test(p)) return 'website.change';
+  if (/^\/api\/associate-training/.test(p)) return 'manual.do'; // admin-only actions are checked in the route
   if (/^\/api\/strategy\/manual|^\/api\/strategy\/backlinks\//.test(p)) return 'manual.do';
   if (/^\/api\/strategy\/[^/]+\/approve/.test(p)) return 'strategy.approve';
   if (/^\/api\/strategy/.test(p)) return 'strategy.edit';
