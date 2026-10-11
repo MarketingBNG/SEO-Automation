@@ -12,7 +12,7 @@ import { useRole } from '@/hooks/use-role';
 import { jobsChanged } from '@/components/shared/job-progress';
 
 const fmt = (s?: string | null) => (s ? new Date(s).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : '');
-const KIND: Record<string, string> = { news: 'News', update: 'Rule or deadline change', evergreen: 'Evergreen' };
+const KIND: Record<string, string> = { news: 'News', update: 'News', evergreen: 'Evergreen' };
 
 function TopicCard({ t, canWork, onChanged }: { t: any; canWork: boolean; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
@@ -60,7 +60,7 @@ function TopicCard({ t, canWork, onChanged }: { t: any; canWork: boolean; onChan
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="font-semibold">{t.title}</div>
-          <div className="text-xs text-muted-foreground">{KIND[t.kind] || t.kind}{t.carried_over ? ' · carried over' : ''}</div>
+          <div className="text-xs text-muted-foreground">{KIND[t.kind] || t.kind}{t.published_at ? ` · published ${fmt(t.published_at)}` : ''}</div>
         </div>
         <button type="button" className="flex items-center gap-1 text-xs text-primary underline" onClick={() => setOpen((v) => !v)}>
           <ChevronDown className={`size-3 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -174,14 +174,19 @@ export default function TopicsTab() {
   }
 
   if (!data) return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Loading topics…</div>;
-  const days = [...new Set<string>((data.topics || []).map((t: any) => String(t.day)))];
+  const todays = (data.topics || []).filter((t: any) => t.day === data.today);
+  const news = todays.filter((t: any) => t.kind !== 'evergreen');
+  const evergreen = todays.filter((t: any) => t.kind === 'evergreen');
+  const earlier = (data.topics || []).filter((t: any) => t.day !== data.today);
+  const researchedToday = data.lastRun?.day === data.today && !data.lastRun?.error;
+  const list = (l: any[]) => <ul className="space-y-3">{l.map((t: any) => <TopicCard key={t.id} t={t} canWork={canWork} onChanged={load} />)}</ul>;
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Topics worth writing about</CardTitle>
+          <CardTitle>News from the last 24 hours</CardTitle>
           <CardDescription>
-            Every morning at 10:00 IST the dashboard searches the news and rule changes of the last two days for our audience and the approved strategy&apos;s keywords, and lists up to five topics with the keywords to use. Nothing new that day: yesterday&apos;s topics are carried over with a note. From a topic, have the dashboard write a blog (full research and fact check) or a LinkedIn article, or upload your own piece to audit it, compare it with the research, and make a finalized version.
+            Every morning at 10:00 IST the dashboard searches what was published in the last 24 hours that matters to our company, our services, our clients and our niche: rule, law and deadline changes, official notices and business news. Each one shows its source and publish time; anything older is left out. Press Research now any time for a fresh look. From a topic, have the dashboard write a blog (full research and fact check) or a LinkedIn article, or upload your own piece to audit it, compare it with the research, and make a finalized version.
             {data.lastRun?.at ? ` Last research: ${fmt(data.lastRun.at)}${data.lastRun.error ? ` (failed: ${data.lastRun.error})` : ''}.` : ' No research has run yet.'}
           </CardDescription>
           {canWork && (
@@ -193,24 +198,28 @@ export default function TopicsTab() {
             </CardAction>
           )}
         </CardHeader>
-        <CardContent className="space-y-5">
-          {days.length === 0 && <p className="text-sm text-muted-foreground">No topics yet. Press &quot;Research now&quot; or wait for the 10:00 IST run.</p>}
-          {days.map((day) => {
-            const list = data.topics.filter((t: any) => t.day === day);
-            return (
-              <div key={day}>
-                <div className="mb-2 flex flex-wrap items-baseline gap-2">
-                  <h3 className="font-semibold">{day === data.today ? 'Today' : day}</h3>
-                  {list[0]?.carried_over && <span className="text-xs text-amber-700 dark:text-amber-400">{list[0].carried_over}</span>}
-                </div>
-                <ul className="space-y-3">
-                  {list.map((t: any) => <TopicCard key={t.id} t={t} canWork={canWork} onChanged={load} />)}
-                </ul>
-              </div>
-            );
-          })}
+        <CardContent>
+          {news.length ? list(news) : <p className="text-sm text-muted-foreground">{researchedToday ? 'No news from the last 24 hours fits our company, services or clients. Use the evergreen topics below, or press Research now later in the day.' : 'Today has not been researched yet. Press Research now or wait for the 10:00 IST run.'}</p>}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Evergreen topics</CardTitle>
+          <CardDescription>Subjects that stay useful for our clients, from the strategy keywords and our services, not yet on the website. New ones every day.</CardDescription>
+        </CardHeader>
+        <CardContent>{evergreen.length ? list(evergreen) : <p className="text-sm text-muted-foreground">None for today yet.</p>}</CardContent>
+      </Card>
+
+      {earlier.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Earlier topics you started</CardTitle>
+            <CardDescription>Topics from earlier days that already have a blog, an article or an upload. Untouched old topics are not shown.</CardDescription>
+          </CardHeader>
+          <CardContent>{list(earlier)}</CardContent>
+        </Card>
+      )}
     </div>
   );
 }

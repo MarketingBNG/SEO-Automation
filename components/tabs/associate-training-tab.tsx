@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ChevronDown, GraduationCap, Loader2, RefreshCw, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { useRole } from '@/hooks/use-role';
 
 const fmtDay = (d?: string | null) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { dateStyle: 'medium', timeZone: 'UTC' }) : '');
 
@@ -117,16 +116,139 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
   );
 }
 
+// The questions of a test someone else will take: readable, not answerable.
+function TestPreview({ test }: { test: any }) {
+  return (
+    <div className="space-y-3">
+      <div className="text-sm text-muted-foreground">Only the associate can take this test.</div>
+      {test.questions.map((q: any, i: number) => (
+        <div key={q.id} className="rounded-lg border p-3 text-sm">
+          <div className="font-medium">
+            {i + 1}. {q.q} {q.repeat && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">Asked again</span>}
+          </div>
+          <ul className="mt-1 list-disc pl-6 text-muted-foreground">
+            {q.options.map((o: string, k: number) => (
+              <li key={k}>{o}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// One person's training page. readOnly: an admin or manager looking at an associate's page.
+function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: any; readOnly: boolean; onDone: () => void; openReview: (id: number) => void }) {
+  const lvl = data.levels[p.profile.level];
+  const who = readOnly ? p.name || p.email : 'you';
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <GraduationCap className="size-5" /> {readOnly ? `${p.name || p.email}` : 'Associate Training'}
+          </CardTitle>
+          <CardDescription>
+            {readOnly
+              ? 'This is the page the associate sees, read only.'
+              : `Every morning at 09:00 IST you get a short lesson to read: our company, our services and the latest news, rules and laws. The next morning there is a test on it. Questions you get wrong come back two days later. Two tests in a row at ${data.passPercent}% or more move you up a level.`}
+          </CardDescription>
+          <CardAction>
+            <div className="text-right text-sm">
+              <div className="font-semibold">Level {p.profile.level} of 5</div>
+              <div className="text-xs text-muted-foreground">
+                {lvl?.words} words, {lvl?.questions} questions a day
+              </div>
+            </div>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          {p.profile.streak > 0 ? `${p.profile.streak} test at ${data.passPercent}% or more. One more to move up.` : `Score ${data.passPercent}% or more in two tests in a row to move up.`}
+          {p.dueAgain > 0 && ` ${p.dueAgain} question(s) waiting to be asked again.`}
+          {!p.profile.active && ` Training is paused for ${who} by the admin.`}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Today&apos;s test</CardTitle>
+          <CardDescription>On yesterday&apos;s lesson, plus questions answered wrong earlier.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {p.test ? readOnly ? <TestPreview test={p.test} /> : <Test key={p.test.id} test={p.test} onDone={onDone} /> : <div className="text-sm text-muted-foreground">No test waiting. The first test comes the morning after the first lesson.</div>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Today&apos;s lesson</CardTitle>
+          <CardDescription>Read it today. Tomorrow&apos;s test asks about it.</CardDescription>
+        </CardHeader>
+        <CardContent>{p.lesson ? <Lesson l={p.lesson} open /> : <div className="text-sm text-muted-foreground">The lesson is being prepared. This takes a few minutes; the page refreshes by itself.</div>}</CardContent>
+      </Card>
+
+      {p.results.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{readOnly ? 'Results' : 'My results'}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <table className="w-full text-sm">
+              <thead className="text-left text-muted-foreground">
+                <tr>
+                  <th className="py-1">Day</th>
+                  <th>Level</th>
+                  <th>Score</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {p.results.map((r: any) => (
+                  <tr key={r.id} className="border-t">
+                    <td className="py-1.5">{fmtDay(r.day)}</td>
+                    <td>{r.level}</td>
+                    <td>{r.status === 'missed' ? 'Not taken' : `${r.score}/${r.total} (${r.percent}%)`}</td>
+                    <td className="text-right">
+                      {r.status === 'done' && (
+                        <Button variant="ghost" size="sm" onClick={() => openReview(r.id)}>
+                          See answers
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {p.pastLessons.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Earlier lessons</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {p.pastLessons.map((l: any) => (
+              <Lesson key={l.id} l={l} />
+            ))}
+          </CardContent>
+        </Card>
+      )}
+    </>
+  );
+}
+
 export default function AssociateTrainingTab() {
-  const { role } = useRole();
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const [review, setReview] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [person, setPerson] = useState<string>('');
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch('/api/associate-training');
+      const res = await fetch(`/api/associate-training${person ? `?person=${encodeURIComponent(person)}` : ''}`);
       const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (!res.ok) throw new Error(j.error);
       setData(j);
@@ -134,7 +256,7 @@ export default function AssociateTrainingTab() {
     } catch (e: any) {
       setErr(e.message);
     }
-  }, []);
+  }, [person]);
   useEffect(() => {
     const first = setTimeout(load, 0);
     const t = setInterval(load, 60000);
@@ -163,7 +285,32 @@ export default function AssociateTrainingTab() {
 
   if (err) return <div className="text-sm text-red-600">{err}</div>;
   if (!data) return <Loader2 className="size-5 animate-spin" />;
-  const lvl = data.levels[data.profile.level];
+
+  const reviewCard = review && (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          Answers for {fmtDay(review.day)} ({review.percent}%){data.viewer ? `: ${review.email}` : ''}
+        </CardTitle>
+        <CardAction>
+          <Button variant="ghost" size="sm" onClick={() => setReview(null)}>
+            Close
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent>
+        <Review test={review} />
+      </CardContent>
+    </Card>
+  );
+
+  if (!data.viewer)
+    return (
+      <div className="space-y-6">
+        {data.me && <PersonPage p={data.me} data={data} readOnly={false} onDone={load} openReview={openReview} />}
+        {reviewCard}
+      </div>
+    );
 
   return (
     <div className="space-y-6">
@@ -173,125 +320,25 @@ export default function AssociateTrainingTab() {
             <GraduationCap className="size-5" /> Associate Training
           </CardTitle>
           <CardDescription>
-            Every morning at 09:00 IST you get a short lesson to read: our company, our services and the latest news, rules and laws. The next morning there is a test on it. Questions you get wrong come back two days later. Two tests in a row at {data.passPercent}% or more move you up a level.
+            You are watching the training: read every lesson, see each associate&apos;s page, results and answers. Only associates take the tests. Lessons come at 09:00 IST, tests the next morning; wrong answers come back two days later; two tests in a row at {data.passPercent}% or more move an associate up a level.
+            {data.lastRun?.at && ` Last daily run: ${new Date(data.lastRun.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST${data.lastRun.errors?.length ? `, ${data.lastRun.errors.length} error(s): ${data.lastRun.errors.join('; ')}` : ''}.`}
           </CardDescription>
-          <CardAction>
-            <div className="text-right text-sm">
-              <div className="font-semibold">Level {data.profile.level} of 5</div>
-              <div className="text-xs text-muted-foreground">
-                {lvl?.words} words, {lvl?.questions} questions a day
-              </div>
-            </div>
-          </CardAction>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          {data.profile.streak > 0 ? `${data.profile.streak} test at ${data.passPercent}% or more. One more to move up.` : `Score ${data.passPercent}% or more in two tests in a row to move up.`}
-          {data.dueAgain > 0 && ` ${data.dueAgain} question(s) waiting to be asked again.`}
-          {!data.profile.active && ' Your training is paused by the admin.'}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Today&apos;s test</CardTitle>
-          <CardDescription>On yesterday&apos;s lesson, plus questions answered wrong earlier.</CardDescription>
-        </CardHeader>
-        <CardContent>{data.test ? <Test key={data.test.id} test={data.test} onDone={load} /> : <div className="text-sm text-muted-foreground">No test waiting. Your first test comes the morning after your first lesson.</div>}</CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Today&apos;s lesson</CardTitle>
-          <CardDescription>Read it today. Tomorrow&apos;s test asks about it.</CardDescription>
-        </CardHeader>
-        <CardContent>{data.lesson ? <Lesson l={data.lesson} open /> : <div className="text-sm text-muted-foreground">Your lesson is being prepared. This takes a few minutes; the page refreshes by itself.</div>}</CardContent>
-      </Card>
-
-      {data.results.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>My results</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <table className="w-full text-sm">
-              <thead className="text-left text-muted-foreground">
-                <tr>
-                  <th className="py-1">Day</th>
-                  <th>Level</th>
-                  <th>Score</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {data.results.map((r: any) => (
-                  <tr key={r.id} className="border-t">
-                    <td className="py-1.5">{fmtDay(r.day)}</td>
-                    <td>{r.level}</td>
-                    <td>{r.status === 'missed' ? 'Not taken' : `${r.score}/${r.total} (${r.percent}%)`}</td>
-                    <td className="text-right">
-                      {r.status === 'done' && (
-                        <Button variant="ghost" size="sm" onClick={() => openReview(r.id)}>
-                          See answers
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      )}
-
-      {review && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Answers for {fmtDay(review.day)} ({review.percent}%){role === 'admin' && review.email ? `: ${review.email}` : ''}
-            </CardTitle>
-            <CardAction>
-              <Button variant="ghost" size="sm" onClick={() => setReview(null)}>
-                Close
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            <Review test={review} />
-          </CardContent>
-        </Card>
-      )}
-
-      {data.pastLessons.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Earlier lessons</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {data.pastLessons.map((l: any) => (
-              <Lesson key={l.id} l={l} />
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {role === 'admin' && data.everyone && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Everyone (admin only)</CardTitle>
-            <CardDescription>
-              People join when they first open this page. {data.lastRun?.at && `Last daily run: ${new Date(data.lastRun.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST${data.lastRun.errors?.length ? `, ${data.lastRun.errors.length} error(s): ${data.lastRun.errors.join('; ')}` : ''}.`}
-            </CardDescription>
+          {data.canManage && (
             <CardAction>
               <Button variant="outline" size="sm" disabled={busy === 'run'} onClick={() => admin('run')}>
                 {busy === 'run' ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Prepare today now
               </Button>
             </CardAction>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
+          )}
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          {data.everyone.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No associate has joined yet. They join when they first open this page.</div>
+          ) : (
             <table className="w-full text-sm">
               <thead className="text-left text-muted-foreground">
                 <tr>
-                  <th className="py-1">Person</th>
+                  <th className="py-1">Associate</th>
                   <th>Level</th>
                   <th>Tests</th>
                   <th>Average (last 5)</th>
@@ -302,16 +349,24 @@ export default function AssociateTrainingTab() {
               </thead>
               <tbody>
                 {data.everyone.map((p: any) => (
-                  <tr key={p.email} className="border-t">
-                    <td className="py-1.5">{p.name || p.email}</td>
+                  <tr key={p.email} className={`border-t ${person === p.email ? 'bg-muted' : ''}`}>
+                    <td className="py-1.5">
+                      <button className="text-left underline" onClick={() => setPerson(person === p.email ? '' : p.email)}>
+                        {p.name || p.email}
+                      </button>
+                    </td>
                     <td>
-                      <select className="rounded border bg-background px-1" value={p.level} onChange={(e) => admin('level', { email: p.email, level: Number(e.target.value) })}>
-                        {[1, 2, 3, 4, 5].map((n) => (
-                          <option key={n} value={n}>
-                            {n}
-                          </option>
-                        ))}
-                      </select>
+                      {data.canManage ? (
+                        <select className="rounded border bg-background px-1" value={p.level} onChange={(e) => admin('level', { email: p.email, level: Number(e.target.value) })}>
+                          {[1, 2, 3, 4, 5].map((n) => (
+                            <option key={n} value={n}>
+                              {n}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        p.level
+                      )}
                     </td>
                     <td>{p.tests}</td>
                     <td>{p.average === null ? '-' : `${p.average}%`}</td>
@@ -329,16 +384,28 @@ export default function AssociateTrainingTab() {
                       )}
                     </td>
                     <td>{p.dueAgain}</td>
-                    <td>
-                      <input type="checkbox" checked={p.active} onChange={(e) => admin('active', { email: p.email, active: e.target.checked })} />
-                    </td>
+                    <td>{data.canManage ? <input type="checkbox" checked={p.active} onChange={(e) => admin('active', { email: p.email, active: e.target.checked })} /> : p.active ? 'Yes' : 'Paused'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
+
+      {reviewCard}
+
+      {data.person && <PersonPage p={data.person} data={data} readOnly onDone={load} openReview={openReview} />}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Today&apos;s lessons</CardTitle>
+          <CardDescription>One lesson per level, read by the associates at that level.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {data.todayLessons.length ? data.todayLessons.map((l: any) => <Lesson key={l.id} l={l} />) : <div className="text-sm text-muted-foreground">No lessons yet today. They are made at 09:00 IST.</div>}
+        </CardContent>
+      </Card>
     </div>
   );
 }

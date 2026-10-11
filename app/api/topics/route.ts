@@ -6,9 +6,11 @@ import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
 
-// GET: the last 14 days of topics (today first) with where each one went, and the last run.
+// GET: today's topics (news from the last 24 hours and evergreen), plus older topics someone
+// already started on. Untouched topics from earlier days are not shown.
 export async function GET() {
-  const rows = await prisma.topics.findMany({ orderBy: [{ day: 'desc' }, { id: 'asc' }], take: 70 });
+  const today = istDay();
+  const rows = await prisma.topics.findMany({ where: { OR: [{ day: today }, { status: { not: 'new' } }] }, orderBy: [{ day: 'desc' }, { id: 'asc' }], take: 70 });
   const draftIds = rows.flatMap((r) => [r.draft_id, r.article_draft_id]).filter((x): x is number => Boolean(x));
   const drafts = draftIds.length ? await prisma.drafts.findMany({ where: { id: { in: draftIds } }, select: { id: true, title: true, status: true, kind: true, wp_post_url: true } }) : [];
   const auditIds = rows.map((r) => r.audit_id).filter((x): x is number => Boolean(x));
@@ -20,7 +22,7 @@ export async function GET() {
     lastRun = JSON.parse((await settings.get('topics_last_run')) || 'null');
   } catch {}
   return NextResponse.json({
-    today: istDay(),
+    today,
     lastRun,
     topics: rows.map((r) => ({
       ...r,

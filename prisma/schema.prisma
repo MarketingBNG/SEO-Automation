@@ -482,7 +482,8 @@ model topics {
   why              String?
   keywords         String? // JSON string[]
   sources          String? // JSON [{title,url}]
-  kind             String? // news | update | evergreen
+  kind             String? // news | evergreen (older rows: update)
+  published_at     String? // when the news source was published (ISO), news only
   carried_over     String? // note when yesterday's topic is repeated because nothing new came up
   status           String  @default("new") // new | blog | article | manual
   draft_id         Int?

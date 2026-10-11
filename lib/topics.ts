@@ -1,9 +1,11 @@
-// Topics: every morning at 10:00 IST the dashboard researches what is worth writing about today
-// (news, rule changes, deadlines, and the approved strategy's keywords) and lists up to five
-// topics with the keywords to use and the sources. Nothing new that day: yesterday's topics are
-// carried over with a note saying so. From a topic a person can have the dashboard write a blog
-// or a LinkedIn article, or upload their own piece for an audit, a comparison with the research,
-// and a finalized version.
+// Topics: every morning at 10:00 IST the dashboard researches two lists.
+//  - News from the last 24 hours that matters to our company, our services, our clients (Indian
+//    founders with US companies, NRIs) or our niche (US-India tax, finance and compliance). Each
+//    item has its source and publish time; anything older than about a day is dropped, never shown.
+//    A day with no such news shows none, never yesterday's.
+//  - Evergreen topics: subjects that stay useful, from the strategy keywords, not yet on the site.
+// From a topic a person can have the dashboard write a blog or a LinkedIn article, or upload their
+// own piece for an audit, a comparison with the research, and a finalized version.
 import prisma from './prisma';
 import * as settings from './settings';
 import * as activity from './activity';
@@ -20,26 +22,47 @@ export const istHour = (d = new Date()) => new Date(d.getTime() + 5.5 * 3600000)
 
 const g = globalThis as unknown as { __topicsRun?: boolean };
 
-export type Topic = { title: string; why: string; keywords: string[]; sources: { title: string; url: string }[]; kind: 'news' | 'update' | 'evergreen' };
+export type Topic = { title: string; why: string; keywords: string[]; sources: { title: string; url: string }[]; kind: 'news' | 'evergreen'; publishedAt: string | null };
 
-const SYSTEM = `You are the content research lead for USAIndiaCFO (usaindiacfo.com), a cross-border finance, tax and compliance firm serving Indian founders with US companies and NRIs. Each morning you find what is worth writing about TODAY for this audience: fresh news, rule or deadline changes (IRS, CBDT, RBI, FEMA, MCA, SEC, state filings, GST, DTAA, visas for founders), and any update that affects US-India businesses. Use web search for the last 48 hours first; then add at most two evergreen topics from the strategy keywords that are not yet covered on the site. Be specific and verifiable: a topic must come from a real, current source you found, with its URL. Never invent news. Prefer topics where a 1,200 to 1,800 word blog could rank and a LinkedIn article could start a conversation.`;
+// News must be from the last day (a few hours of slack for time zones and late indexing).
+export const NEWS_MAX_AGE_HOURS = 30;
 
-function parseTopics(text: string): Topic[] {
-  const j: any = parseJson(text);
-  const list = Array.isArray(j) ? j : j.topics || [];
-  return list
-    .filter((t: any) => t && t.title)
-    .slice(0, 5)
-    .map((t: any) => ({
-      title: String(t.title).trim().slice(0, 160),
-      why: String(t.why || t.reason || '').trim().slice(0, 600),
-      keywords: (Array.isArray(t.keywords) ? t.keywords : String(t.keywords || '').split(',')).map((k: any) => String(k).trim()).filter(Boolean).slice(0, 8),
-      sources: (Array.isArray(t.sources) ? t.sources : []).map((s: any) => (typeof s === 'string' ? { title: s, url: s } : { title: String(s.title || s.url || ''), url: String(s.url || '') })).filter((s: any) => /^https?:\/\//.test(s.url)).slice(0, 4),
-      kind: ['news', 'update', 'evergreen'].includes(t.kind) ? t.kind : 'news',
-    }));
+const SYSTEM = `You are the content research lead for USAIndiaCFO (usaindiacfo.com), a cross-border finance, tax and compliance firm serving Indian founders with US companies and NRIs. Each morning you find (1) what happened in the LAST 24 HOURS that this firm should write about, and (2) evergreen topics that stay useful. News means: rule, law, deadline or policy changes, official notices, court rulings, budget or tax announcements, and business events from IRS, Treasury, CBDT, RBI, FEMA, MCA, SEBI, SEC, US states, GST Council, DTAA partners, US and Indian immigration for founders, plus anything that changes how Indian founders, NRIs or US-India businesses must act. Use web search and open the pages. Only report an item if the page shows it was published in the last 24 hours, and give that publish time. Never invent news, dates or URLs. If nothing relevant was published in the last 24 hours, return no news; never fill the list with older items.`;
+
+function cleanTopic(t: any, kind: 'news' | 'evergreen'): Topic | null {
+  if (!t || !t.title) return null;
+  const sources = (Array.isArray(t.sources) ? t.sources : []).map((s: any) => (typeof s === 'string' ? { title: s, url: s } : { title: String(s.title || s.url || ''), url: String(s.url || '') })).filter((s: any) => /^https?:\/\//.test(s.url)).slice(0, 4);
+  const at = t.publishedAt ? Date.parse(t.publishedAt) : NaN;
+  return {
+    title: String(t.title).trim().slice(0, 160),
+    why: String(t.why || t.reason || '').trim().slice(0, 600),
+    keywords: (Array.isArray(t.keywords) ? t.keywords : String(t.keywords || '').split(',')).map((k: any) => String(k).trim()).filter(Boolean).slice(0, 8),
+    sources,
+    kind,
+    publishedAt: Number.isFinite(at) ? new Date(at).toISOString() : null,
+  };
 }
 
-// The daily research. Returns the topics saved for today.
+// Keeps only news with a source and a publish time inside the last NEWS_MAX_AGE_HOURS.
+export function freshNews(list: any[], now = new Date()): Topic[] {
+  return (Array.isArray(list) ? list : [])
+    .map((t) => cleanTopic(t, 'news'))
+    .filter((t): t is Topic => Boolean(t && t.sources.length && t.publishedAt))
+    .filter((t) => {
+      const age = (now.getTime() - Date.parse(t.publishedAt!)) / 3600000;
+      return age >= -2 && age <= NEWS_MAX_AGE_HOURS;
+    })
+    .slice(0, 6);
+}
+
+function parseTopics(text: string, now: Date): Topic[] {
+  const j: any = parseJson(text);
+  const evergreen = (Array.isArray(j.evergreen) ? j.evergreen : []).map((t: any) => cleanTopic(t, 'evergreen')).filter(Boolean).slice(0, 3) as Topic[];
+  return [...freshNews(j.news, now), ...evergreen];
+}
+
+// The daily research. Returns the topics saved for today. Running it again the same day replaces
+// today's topics nobody has started on.
 export async function researchTopics(now = new Date(), { force = false } = {}) {
   const day = istDay(now);
   if (g.__topicsRun) return { skipped: 'A topic research is already running.' };
@@ -53,34 +76,30 @@ export async function researchTopics(now = new Date(), { force = false } = {}) {
     const keywords = plan ? [...(plan.keywords || []).map((k: any) => k.keyword), ...(plan.blogPlan?.calendar || []).map((b: any) => b.mainKeyword)].filter(Boolean).slice(0, 60) : [];
     const focus = String((await settings.get('focus_services')) || 'ITIN, EIN, US company formation for Indians, NRI tax, FEMA compliance, virtual CFO').split(/\n|;/).map((x) => x.trim()).filter(Boolean);
     const recent = await prisma.drafts.findMany({ where: { status: { in: ['published', 'approved', 'pending_review'] } }, select: { title: true }, orderBy: { id: 'desc' }, take: 40 });
-    const yesterday = await prisma.topics.findMany({ where: { day: { lt: day } }, orderBy: { id: 'desc' }, take: 10, select: { title: true, day: true } });
-    const prompt = `Today is ${day} (India). Services we sell: ${focus.join('; ')}.
+    const earlier = await prisma.topics.findMany({ where: { day: { lt: day } }, orderBy: { id: 'desc' }, take: 60, select: { title: true, day: true } });
+    const since = new Date(now.getTime() - 24 * 3600000).toISOString();
+    const prompt = `Now: ${now.toISOString()} (India date ${day}). Only news published after ${since} counts.
+Services we sell: ${focus.join('; ')}.
 Strategy keywords (use them where they fit): ${keywords.join(', ') || 'none approved yet'}.
-Titles already on the site or in progress (do not repeat these topics): ${recent.map((r) => r.title).filter(Boolean).join(' | ') || 'none'}.
-Topics suggested on earlier days (do not repeat unless there is genuinely new news): ${yesterday.map((t) => `${t.day}: ${t.title}`).join(' | ') || 'none'}.
+Titles already on the site or in progress (do not repeat): ${recent.map((r) => r.title).filter(Boolean).join(' | ') || 'none'}.
+Topics given on earlier days (never repeat them): ${earlier.map((t) => t.title).join(' | ') || 'none'}.
 
-Search the web for news and updates from the last 48 hours that matter to this audience. Then return ONLY JSON between ===JSON=== and ===END=== in this shape:
-{"topics":[{"title":"...","why":"one or two sentences: what happened or changed, and why our audience cares now","keywords":["primary keyword","secondary","..."],"sources":[{"title":"...","url":"https://..."}],"kind":"news|update|evergreen"}]}
-Rules: 0 to 5 topics. At most 2 evergreen. Every news or update topic needs at least one source URL from your search. If nothing relevant happened, return {"topics":[]}.`;
-    const { text } = (await callClaude(SYSTEM, [{ role: 'user', content: prompt }], undefined, { maxUses: Number(process.env.TOPICS_SEARCHES || 12), effort: 'high', feature: 'other' })) as { text: string };
-    let topics: Topic[] = [];
-    try {
-      topics = parseTopics(text);
-    } catch {
-      topics = [];
-    }
-    let note: string | null = null;
-    if (!topics.length) {
-      // Carry yesterday's topics over, saying why.
-      const lastDay = (await prisma.topics.findFirst({ where: { day: { lt: day } }, orderBy: { day: 'desc' }, select: { day: true } }))?.day;
-      const prev = lastDay ? await prisma.topics.findMany({ where: { day: lastDay }, orderBy: { id: 'asc' } }) : [];
-      note = `No new news or updates for our audience were found this morning, so the topics from ${lastDay || 'the last run'} are carried over.`;
-      topics = prev.map((t) => ({ title: t.title, why: t.why || '', keywords: JSON.parse(t.keywords || '[]'), sources: JSON.parse(t.sources || '[]'), kind: (t.kind as any) || 'evergreen' }));
-    }
+1. Search the web for news published in the last 24 hours that matters to our company, our services, our clients or our niche. Up to 6 items, each with the page URL and its publish time.
+2. Give 3 evergreen topics from the strategy keywords or our services that are not on the site yet.
+Return ONLY JSON between ===JSON=== and ===END===:
+{"news":[{"title":"...","why":"what happened and why our clients care, one or two sentences","keywords":["primary","secondary"],"sources":[{"title":"...","url":"https://..."}],"publishedAt":"2026-01-31T09:00:00Z"}],
+ "evergreen":[{"title":"...","why":"why it stays useful for our clients","keywords":["primary","secondary"],"sources":[]}]}
+Inside string values never use a double quote. If no news qualifies, return "news":[].`;
+    const { text } = (await callClaude(SYSTEM, [{ role: 'user', content: prompt }], undefined, { maxUses: Number(process.env.TOPICS_SEARCHES || 15), effort: 'high', feature: 'other' })) as { text: string };
+    const topics = parseTopics(text, now);
+    // A fresh run replaces today's topics nobody has started on.
+    await prisma.topics.deleteMany({ where: { day, status: 'new' } });
     const saved: any[] = [];
-    for (const t of topics) saved.push(await prisma.topics.create({ data: { day, title: t.title, why: t.why, keywords: JSON.stringify(t.keywords), sources: JSON.stringify(t.sources), kind: t.kind, carried_over: note } }));
-    await settings.set('topics_last_run', JSON.stringify({ at: new Date().toISOString(), day, count: saved.length, note }));
-    await activity.log('topics.researched', { details: `${saved.length} topic(s) for ${day}${note ? ' (carried over: nothing new found)' : ''}` });
+    for (const t of topics) saved.push(await prisma.topics.create({ data: { day, title: t.title, why: t.why, keywords: JSON.stringify(t.keywords), sources: JSON.stringify(t.sources), kind: t.kind, published_at: t.publishedAt } }));
+    const news = saved.filter((t) => t.kind === 'news').length;
+    const note = news ? null : 'No news from the last 24 hours fits our company, services or clients.';
+    await settings.set('topics_last_run', JSON.stringify({ at: new Date().toISOString(), day, count: saved.length, news, note }));
+    await activity.log('topics.researched', { details: `${news} news topic(s) from the last 24 hours and ${saved.length - news} evergreen for ${day}` });
     await endTimer(key, true);
     return { day, topics: saved, note };
   } catch (e: any) {
