@@ -165,7 +165,9 @@ export async function runTrainingDay(now = new Date()) {
   const day = istDay(now);
   const errors: string[] = [];
   try {
-    const people = await prisma.training_profiles.findMany({ where: { active: true } });
+    // Admins and managers watch; only associates get lessons and tests.
+    const watchers = (await prisma.team_members.findMany({ where: { role: { in: ['admin', 'manager'] } }, select: { email: true } })).map((r) => r.email.toLowerCase());
+    const people = await prisma.training_profiles.findMany({ where: { active: true, email: { notIn: watchers } } });
     for (const p of people) await prepareDay(p.email, day).catch((e) => errors.push(`${p.email}: ${e.message}`));
     await settings.set('training_last_run', JSON.stringify({ at: new Date().toISOString(), day, people: people.length, errors }));
     if (errors.length) await activity.log('training.failed', { details: errors.join('; ').slice(0, 300) });
