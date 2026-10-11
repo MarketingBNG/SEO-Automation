@@ -8,6 +8,7 @@ import { AlertTriangle, CalendarClock, CheckCircle2, Download, FileText, KeyRoun
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useRole } from '@/hooks/use-role';
+import BlogMoveControls from '@/components/shared/blog-move-controls';
 
 const fmtDate = (s?: string | null) => (s ? new Date(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z')).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : '');
 
@@ -94,6 +95,7 @@ function ApprovalCard({ row, reviewers, canReview, onDone }: { row: any; reviewe
           </div>
         )}
         {err && <div className="text-xs text-red-600 dark:text-red-400">{err}</div>}
+        {canReview && <BlogMoveControls row={row} onDone={onDone} />}
       </div>
     </li>
   );
@@ -103,7 +105,8 @@ export default function HomeTab() {
   const [data, setData] = useState<any>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const who = useRole();
-  const canReview = who.can('strategy.approve');
+  // Managers and associates review too: approve, reject, pause and reschedule.
+  const canReview = who.can('manual.do');
   const canWork = who.can('content.work');
   const load = useCallback(async () => {
     setData(await fetch('/api/home').then((r) => (r.ok ? r.json() : null)).catch(() => null));
@@ -199,6 +202,11 @@ export default function HomeTab() {
                     <div className="min-w-0">
                       <div className="font-medium">{r.draft_id ? <Link className="hover:underline" href={`/?tab=drafts&draft=${r.draft_id}`}>{r.title}</Link> : r.title}</div>
                       <div className="text-xs text-muted-foreground"><strong className="text-foreground">{r.publish_plan?.headline}.</strong> {r.publish_plan?.detail}{r.author ? ` By ${r.author}.` : ''}</div>
+                      {canReview && (
+                        <div className="pt-1">
+                          <BlogMoveControls row={r} onDone={(m) => { setMsg(m); load(); }} />
+                        </div>
+                      )}
                     </div>
                   </li>
                 ))}

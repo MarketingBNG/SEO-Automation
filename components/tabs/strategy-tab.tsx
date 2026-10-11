@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
 import { useManualTasks, ManualTasksBanner, ManualTaskList } from '@/components/shared/manual-tasks';
 import { useRole } from '@/hooks/use-role';
+import BlogMoveControls from '@/components/shared/blog-move-controls';
 import { cn } from 'cn';
 import Link from 'next/link';
 import { jobsChanged } from '@/components/shared/job-progress';
@@ -676,7 +677,6 @@ function MonthRunning() {
   const [reviewer, setReviewer] = useState<Record<number, string>>({});
   // Managers and associates review too: approve, reject, pause and reschedule.
   const canReview = useRole().can('manual.do');
-  const [moving, setMoving] = useState<{ id: number; suggestions: any[]; custom: string } | null>(null);
   const load = useCallback(async () => {
     setData(await fetch('/api/strategy/schedule').then((r) => r.json()).catch(() => null));
   }, []);
@@ -695,26 +695,6 @@ function MonthRunning() {
     setRejecting(null);
     setFeedback('');
     load();
-  }
-
-  async function act(id: number, body: any, done: string) {
-    setBusy(id);
-    const res = await fetch(`/api/strategy/schedule/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const json = await res.json().catch(() => ({}));
-    setBusy(null);
-    if (!res.ok) {
-      setMsg(json.error || 'Could not save.');
-      if (json.needsReschedule) setMoving({ id, suggestions: json.suggestions || [], custom: '' });
-      return;
-    }
-    setMsg(json.note ? `${done} ${json.note}` : done);
-    setMoving(null);
-    load();
-  }
-  async function openMove(id: number) {
-    if (moving?.id === id) return setMoving(null);
-    const j = await fetch(`/api/strategy/schedule/${id}`).then((r) => r.json()).catch(() => ({}));
-    setMoving({ id, suggestions: j.suggestions || [], custom: '' });
   }
 
   const factCheck = (r: any) => {
@@ -803,29 +783,9 @@ function MonthRunning() {
                     <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => setRejecting(rejecting === r.id ? null : r.id)}>Reject</Button>
                   </div>
                 )}
-                {canReview && !['published', 'failed', 'drafting', 'revising'].includes(r.status) && (
-                  <div className="mt-1 flex flex-col gap-1">
-                    {r.status === 'paused' ? (
-                      <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => act(r.id, { action: 'resume' }, 'Resumed.')}>Resume</Button>
-                    ) : (
-                      <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => act(r.id, { action: 'pause' }, 'Paused. Nothing happens to it until you resume or reschedule it.')}>Pause</Button>
-                    )}
-                    <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => openMove(r.id)}>Reschedule</Button>
-                  </div>
-                )}
-                {moving?.id === r.id && (
-                  <div className="mt-2 w-64 space-y-1 text-xs">
-                    <div className="font-medium">Suggested times</div>
-                    {moving!.suggestions.length === 0 && <div className="text-muted-foreground">No free day in the next three weeks. Pick a time below.</div>}
-                    {moving!.suggestions.map((sg: any) => (
-                      <button key={sg.at} className="block w-full rounded border p-1.5 text-left hover:bg-muted" disabled={busy === r.id} onClick={() => act(r.id, { action: 'reschedule', publishAt: sg.at }, `Moved to ${sg.label}.`)}>
-                        <div className="font-medium">{sg.label}</div>
-                        <div className="text-muted-foreground">{sg.why}</div>
-                      </button>
-                    ))}
-                    <div className="pt-1 font-medium">Or pick a time (IST)</div>
-                    <input type="datetime-local" className="w-full rounded border bg-background p-1" value={moving!.custom} onChange={(e) => setMoving({ ...moving!, custom: e.target.value })} />
-                    <Button size="sm" disabled={!moving!.custom || busy === r.id} onClick={() => act(r.id, { action: 'reschedule', publishAt: `${moving!.custom}:00+05:30` }, 'Moved.')}>Save the new time</Button>
+                {canReview && (
+                  <div className="mt-1">
+                    <BlogMoveControls row={r} onDone={(m) => { setMsg(m); load(); }} />
                   </div>
                 )}
                 {rejecting === r.id && (
