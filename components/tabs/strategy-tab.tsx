@@ -674,7 +674,9 @@ function MonthRunning() {
   const [feedback, setFeedback] = useState('');
   const [busy, setBusy] = useState<number | null>(null);
   const [reviewer, setReviewer] = useState<Record<number, string>>({});
-  const canReview = useRole().can('strategy.approve');
+  // Managers and associates review too: approve, reject, pause and reschedule.
+  const canReview = useRole().can('manual.do');
+  const [moving, setMoving] = useState<{ id: number; suggestions: any[]; custom: string } | null>(null);
   const load = useCallback(async () => {
     setData(await fetch('/api/strategy/schedule').then((r) => r.json()).catch(() => null));
   }, []);
@@ -695,6 +697,26 @@ function MonthRunning() {
     load();
   }
 
+  async function act(id: number, body: any, done: string) {
+    setBusy(id);
+    const res = await fetch(`/api/strategy/schedule/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const json = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) {
+      setMsg(json.error || 'Could not save.');
+      if (json.needsReschedule) setMoving({ id, suggestions: json.suggestions || [], custom: '' });
+      return;
+    }
+    setMsg(json.note ? `${done} ${json.note}` : done);
+    setMoving(null);
+    load();
+  }
+  async function openMove(id: number) {
+    if (moving?.id === id) return setMoving(null);
+    const j = await fetch(`/api/strategy/schedule/${id}`).then((r) => r.json()).catch(() => ({}));
+    setMoving({ id, suggestions: j.suggestions || [], custom: '' });
+  }
+
   const factCheck = (r: any) => {
     const fc = r.fact_check;
     if (!fc) return <span className="text-muted-foreground">Not checked yet</span>;
@@ -705,7 +727,7 @@ function MonthRunning() {
       <span className="font-medium text-red-600 dark:text-red-400">Could not verify every claim ({fc.rounds} rounds). Held.</span>
     );
   };
-  const STATUS: Record<string, string> = { planned: 'Planned', drafting: 'Being written', in_review: 'In review', rejected: 'Rejected, rewrite queued', revising: 'Being rewritten', held: 'Held', published: 'Published', failed: 'Failed' };
+  const STATUS: Record<string, string> = { planned: 'Planned', drafting: 'Being written', in_review: 'In review', rejected: 'Rejected, rewrite queued', revising: 'Being rewritten', held: 'Held', paused: 'Paused', published: 'Published', failed: 'Failed' };
 
   if (!data?.rows?.length) return null;
   const overdue = data.rows.filter((r: any) => r.overdue);
@@ -719,7 +741,7 @@ function MonthRunning() {
       )}
       <Section
         title="Blog calendar: approve, and see when each publishes"
-        description="Every blog is fact-checked against official sources by two different AI models. A manager then has 48 hours to approve or reject it. If nobody rejects it, it is approved and published automatically under one of the partners' names, with its image and a call to action for its service. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
+        description="Every blog is fact-checked against official sources by two different AI models. The team (managers and associates) then has 48 hours to approve or reject it, and can pause a blog or move it to another time (with suggested times). If nobody rejects it, it is approved and published automatically under one of the partners' names, with its image and a call to action for its service. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
       >
         <DataTable head={['Publish date', 'Title', 'Fact check', 'Status', 'Publishes', '']}>
           {data.rows.map((r: any) => (
@@ -779,6 +801,31 @@ function MonthRunning() {
                     {r.needs_expert && !(data.reviewers || []).length && <span className="w-52 text-xs text-muted-foreground">Type the reviewer as &quot;Name, CA&quot;.</span>}
                     <Button size="sm" disabled={busy === r.id || (r.needs_expert && !reviewer[r.id])} onClick={() => decide(r.id, 'approve')}>Approve blog</Button>
                     <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => setRejecting(rejecting === r.id ? null : r.id)}>Reject</Button>
+                  </div>
+                )}
+                {canReview && !['published', 'failed', 'drafting', 'revising'].includes(r.status) && (
+                  <div className="mt-1 flex flex-col gap-1">
+                    {r.status === 'paused' ? (
+                      <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => act(r.id, { action: 'resume' }, 'Resumed.')}>Resume</Button>
+                    ) : (
+                      <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => act(r.id, { action: 'pause' }, 'Paused. Nothing happens to it until you resume or reschedule it.')}>Pause</Button>
+                    )}
+                    <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => openMove(r.id)}>Reschedule</Button>
+                  </div>
+                )}
+                {moving?.id === r.id && (
+                  <div className="mt-2 w-64 space-y-1 text-xs">
+                    <div className="font-medium">Suggested times</div>
+                    {moving!.suggestions.length === 0 && <div className="text-muted-foreground">No free day in the next three weeks. Pick a time below.</div>}
+                    {moving!.suggestions.map((sg: any) => (
+                      <button key={sg.at} className="block w-full rounded border p-1.5 text-left hover:bg-muted" disabled={busy === r.id} onClick={() => act(r.id, { action: 'reschedule', publishAt: sg.at }, `Moved to ${sg.label}.`)}>
+                        <div className="font-medium">{sg.label}</div>
+                        <div className="text-muted-foreground">{sg.why}</div>
+                      </button>
+                    ))}
+                    <div className="pt-1 font-medium">Or pick a time (IST)</div>
+                    <input type="datetime-local" className="w-full rounded border bg-background p-1" value={moving!.custom} onChange={(e) => setMoving({ ...moving!, custom: e.target.value })} />
+                    <Button size="sm" disabled={!moving!.custom || busy === r.id} onClick={() => act(r.id, { action: 'reschedule', publishAt: `${moving!.custom}:00+05:30` }, 'Moved.')}>Save the new time</Button>
                   </div>
                 )}
                 {rejecting === r.id && (

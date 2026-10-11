@@ -358,8 +358,10 @@ model blog_schedule {
   refresh_url      String?
   keyword_id       Int?
   draft_id         Int?
-  // planned | drafting | in_review | rejected | revising | held | published | failed
+  // planned | drafting | in_review | rejected | revising | held | paused | published | failed
   status           String  @default("planned")
+  paused_from      String? // the status a paused blog goes back to when it is resumed
+  paused_by        String?
   review_started   String?
   reviewed_by      String?
   reviewed_at      String?
