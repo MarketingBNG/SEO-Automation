@@ -268,6 +268,8 @@ export function publishPlan(row: PlanRow, now = new Date(), { requireExpert = fa
           : `Approve it and it publishes at ${slotText}. If nobody decides by then, it publishes on its own at that time.`,
       };
     }
+    case 'paused':
+      return { when: null, headline: 'Paused', detail: `Nothing happens to it until someone resumes or reschedules it. Its slot was ${slotText}.` };
     case 'drafting':
       return { when: iso(slot), headline: `Scheduled for ${slotText}`, detail: 'Being written now. It then goes into a 48-hour review before it publishes.' };
     default:
@@ -294,7 +296,7 @@ export function scheduleAction(row: ScheduleRow, now = new Date(), graceMinutes 
   const slot = toMs(row.publish_at);
   const t = now.getTime();
   const grace = graceMinutes * 60000;
-  if (['published', 'failed', 'rejected', 'revising'].includes(row.status)) return 'wait';
+  if (['published', 'failed', 'rejected', 'revising', 'paused'].includes(row.status)) return 'wait';
   if (row.status === 'in_review') {
     if (requireExpert && !row.reviewed_at && needsExpertReview(row.main_keyword, row.title)) return 'wait';
     return t >= autoPublishAt(row) - grace ? 'publish' : 'wait';
