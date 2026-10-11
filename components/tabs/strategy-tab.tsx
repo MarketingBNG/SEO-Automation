@@ -668,7 +668,8 @@ function TrackingLine({ t }: { t: any }) {
   );
 }
 
-function MonthRunning() {
+// The approved month's blog calendar. standalone: its own page (Blog Calendar), with an empty state.
+export function MonthRunning({ standalone = false }: { standalone?: boolean } = {}) {
   const [data, setData] = useState<any>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<number | null>(null);
@@ -709,7 +710,10 @@ function MonthRunning() {
   };
   const STATUS: Record<string, string> = { planned: 'Planned', drafting: 'Being written', in_review: 'In review', rejected: 'Rejected, rewrite queued', revising: 'Being rewritten', held: 'Held', paused: 'Paused', published: 'Published', failed: 'Failed' };
 
-  if (!data?.rows?.length) return null;
+  if (!data?.rows?.length)
+    return standalone ? (
+      <p className="text-sm text-muted-foreground">{data ? 'No blogs are scheduled. Approve a Monthly Strategy and its blog calendar appears here.' : 'Loading the blog calendar…'}</p>
+    ) : null;
   const overdue = data.rows.filter((r: any) => r.overdue);
   return (
     <div className="space-y-4">

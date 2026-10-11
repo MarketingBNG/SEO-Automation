@@ -4,12 +4,12 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
-  Activity, BarChart3, Bot, BrainCircuit, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
+  Activity, BarChart3, Bot, BrainCircuit, CalendarClock, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
   LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
-  SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
+  SidebarInput, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -27,7 +27,7 @@ import DraftsTab from '@/components/tabs/drafts-tab';
 import AuditTab from '@/components/tabs/audit-tab';
 import RenewalTab from '@/components/tabs/renewal-tab';
 import PerformanceTab from '@/components/tabs/performance-tab';
-import StrategyTab from '@/components/tabs/strategy-tab';
+import StrategyTab, { MonthRunning } from '@/components/tabs/strategy-tab';
 import TrainingTab from '@/components/tabs/training-tab';
 import AssociateTrainingTab from '@/components/tabs/associate-training-tab';
 import WebsiteContentTab from '@/components/tabs/website-content-tab';
@@ -38,27 +38,35 @@ import TeamTab from '@/components/tabs/team-tab';
 import { useRole } from '@/hooks/use-role';
 import type { Role } from '@/lib/permissions';
 
-// The pages, grouped by the job they do. Keys are unchanged, so old links (/?tab=drafts) still work.
+// The pages, grouped by the job they do, in the order the work happens. Keys are unchanged, so old
+// links (/?tab=drafts) still work.
 const TABS = [
-  { key: 'home', label: 'Home', icon: House, group: 'Start', hint: 'What waits for you, what publishes next' },
+  { key: 'home', label: 'Home', icon: House, group: 'Start', hint: 'What waits for you today and what publishes next' },
   { key: 'assistant', label: 'Assistant', icon: Bot, group: 'Start', hint: 'Ask anything, change the website' },
-  { key: 'topics', label: 'Topics', icon: Lightbulb, group: 'Blogs', hint: 'What is worth writing about today: researched every morning at 10:00 IST' },
-  { key: 'strategy', label: 'Monthly Strategy', icon: CalendarRange, group: 'Blogs', hint: 'The 30-day plan, the blog calendar and approvals' },
-  { key: 'drafts', label: 'Drafts & Review', icon: FileText, group: 'Blogs', hint: 'Read, edit, add images, approve, download as Word' },
-  { key: 'keywords', label: 'Write a blog', icon: KeyRound, group: 'Blogs', hint: 'Keywords: research them and write a blog for one' },
-  { key: 'audit', label: 'Check a blog', icon: FileSearch, group: 'Blogs', hint: 'Blog audit: check and rewrite a blog from a file or a link' },
-  { key: 'renewal', label: 'Refresh a live blog', icon: RefreshCcw, group: 'Blogs', hint: 'Blog renewal: rewrite an old post on the website' },
+
+  { key: 'strategy', label: 'Monthly Strategy', icon: CalendarRange, group: 'Plan', hint: 'The 30-day plan: keywords, blogs, fixes; approve it here' },
+  { key: 'calendar', label: 'Blog Calendar', icon: CalendarClock, group: 'Plan', hint: 'Automatic blogs: approve, reject, pause, reschedule' },
+  { key: 'topics', label: 'Topics & News', icon: Lightbulb, group: 'Plan', hint: 'Last 24 hours news and evergreen topics, every morning at 10:00 IST' },
+
+  { key: 'keywords', label: 'Write a blog', icon: KeyRound, group: 'Write', hint: 'Research keywords and write a blog for one' },
+  { key: 'drafts', label: 'Drafts & Review', icon: FileText, group: 'Write', hint: 'Read, edit, add images, approve, download as Word' },
+  { key: 'audit', label: 'Check a blog', icon: FileSearch, group: 'Write', hint: 'Audit and rewrite a blog from a file or a link' },
+  { key: 'renewal', label: 'Refresh a live blog', icon: RefreshCcw, group: 'Write', hint: 'Rewrite an old post on the website' },
+  { key: 'training', label: 'Writing rules', icon: BrainCircuit, group: 'Write', hint: 'The guidelines every blog follows' },
+
+  { key: 'sitecontent', label: 'Website Content', icon: PanelsTopLeft, group: 'Website', hint: 'Pages and blog posts of the new website' },
+
   { key: 'overall', label: 'Overall Report', icon: BarChart3, group: 'Reports', hint: 'All channels, month on month' },
   { key: 'seo', label: 'SEO', icon: Search, group: 'Reports', hint: 'Google rankings and clicks' },
   { key: 'aeo', label: 'AEO', icon: MessageSquareQuote, group: 'Reports', hint: 'Answer engines' },
   { key: 'geo', label: 'GEO', icon: Globe, group: 'Reports', hint: 'AI search visibility' },
-  { key: 'sitecontent', label: 'Website Content', icon: PanelsTopLeft, group: 'Workspace', hint: 'Pages and blog posts of the new website, read through the content API' },
-  { key: 'associates', label: 'Associate Training', icon: GraduationCap, group: 'Training', hint: 'A short lesson every day, a test the next day, levels that grow' },
-  { key: 'training', label: 'Writing rules', icon: BrainCircuit, group: 'Workspace', hint: 'Training: the writing guidelines the blogs follow' },
-  { key: 'meetings', label: 'Meeting insights', icon: Users, group: 'Workspace', hint: 'What clients said in meetings, for blog ideas' },
-  { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Workspace', hint: 'Everything the dashboard did, with errors' },
-  { key: 'team', label: 'Team', icon: ShieldCheck, group: 'Workspace', hint: '' },
-  { key: 'settings', label: 'Settings', icon: Settings, group: 'Workspace', hint: 'Connections, blog rules, SE Ranking, AI credits' },
+  { key: 'meetings', label: 'Meeting insights', icon: Users, group: 'Reports', hint: 'What clients said in meetings' },
+
+  { key: 'associates', label: 'Associate Training', icon: GraduationCap, group: 'Team', hint: 'Daily lesson, next-day test, levels' },
+  { key: 'team', label: 'Team & Roles', icon: ShieldCheck, group: 'Team', hint: 'Who can sign in and what they can do' },
+  { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Team', hint: 'Everything the dashboard did, with errors' },
+
+  { key: 'settings', label: 'Settings', icon: Settings, group: 'Admin', hint: 'Connections, blog rules, SE Ranking, AI credits' },
 ] as const;
 
 // Pages each role sees. Users only see the strategy and the assistant; the team page is for admins
@@ -72,7 +80,16 @@ const HIDDEN: Record<Role, string[]> = {
 };
 
 type TabKey = (typeof TABS)[number]['key'];
-const GROUPS = ['Start', 'Training', 'Blogs', 'Reports', 'Workspace'] as const;
+const GROUPS = ['Start', 'Plan', 'Write', 'Website', 'Reports', 'Team', 'Admin'] as const;
+const GROUP_LABEL: Record<(typeof GROUPS)[number], string> = {
+  Start: 'Start',
+  Plan: 'Plan & publish',
+  Write: 'Write & edit',
+  Website: 'Website',
+  Reports: 'Reports',
+  Team: 'Team & training',
+  Admin: 'Admin',
+};
 const PERFORMANCE_VIEWS: string[] = ['overall', 'seo', 'aeo', 'geo'];
 const isTab = (v: string | null): v is TabKey => !!v && TABS.some((t) => t.key === v);
 
@@ -81,6 +98,7 @@ export default function Dashboard() {
   const { data: session } = useSession();
   const initial = params.get('tab');
   const [tab, setTabState] = useState<TabKey>(isTab(initial) ? initial : 'home');
+  const [find, setFind] = useState('');
   const [askText, setAskText] = useState('');
   // Bumped by the Refresh button: the open tab is mounted again, so it loads fresh data.
   const [reloadKey, setReloadKey] = useState(0);
@@ -138,23 +156,31 @@ export default function Dashboard() {
           </div>
         </SidebarHeader>
         <SidebarContent>
-          {GROUPS.map((g) => (
-            <SidebarGroup key={g}>
-              <SidebarGroupLabel>{g}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {TABS.filter((t) => t.group === g && visible(t.key)).map((t) => (
-                    <SidebarMenuItem key={t.key}>
-                      <SidebarMenuButton isActive={shown === t.key} tooltip={t.hint ? `${t.label}: ${t.hint}` : t.label} title={t.hint || undefined} onClick={() => setTab(t.key)}>
-                        <t.icon />
-                        <span>{t.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ))}
+          <div className="px-2 pt-1 group-data-[collapsible=icon]:hidden">
+            <SidebarInput placeholder="Find a page…" value={find} onChange={(e) => setFind(e.target.value)} aria-label="Find a page" />
+          </div>
+          {GROUPS.map((g) => {
+            const q = find.trim().toLowerCase();
+            const items = TABS.filter((t) => t.group === g && visible(t.key) && (!q || `${t.label} ${t.hint} ${GROUP_LABEL[g]}`.toLowerCase().includes(q)));
+            if (!items.length) return null;
+            return (
+              <SidebarGroup key={g}>
+                <SidebarGroupLabel>{GROUP_LABEL[g]}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {items.map((t) => (
+                      <SidebarMenuItem key={t.key}>
+                        <SidebarMenuButton isActive={shown === t.key} tooltip={`${t.label}: ${t.hint}`} title={t.hint} onClick={() => setTab(t.key)}>
+                          <t.icon />
+                          <span>{t.label}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            );
+          })}
         </SidebarContent>
         <SidebarFooter>
           <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:hidden">
@@ -228,6 +254,7 @@ export default function Dashboard() {
             <div key={k} className={shown === k ? 'block' : 'hidden'}>
               {k === 'home' && <HomeTab />}
               {k === 'topics' && <TopicsTab />}
+              {k === 'calendar' && <MonthRunning standalone />}
               {k === 'associates' && <AssociateTrainingTab />}
               {k === 'sitecontent' && <WebsiteContentTab />}
               {k === 'keywords' && <KeywordsTab />}
