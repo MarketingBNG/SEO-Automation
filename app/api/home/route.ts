@@ -51,7 +51,7 @@ export async function GET() {
   });
 
   const approvals = rows.filter((r) => ['in_review', 'held'].includes(r.status) && r.draft_id && !r.reviewed_at).map(view);
-  const upcoming = rows.filter((r) => ['planned', 'drafting', 'in_review', 'held', 'revising', 'rejected'].includes(r.status) && !(['in_review', 'held'].includes(r.status) && !r.reviewed_at && r.draft_id)).slice(0, 8).map(view);
+  const upcoming = rows.filter((r) => ['planned', 'drafting', 'in_review', 'held', 'revising', 'rejected', 'paused'].includes(r.status) && !(['in_review', 'held'].includes(r.status) && !r.reviewed_at && r.draft_id)).slice(0, 8).map(view);
 
   const attention: { kind: string; title: string; detail: string; href: string }[] = [];
   if (aiPaused === '1') attention.push({ kind: 'credits', title: 'AI work is paused', detail: `${aiPausedReason || 'AI credits are low.'} Enter the new balance in Settings > AI credits.`, href: '/?tab=settings' });

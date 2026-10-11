@@ -53,7 +53,7 @@ const TABS = [
   { key: 'aeo', label: 'AEO', icon: MessageSquareQuote, group: 'Reports', hint: 'Answer engines' },
   { key: 'geo', label: 'GEO', icon: Globe, group: 'Reports', hint: 'AI search visibility' },
   { key: 'sitecontent', label: 'Website Content', icon: PanelsTopLeft, group: 'Workspace', hint: 'Pages and blog posts of the new website, read through the content API' },
-  { key: 'associates', label: 'Associate Training', icon: GraduationCap, group: 'Workspace', hint: 'A short lesson every day, a test the next day, levels that grow' },
+  { key: 'associates', label: 'Associate Training', icon: GraduationCap, group: 'Training', hint: 'A short lesson every day, a test the next day, levels that grow' },
   { key: 'training', label: 'Writing rules', icon: BrainCircuit, group: 'Workspace', hint: 'Training: the writing guidelines the blogs follow' },
   { key: 'meetings', label: 'Meeting insights', icon: Users, group: 'Workspace', hint: 'What clients said in meetings, for blog ideas' },
   { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Workspace', hint: 'Everything the dashboard did, with errors' },
@@ -72,7 +72,7 @@ const HIDDEN: Record<Role, string[]> = {
 };
 
 type TabKey = (typeof TABS)[number]['key'];
-const GROUPS = ['Start', 'Blogs', 'Reports', 'Workspace'] as const;
+const GROUPS = ['Start', 'Training', 'Blogs', 'Reports', 'Workspace'] as const;
 const PERFORMANCE_VIEWS: string[] = ['overall', 'seo', 'aeo', 'geo'];
 const isTab = (v: string | null): v is TabKey => !!v && TABS.some((t) => t.key === v);
 
@@ -161,6 +161,11 @@ export default function Dashboard() {
             <div className="min-w-0 flex-1 text-xs">
               <div className="truncate font-medium">{session?.user?.name}</div>
               <div className="truncate text-muted-foreground">{session?.user?.email}</div>
+              {process.env.NEXT_PUBLIC_BUILD_TIME && (
+                <div className="truncate text-muted-foreground" title="When this version of the dashboard was built">
+                  Version: {new Date(process.env.NEXT_PUBLIC_BUILD_TIME).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })} IST
+                </div>
+              )}
             </div>
             <Button variant="ghost" size="icon" aria-label="Sign out" onClick={() => signOut({ callbackUrl: '/login' })}>
               <LogOut className="size-4" />
