@@ -14,6 +14,7 @@ import { Octopus, type OctopusMood } from '@/components/shared/octopus';
 // The welcome screen shows 4 of these at random each time.
 const ASSISTANT_SUGGESTIONS = [
   'Optimize a blog for SEO: I will paste it in my next message',
+  'Make the changes in my attached file to a blog draft',
   'Add a banner to the homepage (I will attach the image)',
   'Show my top Search Console queries for the last 28 days',
   'Which pages get impressions but very few clicks?',
@@ -369,7 +370,7 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
   }
 
   async function uploadFiles(fileList: FileList | File[] | null) {
-    const files = [...(fileList || [])].filter((f) => f.type.startsWith('image/') || /\.docx$/i.test(f.name));
+    const files = [...(fileList || [])].filter((f) => f.type.startsWith('image/') || /\.(docx|pdf|txt|md)$/i.test(f.name));
     for (const file of files) {
       const key = `${file.name}-${file.size}-${file.lastModified}`;
       const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
@@ -652,12 +653,12 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
                 send();
               }
             }}
-            placeholder={pending.length ? 'Approve or decline above, or type a different instruction' : 'Message the assistant. Attach, paste or drop images and Word documents.'}
+            placeholder={pending.length ? 'Approve or decline above, or type a different instruction' : 'Message the assistant. Attach, paste or drop images, Word, PDF or text files.'}
           />
           <input
             ref={fileRef}
             type="file"
-            accept="image/*,.docx"
+            accept="image/*,.docx,.pdf,.txt,.md"
             multiple
             className="hidden"
             onChange={(e) => {

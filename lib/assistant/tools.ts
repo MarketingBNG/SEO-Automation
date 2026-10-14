@@ -11,6 +11,7 @@ import { runPageSpeedCheck } from '@/lib/pagespeed';
 import { getLeadSourceBreakdown } from '@/lib/zoho';
 import { recordQuestions, summary as questionBankSummary } from '@/lib/questionBank';
 import { createAudit } from '@/lib/audits';
+import { sqlNow } from '@/lib/time';
 
 // Every tool is either 'read' (runs immediately) or 'write' (only runs after the human approves
 // it in the dashboard). A write tool's run() returns { result, change } where change describes how
@@ -288,20 +289,26 @@ defineTool({
 defineTool({
   name: 'list_drafts',
   kind: 'read',
-  description: 'List AI-written blog drafts with their review status (pending_review, approved, rejected, published) and quality state.',
+  description: 'List AI-written blog drafts with their review status (pending_review, approved, rejected, published) and quality state. "search" finds drafts whose title or keyword contains the words.',
   input_schema: {
     type: 'object',
     properties: {
       status: { type: 'string', enum: ['in_progress', 'pending_review', 'approved', 'rejected', 'published'] },
+      search: { type: 'string' },
       limit: { type: 'integer', minimum: 1, maximum: 100 },
     },
     required: [],
     additionalProperties: false,
   },
-  summarize: (i) => `List drafts${i.status ? ` (${i.status})` : ''}`,
-  run: async ({ status, limit = 20 }) => {
-    const cols = { id: true, title: true, status: true, production_state: true, word_count: true, wp_post_url: true, created_at: true };
-    return prisma.drafts.findMany({ where: status ? { status } : {}, select: cols, orderBy: { id: 'desc' }, take: limit });
+  summarize: (i) => `List drafts${i.status ? ` (${i.status})` : ''}${i.search ? ` matching "${i.search}"` : ''}`,
+  run: async ({ status, search, limit = 20 }) => {
+    const cols = { id: true, title: true, status: true, production_state: true, word_count: true, wp_post_url: true, created_at: true, updated_at: true, keyword: { select: { keyword: true } } };
+    const q = String(search || '').trim();
+    const where: any = { ...(status ? { status } : {}), ...(q ? { OR: [{ title: { contains: q, mode: 'insensitive' } }, { keyword: { keyword: { contains: q, mode: 'insensitive' } } }] } : {}) };
+    const rows = await prisma.drafts.findMany({ where, select: cols, orderBy: { id: 'desc' }, take: limit });
+    const sched = await prisma.blog_schedule.findMany({ where: { draft_id: { in: rows.map((r) => r.id) } }, select: { draft_id: true, status: true, publish_at: true } });
+    const cal = new Map(sched.map((x) => [x.draft_id, x]));
+    return rows.map(({ keyword, ...r }: any) => ({ ...r, keyword: keyword?.keyword ?? null, calendar: cal.get(r.id) ? { status: cal.get(r.id)!.status, publish_at: cal.get(r.id)!.publish_at } : null }));
   },
 });
 
@@ -331,6 +338,155 @@ defineTool({
       content_html: draft.content_html,
       facts,
     };
+  },
+});
+
+// ---------------------------------------------------------------------------------------------
+// Blog drafts in the dashboard (Drafts & Review), whatever their status: in review, rejected,
+// approved, or paused / rescheduled on the monthly calendar. These change only the dashboard copy;
+// a blog already on the website is changed there with the wp_ tools.
+// ---------------------------------------------------------------------------------------------
+
+const DRAFT_FIELDS = ['title', 'meta_description', 'content_html'] as const;
+
+async function loadDraft(id) {
+  const draft: any = await prisma.drafts.findUnique({ where: { id } });
+  if (!draft) throw new Error(`Draft ${id} not found. Find it with list_drafts.`);
+  return draft;
+}
+
+const draftHash = (fields) => hash(JSON.stringify(fields));
+// Visible words of an HTML snippet, keeping [VISUAL SUGGESTION: ...] style notes (plainText drops them).
+const textOf = (html) => String(html || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+const wordsIn = (html) => plainText(html).split(' ').filter(Boolean).length;
+
+function draftNote(draft) {
+  return draft.wp_post_url
+    ? `This blog is already on the website (${draft.wp_post_url}). This changes only the dashboard copy; change the live post with the wp_ tools (post id ${draft.wp_post_id || 'see wp_post_url'}).`
+    : null;
+}
+
+// Applies the edits in order. Every "find" must match exactly once (or replace_all), or nothing is applied.
+function applyDraftEdits(html, edits) {
+  let out = String(html || '');
+  const problems: string[] = [];
+  const done: any[] = [];
+  edits.forEach((e, k) => {
+    if (!e.find) {
+      problems.push(`Change ${k + 1}: "find" is empty.`);
+      return;
+    }
+    const n = countOccurrences(out, e.find);
+    if (n === 0) problems.push(`Change ${k + 1}: the text was not found. Copy "find" exactly from content_html (get_draft), tags included: "${snippet(e.find, 80)}"`);
+    else if (n > 1 && !e.replace_all) problems.push(`Change ${k + 1}: the text appears ${n} times; use a longer unique snippet or set replace_all: "${snippet(e.find, 80)}"`);
+    else {
+      const idx = out.indexOf(e.find);
+      const around = contextAround(out, idx, 60);
+      done.push({ field: `Change ${k + 1}${e.replace_all && n > 1 ? ` (${n} places)` : ''}`, before: `…${textOf(around.before).slice(-60)} [${textOf(e.find) || e.find.slice(0, 160)}]`, after: textOf(e.replace) || (e.replace ? e.replace.slice(0, 160) : '(removed)') });
+      out = e.replace_all ? out.split(e.find).join(e.replace) : out.replace(e.find, () => e.replace);
+    }
+  });
+  return { html: out, problems, done };
+}
+
+async function saveDraftFields(draft, fields, summary) {
+  const before = Object.fromEntries(Object.keys(fields).map((k) => [k, draft[k] ?? null]));
+  await prisma.drafts.update({ where: { id: draft.id }, data: { ...fields, updated_at: sqlNow() } });
+  return {
+    summary,
+    targetType: 'draft',
+    targetId: String(draft.id),
+    undo: { kind: 'restore_draft', id: draft.id, fields: before, expectHash: draftHash(fields) },
+  };
+}
+
+defineTool({
+  name: 'draft_edit_text',
+  kind: 'write',
+  risk: 'low',
+  description:
+    'Change wording inside a dashboard blog draft (Drafts & Review): replace a sentence or paragraph, fix a figure, change a link, add a paragraph after another one, delete text. Works for drafts in any status. Give every change the user asked for in one call (up to 50, applied in order). Each "find" is copied exactly from content_html returned by get_draft (HTML tags included) and must match exactly once unless replace_all is true. To add text, find the end of the element it goes after (e.g. "...last words.</p>") and replace it with that same text plus the new element. To delete, replace with "". If any change does not match, nothing is applied.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: { type: 'integer' },
+      edits: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 50,
+        items: {
+          type: 'object',
+          properties: { find: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } },
+          required: ['find', 'replace'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['id', 'edits'],
+    additionalProperties: false,
+  },
+  summarize: (i) => `Edit blog draft #${i.id}: ${i.edits.length} change${i.edits.length > 1 ? 's' : ''}${i.edits.length === 1 ? ` ("${snippet(i.edits[0].find, 50)}" → "${snippet(i.edits[0].replace, 50)}")` : ''}`,
+  preview: async (i) => {
+    const draft = await loadDraft(i.id);
+    const { html, problems, done } = applyDraftEdits(draft.content_html, i.edits);
+    return {
+      target: `Draft #${draft.id}: ${draft.title || '(untitled)'} (${draft.status})`,
+      changes: done,
+      words: `${wordsIn(draft.content_html)} → ${wordsIn(html)}`,
+      problem: problems.length ? `${problems.join(' ')} Nothing would be changed.` : null,
+      warning: draftNote(draft),
+    };
+  },
+  run: async (i) => {
+    const draft = await loadDraft(i.id);
+    const { html, problems } = applyDraftEdits(draft.content_html, i.edits);
+    if (problems.length) throw new Error(`${problems.join(' ')} Nothing was changed (the draft may have been edited since; read it again with get_draft).`);
+    const change = await saveDraftFields(draft, { content_html: html }, `Edited blog draft "${draft.title || draft.id}" (${i.edits.length} change${i.edits.length > 1 ? 's' : ''})`);
+    return { result: { id: draft.id, changes: i.edits.length, words: wordsIn(html), note: draftNote(draft) || 'Saved. The user sees it when they open the draft in Drafts & Review.' }, change };
+  },
+});
+
+defineTool({
+  name: 'draft_update_fields',
+  kind: 'write',
+  riskFor: (i) => (i.content_html !== undefined ? 'medium' : 'low'),
+  description:
+    'Set the title, meta description and/or the whole article (content_html) of a dashboard blog draft (Drafts & Review), in any status. Use content_html only when the user wants the whole article replaced (e.g. by a rewritten version from a file they attached); for changes to parts of the article use draft_edit_text. content_html is clean HTML starting at <h2> (no <h1>, no byline), and keeps the existing images (<img src="/api/uploads/...">) and [VISUAL SUGGESTION: ...] notes unless the user says otherwise.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: { type: 'integer' },
+      title: { type: 'string' },
+      meta_description: { type: 'string' },
+      content_html: { type: 'string' },
+    },
+    required: ['id'],
+    additionalProperties: false,
+  },
+  summarize: (i) => `Update blog draft #${i.id}: ${DRAFT_FIELDS.filter((f) => i[f] !== undefined).map((f) => (f === 'content_html' ? 'whole article' : f.replace('_', ' '))).join(', ') || 'nothing'}`,
+  preview: async (i) => {
+    const draft = await loadDraft(i.id);
+    const fields = DRAFT_FIELDS.filter((f) => i[f] !== undefined);
+    const lostImages = i.content_html !== undefined ? (String(draft.content_html || '').match(/\/api\/uploads\/[^"]+/g) || []).filter((src) => !i.content_html.includes(src)).length : 0;
+    return {
+      target: `Draft #${draft.id}: ${draft.title || '(untitled)'} (${draft.status})`,
+      changes: fields.map((f) =>
+        f === 'content_html'
+          ? { field: 'article', before: `${wordsIn(draft.content_html)} words`, after: `${wordsIn(i.content_html)} words` }
+          : { field: f.replace('_', ' '), before: draft[f] || '', after: i[f] }
+      ),
+      problem: fields.length ? null : 'Nothing to change.',
+      warnings: [lostImages ? `${lostImages} image(s) in the current article are not in the new one and would be removed.` : '', /<h1\b/i.test(i.content_html || '') ? 'The new article has an <h1>; WordPress prints the title as the H1, so start at <h2>.' : '', draftNote(draft) || ''].filter(Boolean),
+    };
+  },
+  run: async (i) => {
+    const draft = await loadDraft(i.id);
+    const fields = Object.fromEntries(DRAFT_FIELDS.filter((f) => i[f] !== undefined).map((f) => [f, String(i[f])]));
+    if (!Object.keys(fields).length) throw new Error('Give at least one of title, meta_description or content_html.');
+    if (fields.content_html !== undefined && wordsIn(fields.content_html) < 100) throw new Error('The new article has under 100 words, so it was not saved. Send the whole article, or use draft_edit_text for a partial change.');
+    const what = Object.keys(fields).map((f) => (f === 'content_html' ? 'article' : f.replace('_', ' '))).join(', ');
+    const change = await saveDraftFields(draft, fields, `Updated blog draft "${draft.title || draft.id}": ${what}`);
+    return { result: { id: draft.id, updated: Object.keys(fields), note: draftNote(draft) || 'Saved. The user sees it when they open the draft in Drafts & Review.' }, change };
   },
 });
 
@@ -1758,6 +1914,20 @@ async function undoChange(undo, { force = false }: { force?: boolean } = {}) {
       const removed = (await prisma.paa_questions.deleteMany({ where: { times_seen: { lte: 1 }, id: { in: ids } } })).count;
       const kept = (await prisma.paa_questions.updateMany({ where: { times_seen: { gt: 1 }, id: { in: ids } }, data: { times_seen: { decrement: 1 } } })).count;
       return `Removed ${removed} question(s) from the question bank${kept ? ` and kept ${kept} that were seen again elsewhere since` : ''}.`;
+    }
+    case 'restore_draft': {
+      const draft: any = await prisma.drafts.findUnique({ where: { id: undo.id } });
+      if (!draft) throw new Error('That draft no longer exists.');
+      if (undo.expectHash && !force) {
+        const now = Object.fromEntries(Object.keys(undo.fields).map((k) => [k, draft[k] ?? null]));
+        if (draftHash(now) !== undo.expectHash) {
+          const err: any = new Error('This draft was edited again after this change. Undoing now would also remove those later edits.');
+          err.code = 'CHANGED_SINCE';
+          throw err;
+        }
+      }
+      await prisma.drafts.update({ where: { id: undo.id }, data: { ...undo.fields, updated_at: sqlNow() } });
+      return 'Restored the previous version of the draft.';
     }
     case 'delete_pending_keywords': {
       const ids = (undo.ids || []).filter((n) => Number.isInteger(n));

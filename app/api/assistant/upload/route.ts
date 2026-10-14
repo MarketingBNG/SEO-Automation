@@ -4,17 +4,20 @@ import mammoth from 'mammoth';
 import prisma from '@/lib/prisma';
 import { saveFile, basename } from '@/lib/storage';
 import { getActor } from '@/lib/auth';
+import { escapeHtml } from '../../_lib/http';
 
 export const runtime = 'nodejs';
 
 const ALLOWED: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const PDF = 'application/pdf';
 const MAX_BYTES = 15 * 1024 * 1024;
 const MAX_DOC_CHARS = 80000;
 
 // Saves a file attached in the assistant chat. Images: the original (what gets uploaded to
 // WordPress) plus a downscaled JPEG copy for the AI to look at. Word documents: converted to HTML
-// and returned, so the text travels inside the chat message (e.g. a blog to audit).
+// and returned, so the text travels inside the chat message (e.g. a blog to audit). PDF and text
+// files the same way.
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
@@ -49,8 +52,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // PDF and plain-text files travel in the chat as text, like a Word document (e.g. a list of
+    // changes to make in a blog). A PDF's layout is not kept, only its words in reading order.
+    const isPdf = mimetype === PDF || /\.pdf$/i.test(originalFilename || '');
+    const isText = /^text\/(plain|markdown)$/.test(mimetype) || /\.(txt|md)$/i.test(originalFilename || '');
+    if (isPdf || isText) {
+      let text = '';
+      if (isPdf) {
+        try {
+          const { extractText, getDocumentProxy } = await import('unpdf');
+          text = String((await extractText(await getDocumentProxy(new Uint8Array(buf)), { mergePages: true })).text || '');
+        } catch {
+          return NextResponse.json({ error: 'That PDF could not be read. If it is password-protected, remove the password and attach it again.' }, { status: 400 });
+        }
+        if (!text.trim()) return NextResponse.json({ error: 'This PDF has no text to read (it is probably a scan). Attach it as a Word file, or as images of the pages.' }, { status: 400 });
+      } else {
+        text = buf.toString('utf8');
+      }
+      const docName = originalFilename || (isPdf ? 'document.pdf' : 'notes.txt');
+      const mime = isPdf ? PDF : 'text/plain';
+      const docKey = `assistant/docs/${Date.now()}-${docName.replace(/[^a-z0-9._-]+/gi, '-').slice(-80)}`;
+      await saveFile(docKey, buf, mime);
+      const saved = await prisma.assistant_files.create({ data: { kind: 'document', filename: docName, path: docKey, mime, size: buf.length, uploaded_by: await getActor() } });
+      const html = text
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .map((p) => `<p>${escapeHtml(p).replace(/\n/g, '<br/>')}</p>`)
+        .join('\n');
+      return NextResponse.json(
+        { kind: 'document', fileId: saved.id, fileUrl: `/api/uploads/${docKey}`, filename: docName, html: html.slice(0, MAX_DOC_CHARS), truncated: html.length > MAX_DOC_CHARS },
+        { status: 200 }
+      );
+    }
+
     if (!ALLOWED[mimetype]) {
-      return NextResponse.json({ error: 'Attach a JPG, PNG, WebP or GIF image, or a Word (.docx) document' }, { status: 400 });
+      return NextResponse.json({ error: 'Attach a JPG, PNG, WebP or GIF image, or a Word (.docx), PDF or text (.txt) file' }, { status: 400 });
     }
 
     const safeName = (originalFilename || 'image').replace(/[^a-z0-9._-]+/gi, '-').slice(-80);
