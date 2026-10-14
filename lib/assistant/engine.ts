@@ -1,5 +1,6 @@
 import { assertCredits, recordUsage, onApiError } from '../aiCredits';
 import Anthropic from '@anthropic-ai/sdk';
+import { anthropicClient } from '../anthropicClient';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
@@ -14,11 +15,7 @@ const MAX_STEPS = 30;
 // every request, which keeps the history append-only from the API's point of view.
 const IMAGE_MARKER = '__image_library__:';
 
-function getClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set in .env');
-  return new Anthropic({ apiKey });
-}
+const getClient = anthropicClient;
 
 async function loadConversation(id): Promise<any> {
   const row = await prisma.assistant_conversations.findUnique({ where: { id } });

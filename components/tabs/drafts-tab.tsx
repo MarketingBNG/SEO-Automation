@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useDeferredValue, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { BarChart3, CalendarClock, CheckCircle2, Download, ExternalLink, FolderOpen, Loader2, Save, Send, ThumbsDown, ThumbsUp, Trash2, Upload, X } from 'lucide-react';
+import { BarChart3, CalendarClock, CheckCircle2, Download, ExternalLink, FileUp, FolderOpen, Loader2, Save, Send, ThumbsDown, ThumbsUp, Trash2, Upload, X } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { ArticleImages } from '@/components/shared/article-images';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { SafeHtml, safeHref } from '@/components/shared/article';
+import { safeHref } from '@/components/shared/article';
+import { EditableArticle } from '@/components/shared/editable-article';
 import { BlogAnalytics, BlogTable, KeywordPanel } from '@/components/shared/blog-insights';
 import { StatusBadge } from '@/components/shared/status-badge';
 import { PeopleAlsoAskList } from '@/components/shared/people-also-ask';
@@ -161,8 +162,8 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   const [message, setMessage] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [coverAlt, setCoverAlt] = useState('');
-  // The preview re-renders after typing pauses, not on every keystroke (it sanitises the whole article).
-  const previewHtml = useDeferredValue(content);
+  const [wordNote, setWordNote] = useState('');
+  const wordInput = useRef<HTMLInputElement>(null);
   const [wpStatus, setWpStatus] = useState('draft');
   const topRef = useRef<HTMLDivElement>(null);
 
@@ -221,6 +222,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   async function save(status: string | null) {
     setSaving(true);
     setMessage('');
+    setWordNote('');
     try {
       const res = await fetch(`/api/drafts/${draft.id}`, {
         method: 'PATCH',
@@ -248,6 +250,30 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
       setMessage('Error: ' + err.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // A Word file (usually the downloaded one, edited) replaces the title, meta and article in the
+  // boxes. Nothing is saved until Save changes or Approve, so the preview can be checked first.
+  async function uploadWord(file: File) {
+    if (dirty && !window.confirm('Replace your unsaved changes with the Word file?')) return;
+    setSaving(true);
+    setWordNote('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`/api/drafts/${draft.id}/word`, { method: 'POST', body: fd });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `Upload failed (${res.status})`);
+      setTitle(json.title || '');
+      setMeta(json.meta_description || '');
+      setContent(json.content_html || '');
+      setWordNote(['Loaded from the Word file. Check the preview, then press Save changes (or Approve). Nothing is saved until you do.', ...(json.notes || [])].join(' '));
+    } catch (err: any) {
+      setWordNote('Error: ' + err.message);
+    } finally {
+      setSaving(false);
+      if (wordInput.current) wordInput.current.value = '';
     }
   }
 
@@ -450,8 +476,12 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
             </details>
           </div>
           <div className="flex min-w-0 flex-col">
-            <FieldLabel>Preview</FieldLabel>
-            <SafeHtml className={`prose-article ${PREVIEW_BOX} max-h-[480px] flex-1 bg-background`} html={previewHtml} />
+            <FieldLabel>Preview (click in it to edit, then Save changes)</FieldLabel>
+            <EditableArticle
+              className={`prose-article ${PREVIEW_BOX} max-h-[480px] flex-1 cursor-text bg-background outline-none focus:ring-2 focus:ring-primary/40`}
+              html={content}
+              onChange={setContent}
+            />
           </div>
         </div>
 
@@ -473,6 +503,11 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
               </Button>
             </>
           )}
+          <input ref={wordInput} type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden" onChange={(e) => e.target.files?.[0] && uploadWord(e.target.files[0])} />
+          <Button variant="outline" onClick={() => wordInput.current?.click()} disabled={saving} title="Replace the whole blog with a Word file, for example the downloaded one after editing it in Word. The preview shows it before anything is saved.">
+            <FileUp />
+            Upload Word
+          </Button>
           <a href={`/api/drafts/${draft.id}/download`} download className={buttonVariants({ variant: 'outline' })} title={dirty ? 'The Word file is made from the saved copy. Save first to include your changes.' : 'The blog as a Word file, laid out as it will be published (cover, title, author line, article, FAQ, call to action)'}>
             <Download />
             Download Word
@@ -482,6 +517,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
             Delete draft
           </Button>
         </div>
+        {wordNote && <p className={`text-sm ${wordNote.startsWith('Error') ? 'text-destructive' : 'text-amber-700 dark:text-amber-400'}`}>{wordNote}</p>}
 
         <Separator />
 

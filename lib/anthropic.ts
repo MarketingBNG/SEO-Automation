@@ -1,8 +1,8 @@
 // @ts-nocheck -- PORT NOTE: ported 1:1 from untyped JS; type checking disabled for this file only (logic unchanged).
-import Anthropic from '@anthropic-ai/sdk';
 import * as settings from './settings';
 import prisma from './prisma';
 import { rethrowFriendly } from './apiErrors';
+import { anthropicClient } from './anthropicClient';
 import { assertCredits, recordUsage, onApiError } from './aiCredits';
 import { validateDraft, markUsedQuestions } from './validation';
 import { getWriterPlaybook, getAuditGates } from './playbook';
@@ -51,11 +51,8 @@ export async function rememberFacts(checks, model) {
   return saved;
 }
 
-function getClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set in .env');
-  return new Anthropic({ apiKey });
-}
+// Main key, with the secondary key as a backup when the main one runs out of credit.
+const getClient = anthropicClient;
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
 const MAX_REPAIR_ATTEMPTS = 3;

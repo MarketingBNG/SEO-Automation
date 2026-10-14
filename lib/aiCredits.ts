@@ -11,6 +11,7 @@
 import prisma from './prisma';
 import * as settings from './settings';
 import * as activity from './activity';
+import { keyInUse, secondaryKeyConfigured, retryMainKey } from './anthropicClient';
 
 // USD per 1M tokens (Anthropic first-party API). Cache writes are 1.25x input (5-minute cache).
 const PRICES: Record<string, { input: number; output: number; cacheRead: number }> = {
@@ -182,6 +183,7 @@ export async function creditStatus() {
     models,
     prices: Object.fromEntries(Object.values(models).map((m) => [m, priceFor(m)])),
     webSearchPer1000: WEB_SEARCH_PER_1000,
+    apiKeys: { secondaryConfigured: secondaryKeyConfigured(), inUse: keyInUse() },
   };
 }
 
@@ -208,13 +210,15 @@ export async function setBalance(usd: number, actor = 'system', threshold?: numb
   await settings.set('credit_balance_after_id', String(last?.id ?? 0));
   if (threshold !== undefined && Number.isFinite(threshold)) await settings.set('credit_pause_below_usd', String(threshold));
   await activity.log('ai.balance_set', { details: `Balance set to $${usd.toFixed(2)}`, actor });
+  retryMainKey();
   await resumeAi(actor);
 }
 
 async function checkThreshold() {
   const s = await creditStatus();
   await checkUsageAlert(s).catch(() => {});
-  if (s.remaining !== null && s.remaining < s.threshold && !s.paused) {
+  // With a secondary key the main key may run dry: the secondary one takes over (lib/anthropicClient.ts).
+  if (s.remaining !== null && s.remaining < s.threshold && !s.paused && !secondaryKeyConfigured()) {
     await pauseAi(`Estimated credit left ($${s.remaining.toFixed(2)}) is below the pause threshold ($${s.threshold.toFixed(2)}).`);
   }
 }
@@ -228,7 +232,8 @@ export async function assertCredits() {
   }
 }
 
-// Anthropic's own "out of credit" answer pauses everything too.
+// Anthropic's own "out of credit" answer pauses everything too (with a secondary key it reaches
+// here only when both keys are out of credit).
 export async function onApiError(err: any) {
   const raw = `${err?.message || ''} ${JSON.stringify(err?.error || '')}`;
   if (/credit balance is too low|out of credit/i.test(raw)) await pauseAi('Anthropic reported that the account is out of credit.');

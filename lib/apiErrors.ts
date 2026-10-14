@@ -4,7 +4,9 @@ function friendlyApiError(err) {
   const raw = String(err?.message || err || '');
   const status = err?.status;
   if (/credit balance is too low/i.test(raw)) {
-    return 'The Anthropic API account is out of credit. Add credit at console.anthropic.com (Settings > Billing), then try again.';
+    return process.env.ANTHROPIC_API_KEY_SECONDARY
+      ? 'Both Anthropic API keys (main and secondary) are out of credit. Add credit at console.anthropic.com (Settings > Billing), then try again.'
+      : 'The Anthropic API account is out of credit. Add credit at console.anthropic.com (Settings > Billing), then try again.';
   }
   if (status === 401 || /invalid x-api-key|authentication_error/i.test(raw)) {
     return 'The Anthropic API key was rejected. Check ANTHROPIC_API_KEY in the .env file.';

@@ -81,6 +81,15 @@ export function AiCreditsCard() {
             <div className="text-muted-foreground">Top up at console.anthropic.com (Settings &gt; Billing). Turning on auto-reload there keeps work from stopping. Then enter the new balance below.</div>
           </div>
         )}
+        {s.apiKeys && (
+          <div className={`rounded-lg border p-3 ${s.apiKeys.inUse === 'secondary' ? 'border-amber-500/50 bg-amber-500/10' : ''}`}>
+            {!s.apiKeys.secondaryConfigured
+              ? 'API keys: main key only. Set ANTHROPIC_API_KEY_SECONDARY on the server to have a backup key take over when the main one runs out of credit.'
+              : s.apiKeys.inUse === 'secondary'
+                ? 'API keys: the main key ran out of credit, so the secondary key is in use. The main key is tried again every hour, or right after you save a new balance below.'
+                : 'API keys: the main key is in use. The secondary key takes over automatically if the main one runs out of credit, so the low-credit pause waits until both are out.'}
+          </div>
+        )}
         {s.actual && (
           <div className="rounded-lg border p-3">
             {'error' in s.actual ? (
