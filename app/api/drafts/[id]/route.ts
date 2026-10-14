@@ -9,6 +9,7 @@ import { requireExpert } from '@/lib/reviewers';
 import { seoSlug } from '@/lib/wordpress';
 import { coverAlt } from '@/lib/cover';
 import { DRAFT_TOKEN_ACTOR, hasDraftToken } from '@/lib/draftToken';
+import { authorNames, pickAuthor } from '@/lib/authors';
 
 export const runtime = 'nodejs';
 
@@ -47,21 +48,34 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     : null;
   const site = (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
   const planned_url = found.wp_post_url || `${site}/${seoSlug(sched?.main_keyword || row.keyword || found.title || '')}/`;
-  return NextResponse.json({ ...row, facts, schedule, planned_url, cover_alt_shown: coverAlt(found) }, { status: 200 });
+  return NextResponse.json({ ...row, facts, schedule, planned_url, cover_alt_shown: coverAlt(found), author_options: await authorNames() }, { status: 200 });
 }
 
 export async function PATCH(req: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const nid = toId(id);
-  const { title, meta_description, content_html, status, cover_alt, if_updated_at }: any = (await req.json().catch(() => ({}))) || {};
+  const { title, meta_description, content_html, status, cover_alt, author, if_updated_at }: any = (await req.json().catch(() => ({}))) || {};
   const existing = await prisma.drafts.findUnique({ where: { id: nid } });
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   // Claude Code edits words only; approving, rejecting and publishing stay with a signed-in person.
   const viaToken = hasDraftToken(req);
-  if (viaToken && (status != null || cover_alt != null)) return NextResponse.json({ error: 'The edit token changes only the title, meta description and article. Approve or reject in the dashboard.' }, { status: 403 });
+  if (viaToken && (status != null || cover_alt != null || author != null)) return NextResponse.json({ error: 'The edit token changes only the title, meta description and article. Approve or reject in the dashboard.' }, { status: 403 });
   // Sent by scripts/draft.ts: refuse when someone saved the draft after it was read.
   if (if_updated_at != null && String(if_updated_at) !== String(existing.updated_at)) {
     return NextResponse.json({ error: `The draft was changed at ${existing.updated_at} (after it was read at ${if_updated_at}). Read it again and redo the edit.` }, { status: 409 });
+  }
+
+  // The partner the blog is published under: one of the names in the list, or "random" for a new
+  // random pick. Set on the draft and on its calendar row, which both publish routes read.
+  if (author != null) {
+    const names = await authorNames();
+    const name = author === 'random' ? pickAuthor(names) : names.find((n) => n === author);
+    if (!name) return NextResponse.json({ error: `Pick one of: ${names.join(', ')}.` }, { status: 400 });
+    if (existing.wp_post_url) return NextResponse.json({ error: 'This blog is already on the website; change its author in WordPress.' }, { status: 400 });
+    await prisma.drafts.update({ where: { id: nid }, data: { author: name } });
+    await prisma.blog_schedule.updateMany({ where: { draft_id: nid, status: { not: 'published' } }, data: { author: name, updated_at: sqlNow() } });
+    await activity.log('draft.author_set', { entityType: 'draft', entityId: nid, details: `"${existing.title}" will publish under ${name}${author === 'random' ? ' (picked at random)' : ''}`, actor: await getActor() });
+    return NextResponse.json({ ok: true, author: name });
   }
 
   // Was: COALESCE(?, col) for each field, updated_at = datetime('now')

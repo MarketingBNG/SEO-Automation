@@ -383,7 +383,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           <span className="text-muted-foreground">{draft.repair_attempts} auto-repair attempt(s)</span>
         </div>
 
-        <GoesLive draft={draft} />
+        <GoesLive draft={draft} onChanged={() => { onChange(); loadDraft(false); }} />
 
         {draft.production_state === 'NEEDS_ATTENTION' && draft.validation_issues && (
           <NoteList heading="Unresolved issues after auto-repair (fix manually before approving):">
@@ -616,9 +616,57 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   );
 }
 
+// The partner the blog is published under: picked at random when the draft is written, changeable
+// here (one of the names, or a new random pick) until the blog is on the website.
+function AuthorPicker({ draft, onChanged }: { draft: any; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const current = draft.author || draft.schedule?.author || '';
+  const names: string[] = draft.author_options || [];
+  async function set(author: string) {
+    setBusy(true);
+    setErr('');
+    try {
+      const res = await fetch(`/api/drafts/${draft.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ author }) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+      onChanged();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (draft.wp_post_url) {
+    return (
+      <div>
+        <span className="text-muted-foreground">Author: </span>
+        {current || 'the default WordPress author'}
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-muted-foreground">Author (published under): </span>
+      <select className="rounded-md border bg-background px-2 py-1 text-sm" value={names.includes(current) ? current : ''} disabled={busy} onChange={(e) => e.target.value && set(e.target.value)} aria-label="Author">
+        {!names.includes(current) && <option value="">{current || 'Not chosen yet (random at publish)'}</option>}
+        {names.map((n) => (
+          <option key={n} value={n}>
+            {n}
+          </option>
+        ))}
+      </select>
+      <Button variant="outline" size="sm" disabled={busy} onClick={() => set('random')}>
+        Pick at random
+      </Button>
+      {err && <span className="text-destructive">{err}</span>}
+    </div>
+  );
+}
+
 // The cover, the author, the address and when the blog goes live, in one place, so a reviewer
 // sees what they are approving.
-function GoesLive({ draft }: { draft: any }) {
+function GoesLive({ draft, onChanged }: { draft: any; onChanged: () => void }) {
   const s = draft.schedule;
   const plan = s?.publish_plan;
   const headline = plan ? plan.headline : draft.status === 'published' ? 'Published' : draft.status === 'approved' ? 'Approved, waiting for you to publish it' : 'Not scheduled';
@@ -643,11 +691,8 @@ function GoesLive({ draft }: { draft: any }) {
           <strong>{headline}.</strong>
           {detail && <span className="text-muted-foreground"> {detail}</span>}
         </div>
-        <div>
-          <span className="text-muted-foreground">Author: </span>
-          {draft.author || s?.author || 'a partner, chosen when the draft is written'}
-          {s?.expert_reviewer ? `, reviewed by ${s.expert_reviewer}` : ''}
-        </div>
+        <AuthorPicker draft={draft} onChanged={onChanged} />
+        {s?.expert_reviewer && <div className="text-muted-foreground">Reviewed by {s.expert_reviewer}</div>}
         <div className="break-all">
           <span className="text-muted-foreground">Address: </span>
           {draft.planned_url}
