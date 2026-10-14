@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import mammoth from 'mammoth';
 import prisma from '@/lib/prisma';
-import { readFile, saveFile } from '@/lib/storage';
+import { readFile, saveFile, deleteFile } from '@/lib/storage';
+import { makeCover } from '@/lib/cover';
+import * as activity from '@/lib/activity';
+import { getActor } from '@/lib/auth';
+import { sqlNow } from '@/lib/time';
 import { inlineImageKeys, UPLOAD_PREFIX } from '@/lib/blogImages';
 import { blogFromWordHtml, dataImages } from '@/lib/wordImport';
 import { methodNotAllowed, toId } from '../../../_lib/http';
@@ -21,7 +25,8 @@ const plain = (s: string) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/\
 
 // POST (multipart, file = .docx): reads a Word file, usually one downloaded here and edited, and
 // returns the blog it holds: { title, meta_description, content_html, notes }. Nothing is saved:
-// the editor shows it, and the person saves it like any other edit. Pictures that were already in
+// the editor shows it, and the person saves it like any other edit. The one exception is the cover:
+// a different picture above the title line replaces the cover right away (reported in notes). Pictures that were already in
 // the blog keep their stored file and alt text; new ones are stored like an uploaded image.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const id = toId((await params).id);
@@ -85,7 +90,34 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (dropped) notes.push(`${dropped} picture${dropped > 1 ? 's' : ''} could not be kept (only PNG, JPG, WebP or GIF under 8 MB). Add ${dropped > 1 ? 'them' : 'it'} under Images.`);
   if (kept) notes.push(`${kept} picture${kept > 1 ? 's' : ''} already in the blog kept.`);
 
+  // The banner above the title: a different picture from the current cover becomes the cover.
+  if (blog.cover) {
+    const m = blog.cover.match(/^data:image\/[\w.+-]+;base64,(.+)$/);
+    const bytes = m ? Buffer.from(m[1], 'base64') : null;
+    if (bytes?.length) {
+      let current: Buffer | null = draft.featured_image_path ? await readFile(draft.featured_image_path).catch(() => null) : null;
+      if (!current) {
+        const row = await prisma.blog_schedule.findFirst({ where: { draft_id: id }, select: { author: true } });
+        current = await makeCover(draft.title || 'Untitled', row?.author || draft.author || null).catch(() => null);
+      }
+      if (!current || sha(current) !== sha(bytes)) {
+        const format = await sharp(bytes).metadata().then((x) => x.format as string).catch(() => '');
+        if (EXT[format] && bytes.length <= MAX_IMAGE_BYTES) {
+          const key = `draft-${id}-${Date.now()}${EXT[format]}`;
+          await saveFile(key, bytes);
+          if (draft.featured_image_path) await deleteFile(draft.featured_image_path).catch(() => {});
+          await prisma.drafts.update({ where: { id }, data: { featured_image_path: key, updated_at: sqlNow() } });
+          await activity.log('draft.creative_uploaded', { entityType: 'draft', entityId: id, details: `"${draft.title}" (cover from Word file)`, actor: await getActor() });
+          notes.push('The cover (banner) was replaced with the picture above the title in the Word file. This is already saved; check its alt text under Cover.');
+        } else {
+          notes.push('The picture above the title could not be used as the cover (only PNG, JPG, WebP or GIF under 8 MB). Upload it under Cover.');
+        }
+      }
+    }
+  }
+
   return NextResponse.json({
+    cover_changed: notes.some((n) => n.startsWith('The cover (banner) was replaced')),
     title: blog.title || draft.title || '',
     meta_description: blog.meta ?? draft.meta_description ?? '',
     content_html: content,

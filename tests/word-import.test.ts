@@ -45,3 +45,10 @@ test('a Word file written from scratch is taken as it is', () => {
   assert.equal(blog.meta, null);
   assert.equal(blog.content, '<p>Intro paragraph.</p><h2>Part</h2><p>By the way, <a>this</a> is text.</p>');
 });
+test('the picture above the title is returned as the cover', () => {
+  const html = '<p><img src="data:image/png;base64,QUJD" alt="x" /></p><h1>Title</h1><h2>One</h2><p>Body text.</p>';
+  const blog = blogFromWordHtml(html);
+  assert.equal(blog.cover, 'data:image/png;base64,QUJD');
+  assert.ok(!blog.content.includes('QUJD'));
+  assert.equal(blogFromWordHtml('<h1>Title</h1><p>Body.</p>').cover, null);
+});

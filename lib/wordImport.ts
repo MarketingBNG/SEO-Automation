@@ -39,7 +39,8 @@ function fixTable(table: string): string {
   return t;
 }
 
-export type WordBlog = { title: string | null; meta: string | null; content: string };
+// cover: the picture above the title line (the banner), as a data: URI, or null when there is none.
+export type WordBlog = { title: string | null; meta: string | null; content: string; cover: string | null };
 
 export function blogFromWordHtml(input: string): WordBlog {
   let html = String(input || '');
@@ -60,8 +61,10 @@ export function blogFromWordHtml(input: string): WordBlog {
   // The title line: the first Heading 1 before any section heading. The cover sits above it.
   const h1 = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
   const h2At = html.search(/<h2\b/i);
+  let cover: string | null = null;
   if (h1 && (h2At < 0 || h1.index! < h2At)) {
     title = text(h1[1]) || null;
+    cover = html.slice(0, h1.index!).match(/<img\b[^>]*\bsrc="(data:image\/[^"]+)"/i)?.[1] || null;
     html = html.slice(h1.index! + h1[0].length);
   }
 
@@ -81,7 +84,7 @@ export function blogFromWordHtml(input: string): WordBlog {
     .replace(/(<a\b[^>]*?)\s+href="(?!https?:|mailto:|tel:|#|\/)[^"]*"/gi, '$1')
     .trim();
 
-  return { title, meta, content: html };
+  return { title, meta, content: html, cover };
 }
 
 // The pictures in the HTML (data: URIs from mammoth), in order.

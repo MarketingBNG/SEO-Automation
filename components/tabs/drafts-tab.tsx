@@ -268,6 +268,10 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
       setTitle(json.title || '');
       setMeta(json.meta_description || '');
       setContent(json.content_html || '');
+      if (json.cover_changed) {
+        onChange();
+        loadDraft(false);
+      }
       setWordNote(['Loaded from the Word file. Check the preview, then press Save changes (or Approve). Nothing is saved until you do.', ...(json.notes || [])].join(' '));
     } catch (err: any) {
       setWordNote('Error: ' + err.message);
