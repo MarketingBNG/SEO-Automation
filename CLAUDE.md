@@ -1,1 +1,22 @@
 @AGENTS.md
+
+# Working rules for this repo
+
+- Code changes: show the diff, and push to `main` (which deploys) only after the user confirms.
+
+## Editing a dashboard blog draft from Claude Code (no API credits)
+
+When the user asks for changes to a blog in Drafts & Review ("blog 81", "the ITIN blog"), edit it
+here with `scripts/draft.ts` instead of the dashboard's AI, so no Anthropic API credits are used.
+It needs `DRAFT_EDIT_TOKEN` in this environment (same value as on the server; see lib/draftToken.ts).
+
+1. `npx tsx scripts/draft.ts list <words>` to find the id, then `npx tsx scripts/draft.ts get <id>`.
+2. Edit `.drafts/<id>/content.html` (and title / meta_description in `.drafts/<id>/draft.json`) with
+   exact, minimal edits. Keep the HTML structure, images and `[VISUAL SUGGESTION: ...]` notes.
+3. `npx tsx scripts/draft.ts diff <id>` and show the user the changes.
+4. Only after the user confirms: `npx tsx scripts/draft.ts put <id>`.
+
+Write in the house voice from `skills/seo-blog-playbook/SKILL.md` (no em dashes, no AI filler), and
+never invent a figure, rate, deadline or section number: check it on an official source first.
+The token cannot approve, reject or publish; those stay in the dashboard. A blog already on the
+website (wp_post_url) is not changed by `put`.

@@ -8,6 +8,7 @@ import { needsExpertReview, publishPlan } from '@/lib/strategy/core';
 import { requireExpert } from '@/lib/reviewers';
 import { seoSlug } from '@/lib/wordpress';
 import { coverAlt } from '@/lib/cover';
+import { DRAFT_TOKEN_ACTOR, hasDraftToken } from '@/lib/draftToken';
 
 export const runtime = 'nodejs';
 
@@ -52,9 +53,16 @@ export async function GET(req: NextRequest, { params }: Ctx) {
 export async function PATCH(req: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const nid = toId(id);
-  const { title, meta_description, content_html, status, cover_alt }: any = (await req.json().catch(() => ({}))) || {};
+  const { title, meta_description, content_html, status, cover_alt, if_updated_at }: any = (await req.json().catch(() => ({}))) || {};
   const existing = await prisma.drafts.findUnique({ where: { id: nid } });
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  // Claude Code edits words only; approving, rejecting and publishing stay with a signed-in person.
+  const viaToken = hasDraftToken(req);
+  if (viaToken && (status != null || cover_alt != null)) return NextResponse.json({ error: 'The edit token changes only the title, meta description and article. Approve or reject in the dashboard.' }, { status: 403 });
+  // Sent by scripts/draft.ts: refuse when someone saved the draft after it was read.
+  if (if_updated_at != null && String(if_updated_at) !== String(existing.updated_at)) {
+    return NextResponse.json({ error: `The draft was changed at ${existing.updated_at} (after it was read at ${if_updated_at}). Read it again and redo the edit.` }, { status: 409 });
+  }
 
   // Was: COALESCE(?, col) for each field, updated_at = datetime('now')
   const data: any = {};
@@ -98,7 +106,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
       entityType: 'draft',
       entityId: Number(id),
       details: `"${updated.title}"`,
-      actor: await getActor(),
+      actor: viaToken ? DRAFT_TOKEN_ACTOR : await getActor(),
     });
   }
 

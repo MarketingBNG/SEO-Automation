@@ -53,3 +53,6 @@ data/
 .vercel
 .env*
 /uploads
+
+# Local copies of dashboard drafts edited from Claude Code (scripts/draft.ts)
+/.drafts/

@@ -160,8 +160,11 @@ VOICE (USAIndiaCFO blog house style): ${voiceGuidelines}
 - Where the piece gives guidance, include a brief line noting it is general information, not
   individualized tax/legal advice.
 - Length: match what the pages ranking now cover. The request gives a LENGTH TARGET measured from the
-  current top results; stay inside it. Without one, about ${maxWords} words. Never pad, and cut
-  background, generic definitions and repeated caveats before adding words.
+  current top results; aim for it. Without one, about ${maxWords} words. Never pad, and cut
+  background, generic definitions and repeated caveats before adding words. But completeness beats
+  length: never shorten a rule by dropping its conditions, limits, timing, exceptions or the steps
+  around it (see COMPLETENESS in the playbook). If the topic cannot be covered fully near the target,
+  go over it and drop whole low-value sections instead, and say so in ===RESEARCH_NOTES===.
 - Both sides of the border: where the topic touches both countries, cover the US side, the India side
   and how they connect (treaty relief, credits, reporting in both places).${playbookReference}${
     lessons ? `\n\nLESSONS LEARNED (from our reviewers' rejections, blogs held by checks, fact-check corrections and how published posts performed; follow them):\n${lessons}` : ''
@@ -528,8 +531,11 @@ possible, grouping claims that share a source.${
       ? ' Also find any OTHER hard claim in the article (a number, rate, threshold, deadline, statute or section, form number, or "new" rule) that is in none of the lists, and verify it too.'
       : ''
   }
-verdict is "correct" only when a primary source confirms it as currently applicable. Otherwise
-"incorrect" (give the correction) or "unverifiable". Return ONLY JSON between ===JSON=== and ===END===:
+verdict is "correct" only when a primary source confirms it as currently applicable AND the claim is
+complete enough not to mislead: a claim that is true but leaves out a condition that changes what the
+reader must do (who it applies to, the trigger, a threshold or limit, "whichever is earlier", the order
+of steps, an exemption or exception the source states) is "incorrect", with the complete version as
+the correction. Otherwise "incorrect" (give the correction) or "unverifiable". Return ONLY JSON between ===JSON=== and ===END===:
 {"checks":[{"claim":"exact sentence or phrase","verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}]}`;
   const user = (group: string[], i: number) =>
     `${article}${

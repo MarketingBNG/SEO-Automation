@@ -112,6 +112,27 @@ Known 2025-2026 traps. Check their current status on every run:
 - FBAR is the Report of Foreign Bank and Financial Accounts (FinCEN Form 114). The duty falls on US persons, not on "NRIs". The non-willful penalty applies per report, not per account (Bittner v. United States, 2023). Penalty caps are inflation-adjusted, so always state the adjustment year.
 - Form 5472 for a foreign-owned US disregarded entity is attached to a pro forma Form 1120 and cannot be e-filed. Confirm the current fax or mail instructions and the $25,000 penalty in the IRS instructions.
 - Never use the old IRS Circular 230 "not intended to be used to avoid penalties" legend.
+- India, 1961 Act to 2025 Act: a circular, notification, exemption or carve-out issued under the 1961 Act does not automatically carry over. Say whether it continues under the 2025 Act, or write "issued under the 1961 Act; confirm whether it continues under the 2025 Act". If you cannot confirm a renumbered form or rule in the Income-tax Rules, 2026 text, describe the report and give the 1961 Act form with its period (for example "the transfer pricing report (Form 3CEB under the 1961 Act)") instead of guessing the new number.
+
+### Completeness: state every rule in full
+
+Reviewers' most common correction is not a wrong fact but a half-stated one. A sentence can be true and still mislead because a condition is missing. For every rule, filing or limit the post mentions, give all of these that the source states:
+- Who it applies to, and who it does not (for example "withholding on effectively connected income allocated to foreign partners", not "withholding on foreign partners").
+- The trigger and the exact timing, including "whichever is earlier" or "within X days of Y" (for example "Form FC is due at the remittance or the financial commitment, whichever is earlier").
+- The order of steps where order matters (what must be filed or obtained before money moves).
+- Thresholds and limits with their numbers (for example the investment limit as a percentage of net worth, a minimum fee, a ₹ threshold for TCS).
+- The statutory condition in the law's own terms, not a paraphrase such as "if filed on time".
+- Exemptions, exceptions and carve-outs (for example who does not file an APR; the POEM turnover carve-out), and the alternative where the normal route does not fit (for example unaudited accounts where US law requires no audit).
+- What happens if it was missed, and how to put it right (late submission fee, compounding, a late filing with reasonable cause).
+- How the other country treats the same thing where the post is cross-border (for example an LLC that is tax-transparent in the US but a company in India, and the foreign tax credit mismatch that creates).
+- Other filings the same event triggers, on both sides (for example a BEA survey for a new US business with a foreign parent; an ITIN and Form 1040-NR when the owner has effectively connected income).
+- The practical evidence or documents a reader will be asked for (for example what a US bank asks for to open the account; board minutes and records of where decisions are made for POEM).
+- Busy periods or waiting times the official source mentions (for example ITIN processing in the peak filing season).
+Keep each item short: one sentence or one table cell is usually enough. If an item cannot be verified from a primary source, leave it out and list it in the Facts Register as UNVERIFIED for the reviewer, rather than stating the rule without it.
+
+Topic checklist: a US company for an Indian founder or Indian company. Verify each against the current primary source and cover it where it applies:
+- India side (FEMA overseas investment): the resident individual route and its limits (an individual cannot set up a step-down subsidiary through it, so a "flip" needs a different structure; the limit on layers of subsidiaries); the Indian company route and its limit as a percentage of net worth (OI Rules 2022, Schedule I); TCS on the remittance (threshold, who collects it, how credit is claimed); Form FC and its timing; the Annual Performance Report, its exemptions and the unaudited-accounts position; what to do if Form FC or the APR was missed; POEM and the evidence of where decisions are made; transfer pricing reporting.
+- US side: entity choice and how India treats each entity; state fees and recurring state charges with their numbers (for Delaware, the franchise tax under both calculation methods, with the official calculator); EIN (cite the Form SS-4 instructions) and when an ITIN is needed; the federal returns and information returns (Form 5472, partnership return and IRC §1446 withholding for a multi-member LLC); BEA survey BE-13 for a new foreign-owned US business; opening the US bank account.
 
 ## 2. Keyword strategy
 
@@ -185,6 +206,7 @@ Length: follow the brief's word cap (default 1600 words for standard posts). Rul
 
 - Write in the voice of the named credentialed author. Show experience ("we see", "our clients often ask") only when the brief backs it. Never fabricate experience, clients, results or credentials.
 - Cite primary sources by name inline: the statute and section, the form number and its instructions, the agency. For example: "under Section 90 of the Income-tax Act, 1961", "FinCEN Form 114", "IRS Notice 2025-55".
+- Cite the rule's own text: the form's instructions, the regulation, the rule or the circular. Do not cite secondary IRS material such as the Internal Revenue Manual or IRS FAQs for a point the form instructions or regulation state.
 - For cross-border posts, cover both countries' obligations and name the actual forms on each side:
   - US examples: Form 5472 with pro forma 1120, FBAR, Form 8938, Form 1116, Form 8833, W-8BEN.
   - India examples: ITR-2 or ITR-3, Form 67, Form 10F, TRC, Schedule FA, ODI under FEMA, LRS.
@@ -266,6 +288,9 @@ Before you output, confirm every item:
 13. There are no testimonials, fees, "free" offers, superlatives, client counts or CPA-firm claims.
 14. The article is within the word cap, or you have added a note explaining why not.
 15. Author and reviewer come from the brief or are left as placeholders, never invented.
+16. Every rule, filing and limit is stated in full (see "Completeness" in section 1): who it applies to, trigger and timing, order of steps, the number, exemptions, how to fix a miss, how the other country treats it, and the related filings. Nothing was cut to fit the word count.
+17. Every 1961 Act circular, carve-out or form you mention says whether it continues under the 2025 Act.
+18. Numbers and words are separated by normal spaces ("US$60 or US$0.0002 per dollar"), never run together.
 <!-- WRITER_PLAYBOOK:END -->
 
 ## Audit gates

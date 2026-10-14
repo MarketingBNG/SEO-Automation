@@ -82,6 +82,15 @@ function plainText(html) {
     .trim();
 }
 
+// Text whose spaces were lost ("US$60 orUS$0.0002", "US$11,850,sotheIndiancompany"): a word run
+// into an amount, an amount run into words, or one very long run of letters.
+function gluedText(text) {
+  const found = new Set<string>();
+  const res = [/[A-Za-z]*[a-z]{2}(?:US\$|USD\b|INR\b|₹)[\d.,]*/g, /(?:US\$|USD|INR|₹|\$)\s?\d[\d.,]*[a-z]{4,}[A-Za-z]*/g, /\b[A-Za-z]{25,}\b/g];
+  for (const re of res) for (const m of String(text || '').matchAll(re)) if (found.size < 3) found.add(m[0].slice(0, 50));
+  return [...found];
+}
+
 function wordCount(html) {
   const text = stripHtml(html);
   if (!text) return 0;
@@ -250,6 +259,11 @@ async function validateDraft({ title, meta, content, facts, keyword, paaQuestion
     if (lowerText.includes(phrase.toLowerCase())) {
       issues.push(`Contains a banned AI-filler phrase: "${phrase}". Rewrite that section.`);
     }
+  }
+
+  const glued = gluedText(bodyText);
+  if (glued.length) {
+    issues.push(`Words are run together with no spaces: ${glued.map((g) => `"${g}"`).join(', ')}. Retype these sentences as plain text with normal spaces between words and figures (e.g. "US$60 or US$0.0002 per dollar").`);
   }
 
   // Decoded, so &#8212; and &mdash; count too. "--" is checked on the text only (not the HTML,
@@ -535,4 +549,4 @@ function craftChecks({ title, meta, content, keyword, plainText, wc, allLinks, i
   return { issues, warnings };
 }
 
-export { validateDraft, wordCount, stripHtml, faqQuestions, markUsedQuestions, BANNED_PHRASES };
+export { validateDraft, gluedText, wordCount, stripHtml, faqQuestions, markUsedQuestions, BANNED_PHRASES };

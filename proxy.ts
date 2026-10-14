@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { actionFor, can, deniedMessage, isRole } from '@/lib/permissions';
+import { draftTokenAllows, hasDraftToken } from '@/lib/draftToken';
 
 // Replaces the old middleware.js Basic Auth: every page and API route needs a signed-in
 // @usaindiacfo.com Google account. Vercel Cron calls carry `Authorization: Bearer CRON_SECRET`.
@@ -12,6 +13,13 @@ export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
     return NextResponse.next();
+  }
+
+  // Claude Code's blog edits (lib/draftToken.ts): read drafts, change title / meta / article only.
+  if (hasDraftToken(req)) {
+    return draftTokenAllows(req.method, pathname)
+      ? NextResponse.next()
+      : NextResponse.json({ error: 'The edit token only reads blog drafts and changes their title, meta description and article.' }, { status: 403 });
   }
 
   const cronSecret = process.env.CRON_SECRET;
