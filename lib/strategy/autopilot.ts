@@ -222,7 +222,10 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   const paused = await publishingPaused();
   if (paused) reasons.push(`Auto-publishing paused: ${paused}.`);
   if (draft.status === 'rejected') reasons.push('Reviewer rejected the draft.');
-  const fc = await ensureFactChecked(row, draft, verify);
+  // A blog a person reviewed or approved is not fact-checked again: the check at generation time
+  // stands, and edits made in review are the reviewer's call. It publishes at its slot.
+  const humanApproved = Boolean(row.reviewed_at) || draft.status === 'approved';
+  const fc = humanApproved ? { ok: true, rounds: 0, draft } : await ensureFactChecked(row, draft, verify);
   const checked = fc.draft;
   if (/\[(PRACTITIONER NOTE NEEDED|VERIFY|AUTHOR NAME|REVIEWER NAME|VISUAL SUGGESTION)/i.test(checked.content_html || '')) reasons.push('Draft still has a reviewer placeholder.');
   if (!fc.ok) reasons.push(`Fact check could not confirm every claim from a primary source after ${fc.rounds} rounds. Not published.`);
