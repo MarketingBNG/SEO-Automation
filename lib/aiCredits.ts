@@ -11,7 +11,7 @@
 import prisma from './prisma';
 import * as settings from './settings';
 import * as activity from './activity';
-import { keyInUse, secondaryKeyConfigured, retryMainKey } from './anthropicClient';
+import { keyInUse, secondaryKeyConfigured, retryMainKey, switchedToSecondary, keyWorks } from './anthropicClient';
 
 // USD per 1M tokens (Anthropic first-party API). Cache writes are 1.25x input (5-minute cache).
 const PRICES: Record<string, { input: number; output: number; cacheRead: number }> = {
@@ -232,9 +232,34 @@ export async function assertCredits() {
   }
 }
 
-// Anthropic's own "out of credit" answer pauses everything too (with a secondary key it reaches
-// here only when both keys are out of credit).
-export async function onApiError(err: any) {
+// Anthropic's own "out of credit" answer. keyKind: the key the failed request used. On the main key
+// with a secondary key set up, new requests move to the secondary key and nothing pauses; AI work
+// pauses only when the secondary key is out too (or there is none).
+export async function onApiError(err: any, keyKind: 'main' | 'secondary' = 'main') {
   const raw = `${err?.message || ''} ${JSON.stringify(err?.error || '')}`;
-  if (/credit balance is too low|out of credit/i.test(raw)) await pauseAi('Anthropic reported that the account is out of credit.');
+  if (!/credit balance is too low|out of credit/i.test(raw)) return;
+  if (keyKind === 'main' && secondaryKeyConfigured()) {
+    switchedToSecondary();
+    return;
+  }
+  await pauseAi(secondaryKeyConfigured() ? 'Both Anthropic API keys (main and secondary) are out of credit.' : 'Anthropic reported that the account is out of credit.');
+}
+
+export const isCreditError = (err: any) => err?.name === 'CreditPausedError' || /out of credit|credit balance is too low/i.test(`${err?.message || ''} ${JSON.stringify(err?.error || '')}`);
+
+// Called by the scheduler every 15 minutes: while AI work is paused, checks with a tiny request
+// whether a key works again (top-up, auto-reload, or a new secondary key) and, if so, lifts the
+// pause and restarts the work that stopped: paused strategies and blogs left in the queue. Their
+// finished AI steps are reused (lib/aiReplay.ts), so nothing done before is paid for twice.
+export async function autoResumeAi(): Promise<string | null> {
+  if ((await settings.get('ai_paused')) !== '1') return null;
+  const main = await keyWorks('main');
+  const second = !main && (await keyWorks('secondary'));
+  if (!main && !second) return null;
+  if (main) retryMainKey();
+  else switchedToSecondary();
+  await resumeAi('automatic (credits available again)');
+  await activity.log('ai.auto_resumed', { details: `AI credits are available again on the ${main ? 'main' : 'secondary'} key, so paused work started again by itself.` });
+  const { resumeCreditPaused } = await import('./aiReplay');
+  return resumeCreditPaused();
 }

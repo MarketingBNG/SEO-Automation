@@ -896,7 +896,7 @@ export default function SettingsTab() {
                 setBingStatus('Testing…');
                 const json = await fetch('/api/bing/test').then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
                 markConn('bing', json);
-                setBingStatus(json.ok ? `Connected: ${json.site} is verified.` : `Not working: ${json.error}`);
+                setBingStatus(json.ok ? (json.via === 'wordpress' ? `Connected through WordPress: ${json.plugins.join(', ')} sends new posts to Bing. An API key here is optional.` : `Connected: ${json.site} is verified.`) : `Not working: ${json.error}`);
               }}
             >
               <PlugZap /> Test connection

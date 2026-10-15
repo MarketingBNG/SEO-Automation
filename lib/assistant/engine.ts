@@ -165,7 +165,7 @@ async function runLoop(conv, emit, signal) {
         jsonRetries = 0;
         await recordUsage({ model: message.model || MODEL, usage: message.usage, feature: 'assistant' });
       } catch (err: any) {
-        await onApiError(err);
+        await onApiError(err, (client as any).keyKind);
         if (signal.aborted || err instanceof Anthropic.APIError || jsonRetries++ >= 2) throw err;
         emit({ type: 'notice', text: 'Retrying a step that came back malformed…' });
         continue;

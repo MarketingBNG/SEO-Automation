@@ -6,6 +6,7 @@
 //  - Pause: the run waits at its next checkpoint (between steps) until resumed.
 //  - Stop: the run is cancelled at once (a running Claude request is aborted too).
 // A paused run that the server lost (restart) starts again from the beginning when resumed.
+import { withReplay, clearReplay } from '../aiReplay';
 import prisma from '../prisma';
 import * as activity from '../activity';
 import { generateStrategy } from './generate';
@@ -28,6 +29,8 @@ export function progressWriter(write: (stage: string, percent: number) => Promis
 }
 
 const ACTIVE = ['generating', 'paused', 'stopping'];
+// Set on a run cut off by a server restart; the scheduler starts it again (resumeRestarted).
+const RESTART_PAUSED = 'Paused: the server restarted. It starts again by itself (finished steps are kept).';
 // Runs alive in this server process, so Stop can abort them immediately. Kept on globalThis so
 // every route (each may load its own copy of this module) sees the same list.
 const g = globalThis as unknown as { __strategyRuns?: Map<number, AbortController> };
@@ -59,16 +62,21 @@ function run(id: number, window: StrategyWindow, actor: string) {
   );
   // Detached on purpose: the self-hosted server keeps running it after the request returns.
   const began = Date.now();
-  void generateStrategy({ window, actor, rowId: id, onProgress, signal: controller.signal, checkpoint: () => checkpointFor(id, controller) })
-    .then(() => recordDuration('strategy', (Date.now() - began) / 1000))
+  // Finished AI steps are saved, so Resume after a credit stop or a restart reuses them (lib/aiReplay.ts).
+  void withReplay(`strategy-${id}`, () => generateStrategy({ window, actor, rowId: id, onProgress, signal: controller.signal, checkpoint: () => checkpointFor(id, controller) }))
+    .then(async () => {
+      await clearReplay(`strategy-${id}`);
+      recordDuration('strategy', (Date.now() - began) / 1000);
+    })
     .catch(async (err: any) => {
       // Credits ran low: keep the run paused (not failed) so Resume starts it again after a top-up.
       if (err?.name === 'CreditPausedError' || /out of credit|credit balance is too low/i.test(err?.message || '')) {
-        await prisma.seo_strategies.update({ where: { id }, data: { status: 'paused', progress_stage: 'Paused: AI credits low. Add credits, update the balance in Settings, then Resume.' } }).catch(() => {});
+        await prisma.seo_strategies.update({ where: { id }, data: { status: 'paused', progress_stage: 'Paused: AI credits low. It starts again by itself when credits are back (finished steps are kept).' } }).catch(() => {});
         return;
       }
       const stopped = controller.signal.aborted || err?.name === 'AbortError' || err?.name === 'APIUserAbortError' || /stopped by user/i.test(err?.message || '');
       if (stopped) {
+        await clearReplay(`strategy-${id}`);
         await prisma.seo_strategies.update({ where: { id }, data: { status: 'stopped', progress_stage: 'Stopped' } }).catch(() => {});
         await activity.log('strategy.generation_stopped', { entityType: 'seo_strategy', entityId: id, actor });
         return;
@@ -102,7 +110,7 @@ export async function markInterrupted() {
       data:
         r.status === 'stopping'
           ? { status: 'stopped', progress_stage: 'Stopped' }
-          : { status: 'failed', progress_stage: 'Interrupted', error: 'This run was interrupted because the server restarted (for example a redeploy). Click Generate to start a new one.' },
+          : { status: 'paused', progress_stage: RESTART_PAUSED },
     });
   }
 }
@@ -130,4 +138,11 @@ export async function controlStrategyJob(id: number, action: 'pause' | 'resume' 
   }
   await activity.log(`strategy.generation_${action}`, { entityType: 'seo_strategy', entityId: id, actor });
   return prisma.seo_strategies.findUnique({ where: { id } });
+}
+
+// Starts again the runs cut off by a server restart (called by the scheduler), unless AI work is
+// paused for credits; then autoResumeAi does it when credits are back.
+export async function resumeRestarted() {
+  const rows = await prisma.seo_strategies.findMany({ where: { status: 'paused', progress_stage: RESTART_PAUSED }, select: { id: true } });
+  for (const r of rows) await controlStrategyJob(r.id, 'resume', 'automatic (after a server restart)').catch((e: any) => console.error('Strategy restart failed:', e.message));
 }

@@ -34,3 +34,22 @@ export async function testBing() {
   if (!ours) throw new Error(`Connected, but ${SITE()} is not a verified site on this Bing account (found: ${sites.join(', ') || 'none'})`);
   return { site: ours, verified: true };
 }
+
+// Without an API key here, Bing may still get every new post from WordPress itself: Microsoft's
+// "Bing URL Submissions" plugin, an IndexNow plugin, or IndexNow in Rank Math or Yoast. Lists the
+// active plugins (needs the WordPress user to be allowed to see plugins).
+const BING_PLUGINS: { test: RegExp; name: string }[] = [
+  { test: /bing-webmaster-tools|bing-url-submission/i, name: 'Bing URL Submissions (Microsoft)' },
+  { test: /indexnow/i, name: 'IndexNow' },
+  { test: /seo-by-rank-math|rank-math/i, name: 'Rank Math (IndexNow, if it is turned on under Instant Indexing)' },
+  { test: /wordpress-seo|yoast/i, name: 'Yoast SEO (IndexNow, if it is turned on)' },
+];
+
+export async function bingViaWordPress(): Promise<{ plugins: string[] } | { error: string }> {
+  const { wpRequest } = await import('./wordpress');
+  const res: any = await wpRequest('GET', '/wp/v2/plugins', { query: { status: 'active', _fields: 'plugin,name' } }).catch((e: any) => ({ error: e.message }));
+  if (res?.error) return { error: res.error };
+  const list: any[] = Array.isArray(res?.json) ? res.json : [];
+  const plugins = BING_PLUGINS.filter((p) => list.some((x) => p.test.test(`${x.plugin} ${x.name}`))).map((p) => p.name);
+  return { plugins };
+}

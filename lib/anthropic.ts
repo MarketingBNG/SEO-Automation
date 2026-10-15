@@ -2,7 +2,8 @@
 import * as settings from './settings';
 import prisma from './prisma';
 import { rethrowFriendly } from './apiErrors';
-import { anthropicClient } from './anthropicClient';
+import { anthropicClient, clientKeyKind, secondaryKeyConfigured, switchedToSecondary } from './anthropicClient';
+import { replayScope, requestHash, savedStep, saveStep } from './aiReplay';
 import { assertCredits, recordUsage, onApiError } from './aiCredits';
 import { validateDraft, markUsedQuestions } from './validation';
 import { getWriterPlaybook, getAuditGates } from './playbook';
@@ -274,7 +275,21 @@ function withCache(systemPrompt, conversation) {
   return { system, messages };
 }
 
-async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40, onActivity, idleMs = IDLE_MS() }: any = {}) {
+// Inside a resumable run (lib/aiReplay.ts) a request made before returns its saved answer, so a
+// blog or strategy started again after it stopped pays only for the steps not done yet.
+async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
+  const ctx = replayScope();
+  if (!ctx) return callClaudeLive(systemPrompt, userMessages, signal, opts);
+  const { onActivity, idleMs, ...rest } = opts;
+  const hash = requestHash({ systemPrompt, userMessages, rest });
+  const saved = await savedStep(ctx.scope, hash);
+  if (saved && saved.run !== ctx.run) return { ...saved, activity: { part: 0, searches: 0, chars: 0, retries: 0, lastEventAt: Date.now(), note: 'reused from the earlier run' } };
+  const result = await callClaudeLive(systemPrompt, userMessages, signal, opts);
+  await saveStep(ctx.scope, hash, { run: ctx.run, text: result.text, assistantMessages: result.assistantMessages, stopReason: result.stopReason });
+  return result;
+}
+
+async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40, onActivity, idleMs = IDLE_MS() }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
   const assistantMessages: any[] = [];
@@ -303,7 +318,7 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
         tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxUses }],
         messages: conversation,
       }, signal).catch(async (err: any) => {
-        await onApiError(err);
+        await onApiError(err, 'secondary');
         throw err;
       });
       await recordUsage({ model, usage: response.usage, feature, batch: true });
@@ -378,7 +393,7 @@ async function callClaude(systemPrompt, userMessages, signal, { maxUses = 8, eff
       } catch (err: any) {
         if (signal?.aborted) throw err; // stopped by the user
         if (!stalled && (err?.name === 'AbortError' || err?.name === 'APIUserAbortError')) throw err;
-        await onApiError(err);
+        await onApiError(err, clientKeyKind(client));
         if (attempt >= 4 && stalled) {
           throw Object.assign(new Error(`The AI sent nothing for ${Math.round(idleMs / 60000)} minutes, ${attempt + 1} times in a row. Try again, or raise CLAUDE_IDLE_TIMEOUT_MS.`), { cause: err });
         }
@@ -434,7 +449,15 @@ async function runBatchTurn(client, params, signal) {
   for await (const item of await client.messages.batches.results(created.id)) {
     if (item.custom_id !== 'turn') continue;
     if (item.result.type === 'succeeded') return item.result.message;
-    if (item.result.type === 'errored') throw new Error(`Batch request failed: ${item.result.error?.error?.message || item.result.error?.type || 'unknown error'}`);
+    if (item.result.type === 'errored') {
+      const why = item.result.error?.error?.message || item.result.error?.type || 'unknown error';
+      // The main key ran out of credit while the batch waited: send it again on the secondary key.
+      if (/credit balance is too low|out of credit/i.test(why) && clientKeyKind(client) === 'main' && secondaryKeyConfigured()) {
+        switchedToSecondary();
+        return runBatchTurn(anthropicClient(), params, signal);
+      }
+      throw new Error(`Batch request failed: ${why}`);
+    }
     throw new Error(`Batch request ${item.result.type}.`);
   }
   throw new Error(`Batch ${created.id} returned no result.`);

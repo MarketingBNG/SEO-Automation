@@ -27,7 +27,7 @@ export function retryMainKey() {
   mainOutAt = 0;
 }
 
-function switchedToSecondary() {
+export function switchedToSecondary() {
   const first = !mainResting();
   mainOutAt = Date.now();
   if (!first) return;
@@ -57,8 +57,41 @@ export function anthropicClient(): Anthropic {
     if (!OUT_OF_CREDIT.test(body)) return res;
     switchedToSecondary();
     key = secondary;
-    return fetch(url, withKey(init, key));
+    const again = await fetch(url, withKey(init, key));
+    if (again.status === 401 || again.status === 403) secondaryRejected(again.status);
+    return again;
   };
 
-  return new Anthropic({ apiKey: key, fetch: fetchWithBackup });
+  const client = new Anthropic({ apiKey: key, fetch: fetchWithBackup });
+  // Which key this client is on now (it moves to the secondary one on an out-of-credit answer).
+  Object.defineProperty(client, 'keyKind', { get: () => (secondary && key === secondary ? 'secondary' : 'main') });
+  return client;
+}
+
+export const clientKeyKind = (client: any): 'main' | 'secondary' => (client?.keyKind === 'secondary' ? 'secondary' : 'main');
+
+// The secondary key was refused by Anthropic (wrong or revoked key, for example one that is not an
+// sk-ant-api03- API key): said once per hour in the activity log and as an alert.
+let rejectedSaidAt = 0;
+function secondaryRejected(status: number) {
+  if (Date.now() - rejectedSaidAt < TRY_MAIN_AGAIN_MS) return;
+  rejectedSaidAt = Date.now();
+  const text = `The main Anthropic API key is out of credit and the secondary key (ANTHROPIC_API_KEY_SECONDARY) was refused by Anthropic (HTTP ${status}). Put a valid API key (it starts with sk-ant-api03-) from an account with credit in Coolify and redeploy.`;
+  console.warn(text);
+  import('./activity').then((a) => a.log('ai.secondary_key_refused', { details: text })).catch(() => {});
+  import('./notify').then((n) => n.notify('AI credits: the secondary API key does not work', text, { action: 'alert.credits_secondary_refused' })).catch(() => {});
+}
+
+// Whether a key can run a request right now: one tiny request (1 output token on the smallest
+// model, a fraction of a cent). Used to resume AI work by itself after a top-up.
+export async function keyWorks(which: 'main' | 'secondary'): Promise<boolean> {
+  const k = which === 'main' ? process.env.ANTHROPIC_API_KEY : process.env.ANTHROPIC_API_KEY_SECONDARY;
+  if (!k) return false;
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': k, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: process.env.PROBE_MODEL || 'claude-haiku-5-5', max_tokens: 1, messages: [{ role: 'user', content: 'ok' }] }),
+    signal: AbortSignal.timeout(30000),
+  }).catch(() => null);
+  return !!res?.ok;
 }

@@ -11,8 +11,18 @@ import { progressWriter } from './strategy/jobs';
 import { blogRuns } from './blogRuns';
 import { authorNames, pickAuthor } from './authors';
 import { startedAt } from './jobTimer';
+import { withReplay, clearReplay } from './aiReplay';
 
+// The run's finished AI steps are saved (lib/aiReplay.ts): if it stops for credits or a restart, the
+// next run of the same keyword reuses them. Once the draft is saved they are deleted.
 export async function runBlogJob(keyword: any, controller: AbortController, send: (evt: any) => void = () => {}) {
+  const scope = `blog-${keyword.id}`;
+  await withReplay(scope, () => runBlogJobOnce(keyword, controller, send));
+  const after = await prisma.keywords.findUnique({ where: { id: keyword.id }, select: { status: true } }).catch(() => null);
+  if (after?.status !== 'pending' && after?.status !== 'generating') await clearReplay(scope);
+}
+
+async function runBlogJobOnce(keyword: any, controller: AbortController, send: (evt: any) => void) {
   blogRuns.set(keyword.id, controller);
   send({ stage: 'Starting…', percent: 2 });
   // Also saved on the keyword row, so the header progress bar shows it on every tab.

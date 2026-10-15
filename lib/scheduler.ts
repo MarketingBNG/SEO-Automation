@@ -31,6 +31,15 @@ async function tick() {
     for (const k of ['fixes', 'outreach', 'speed', 'siteChecks', 'meetings', 'rankAlerts']) if (daily[k]?.error) errors.push(`${k}: ${daily[k].error}`);
     await settings.set('scheduler_last_run', JSON.stringify({ at: new Date().toISOString(), errors: errors.slice(0, 10), opened: daily.opened || 0, published: daily.published || 0, drafted: daily.drafted || 0, held: daily.held || 0 })).catch(() => {});
   }
+  // AI work paused for credits: starts again by itself once a key works again (top-up or the
+  // secondary key), reusing the steps already done. Old saved steps are cleaned up.
+  const credits = await import('./aiCredits');
+  await credits.autoResumeAi().catch((e: any) => console.error('Scheduler: AI auto-resume failed:', e.message));
+  const replay = await import('./aiReplay');
+  if ((await settings.get('ai_paused')) !== '1') await (await import('./strategy/jobs')).resumeRestarted().catch((e: any) => console.error('Scheduler: strategy restart failed:', e.message));
+  if ((await settings.get('ai_paused')) !== '1') await replay.resumeCreditBlog().catch((e: any) => console.error('Scheduler: credit blog resume failed:', e.message));
+  await replay.pruneReplay();
+
   // A blog cut off by a server restart (for example a deploy) is started again automatically.
   const { resumeInterruptedBlog } = await import('./blogJob');
   await resumeInterruptedBlog().catch((e: any) => console.error('Scheduler: blog resume failed:', e.message));

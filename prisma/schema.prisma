@@ -579,3 +579,15 @@ model site_content {
 
   @@index([type, status])
 }
+
+// Finished AI steps of a blog or strategy run (lib/aiReplay.ts): reused when the run starts again
+// after it stopped, deleted when it finishes.
+model ai_replay {
+  id         Int    @id @default(autoincrement())
+  scope      String // blog-<keyword id> | strategy-<row id>
+  hash       String // the request: prompt, messages and options
+  result     String // JSON {text, assistantMessages, stopReason}
+  created_at String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@unique([scope, hash])
+}
