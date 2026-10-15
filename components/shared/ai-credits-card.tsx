@@ -27,6 +27,22 @@ export function AiCreditsCard() {
   const [threshold, setThreshold] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [keyTest, setKeyTest] = useState<any[] | null>(null);
+
+  async function testKeys() {
+    setBusy(true);
+    setError(null);
+    try {
+      const j = await fetch('/api/ai-credits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'test_keys' }) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      setS(j);
+      setKeyTest(j.keyTest);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const j = await fetch('/api/ai-credits').then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -88,6 +104,24 @@ export function AiCreditsCard() {
               : s.apiKeys.inUse === 'secondary'
                 ? 'API keys: the main key ran out of credit, so the secondary key is in use. The main key is tried again every hour, or right after you save a new balance below.'
                 : 'API keys: the main key is in use. The secondary key takes over automatically if the main one runs out of credit, so the low-credit pause waits until both are out.'}
+            <div className="mt-2">
+              <Button variant="outline" size="sm" disabled={busy} onClick={testKeys}>
+                Test both keys
+              </Button>
+            </div>
+            {keyTest && (
+              <ul className="mt-2 space-y-1 text-sm">
+                {keyTest.map((k: any) => (
+                  <li key={k.which}>
+                    <strong>{k.which === 'main' ? 'Main key' : 'Secondary key'}</strong>
+                    {k.ending ? ` (…${k.ending})` : ''}:{' '}
+                    <span className={k.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-destructive'}>{k.ok ? 'works' : `${k.status ? `HTTP ${k.status}: ` : ''}${k.message}`}</span>
+                    {k.sameAsMain && <span className="text-destructive"> This is the same key as the main one: put the key from the other account here.</span>}
+                    {k.configured && !k.apiKeyFormat && <span className="text-destructive"> This is not an API key (it should start with sk-ant-api03-).</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
         {s.actual && (

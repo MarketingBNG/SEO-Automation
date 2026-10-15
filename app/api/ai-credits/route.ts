@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { creditStatus, setBalance, resumeAi, pauseAi } from '@/lib/aiCredits';
+import { creditStatus, setBalance, resumeAi, pauseAi, autoResumeAi } from '@/lib/aiCredits';
+import { checkKey } from '@/lib/anthropicClient';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../_lib/http';
 
@@ -11,7 +12,7 @@ export async function GET() {
 }
 
 // POST { action: 'set_balance', balance, threshold? } after a top-up (also lifts the pause),
-// { action: 'resume' } or { action: 'pause' }.
+// { action: 'test_keys' }, { action: 'resume' } or { action: 'pause' }.
 export async function POST(req: NextRequest) {
   const body: any = (await req.json().catch(() => ({}))) || {};
   const actor = await getActor();
@@ -20,6 +21,11 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(usd) || usd < 0) return NextResponse.json({ error: 'Enter the balance in US dollars.' }, { status: 400 });
     const threshold = body.threshold === undefined || body.threshold === '' ? undefined : Number(body.threshold);
     await setBalance(usd, actor, threshold);
+  } else if (body.action === 'test_keys') {
+    // Each key's answer from Anthropic; if one works while AI work is paused, work starts again.
+    const keys = [await checkKey('main'), await checkKey('secondary')];
+    const resumed = keys.some((k) => k.ok) ? await autoResumeAi().catch(() => null) : null;
+    return NextResponse.json({ ...(await creditStatus()), keyTest: keys, resumed });
   } else if (body.action === 'resume') {
     await resumeAi(actor);
   } else if (body.action === 'pause') {

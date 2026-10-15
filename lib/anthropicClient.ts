@@ -85,13 +85,26 @@ function secondaryRejected(status: number) {
 // Whether a key can run a request right now: one tiny request (1 output token on the smallest
 // model, a fraction of a cent). Used to resume AI work by itself after a top-up.
 export async function keyWorks(which: 'main' | 'secondary'): Promise<boolean> {
+  return (await checkKey(which)).ok;
+}
+
+// What Anthropic answers for one key right now, for Settings > AI credits ("Test both keys"). Shows
+// only the last 4 characters of the key, and whether both settings hold the very same key.
+export async function checkKey(which: 'main' | 'secondary') {
   const k = which === 'main' ? process.env.ANTHROPIC_API_KEY : process.env.ANTHROPIC_API_KEY_SECONDARY;
-  if (!k) return false;
+  if (!k) return { which, configured: false, ok: false, message: 'Not set on the server.' };
+  const info = { which, configured: true, ending: k.slice(-4), apiKeyFormat: k.startsWith('sk-ant-api'), sameAsMain: which === 'secondary' && k === process.env.ANTHROPIC_API_KEY };
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': k, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({ model: process.env.PROBE_MODEL || 'claude-haiku-5-5', max_tokens: 1, messages: [{ role: 'user', content: 'ok' }] }),
     signal: AbortSignal.timeout(30000),
-  }).catch(() => null);
-  return !!res?.ok;
+  }).catch((e: any) => ({ ok: false, status: 0, text: async () => e.message }) as any);
+  if (res.ok) return { ...info, ok: true, message: 'Works.' };
+  const body = await res.text().catch(() => '');
+  let message = body;
+  try {
+    message = JSON.parse(body)?.error?.message || body;
+  } catch {}
+  return { ...info, ok: false, status: res.status, message: String(message).slice(0, 300) };
 }
