@@ -23,7 +23,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const body: any = await req.json().catch(() => ({}));
-  const wpStatus = (body && body.wpStatus) || 'draft';
+  const wpStatus = (body && body.wpStatus) || 'publish';
 
   try {
     let post: any;

@@ -100,7 +100,7 @@ function seoSlug(text) {
   return (kept.length >= 2 ? kept : words).slice(0, 7).join('-');
 }
 
-async function publishPost({ title, contentHtml, excerpt, featuredMediaId, status = 'draft', slug, metaDescription, focusKeyphrase, author }: any) {
+async function publishPost({ title, contentHtml, excerpt, featuredMediaId, status = 'publish', slug, metaDescription, focusKeyphrase, author }: any) {
   const { siteUrl, authHeader } = getConfig();
 
   const res = await fetch(`${siteUrl}/wp-json/wp/v2/posts`, {

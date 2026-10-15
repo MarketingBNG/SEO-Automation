@@ -135,7 +135,7 @@ const linkCls = 'text-primary underline underline-offset-4 break-all';
 // already live the default is a separate WordPress draft, so the live post stays as it is until
 // someone picks "Replace the live post now". Render with key={audit.id} so the choice resets.
 export function RewritePublishControls({ audit, busy, onRewrite, onPublish }: { audit: any; busy: any; onRewrite: () => void; onPublish: (s: string) => void }) {
-  const [wpStatus, setWpStatus] = useState('draft');
+  const [wpStatus, setWpStatus] = useState('publish');
   const existing = Boolean(audit.wp_post_id);
   const liveLink = safeHref(audit.wp_post_url);
 

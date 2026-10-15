@@ -47,7 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (leftovers.length) return NextResponse.json({ error: `Remove the AI notes first. ${leftovers.join(' ')}` }, { status: 400 });
 
   const body: any = await req.json().catch(() => ({}));
-  const wpStatus = (body && body.wpStatus) || 'draft'; // 'draft' or 'publish'
+  const wpStatus = (body && body.wpStatus) || 'publish'; // 'publish' (live) or 'draft'
   const reviewer = String(body?.reviewer || '').trim();
   const kw = (await prisma.keywords.findUnique({ where: { id: draft.keyword_id }, select: { keyword: true } }))?.keyword;
   if (wpStatus === 'publish' && (await requireExpert()) && needsExpertReview(kw, draft.title)) {

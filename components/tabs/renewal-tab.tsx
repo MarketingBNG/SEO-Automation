@@ -17,7 +17,7 @@ export default function RenewalTab() {
   const [activePostId, setActivePostId] = useState<any>(null);
   const [busyPostId, setBusyPostId] = useState<any>(null);
   const [audits, setAudits] = useState<Record<string, any>>({}); // audit id -> full audit row (with facts/issues parsed)
-  const [publishWpStatus, setPublishWpStatus] = useState('draft');
+  const [publishWpStatus, setPublishWpStatus] = useState('publish');
   const [message, setMessage] = useState<string | null>(null);
 
   const loadPosts = useCallback(async () => {
