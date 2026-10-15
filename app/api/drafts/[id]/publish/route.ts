@@ -24,6 +24,24 @@ async function wpPostStatus(id: number): Promise<string | null> {
   return st === 'trash' ? null : st;
 }
 
+// What WordPress holds now: live or not, the address, and whether the FAQ is in the box format.
+async function checkPost(id: number, wantSlug: string, hasFaq: boolean) {
+  const { wpRequest } = await import('@/lib/wordpress');
+  const r: any = await wpRequest('GET', `/wp/v2/posts/${id}`, { query: { context: 'edit', _fields: 'status,link,slug,content' } }).catch(() => null);
+  if (!r?.json) return null;
+  const p = r.json;
+  const raw = String(p.content?.raw || p.content?.rendered || '');
+  return {
+    live: p.status === 'publish',
+    status: p.status,
+    link: p.link,
+    slugOk: p.slug === wantSlug,
+    slug: p.slug,
+    wantSlug,
+    faqBoxes: hasFaq ? /uic-faq-accordion/.test(raw) : null,
+  };
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const nid = toId(id);
@@ -110,7 +128,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       actor: await getActor(),
     });
 
-    return NextResponse.json({ ok: true, wpPostId: post.id, wpPostUrl: post.link, yoastSaved }, { status: 200 });
+    // Read the post back from WordPress, so the screen says what really happened.
+    const check = await checkPost(post.id, fields.slug, Boolean(faqSchema(draft.content_html)));
+    return NextResponse.json({ ok: true, wpPostId: post.id, wpPostUrl: check?.link || post.link, yoastSaved, check }, { status: 200 });
   } catch (err: any) {
     console.error(err);
     await activity.log('wordpress.publish_failed', {

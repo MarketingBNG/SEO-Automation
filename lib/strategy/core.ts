@@ -340,7 +340,7 @@ export function writingRuleIssues({ title, meta, html, surferScore, siteHost }: 
   if (internal < 3) issues.push(`Needs 3+ internal links (has ${internal}).`);
   const official = hrefs.filter((h) => /\.gov(\.[a-z]{2})?\/|\.gov\b|\.nic\.in|rbi\.org\.in|sebi\.gov\.in|incometax\.gov\.in|irs\.gov/i.test(h)).length;
   if (official < 1) issues.push('Needs 1+ official source link.');
-  if (!/<h2[^>]*>\s*(frequently asked questions|faqs?)\b/i.test(html)) issues.push('Needs an FAQ section.');
+  if (!/<h2[^>]*>\s*(?:<[^>]+>\s*)*(frequently asked questions|faqs?)\b/i.test(html)) issues.push('Needs an FAQ section.');
   // A direct 40-60 word answer under each question heading.
   const qHeads = [...String(html).matchAll(/<h[23][^>]*>([^<]*\?)\s*<\/h[23]>\s*<p[^>]*>([\s\S]*?)<\/p>/gi)];
   for (const m of qHeads) {
@@ -361,7 +361,7 @@ const FAQ_BOX = 'border:1px solid #d9dde3;border-radius:4px;margin:0 0 10px;';
 const FAQ_Q = 'cursor:pointer;font-weight:600;padding:14px 18px;background:#f5f7fa;';
 const FAQ_A = 'padding:14px 18px;margin:0;';
 export function faqAccordion(html: string): string {
-  const m = String(html).match(/(<h2[^>]*>\s*(?:frequently asked questions|faqs?)[^<]*<\/h2>)([\s\S]*?)(?=<h2\b|$)/i);
+  const m = String(html).match(/(<h2[^>]*>\s*(?:<[^>]+>\s*)*(?:frequently asked questions|faqs?)[\s\S]*?<\/h2>)([\s\S]*?)(?=<h2\b|$)/i);
   if (!m || /uic-faq-accordion/.test(m[2])) return html;
   const items = [...m[2].matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>([\s\S]*?)(?=<h3\b|$)/gi)];
   if (!items.length) return html;
@@ -377,7 +377,7 @@ export function faqAccordion(html: string): string {
 
 // FAQ schema from the FAQ section, added automatically to every published blog.
 export function faqSchema(html: string): string | null {
-  const faq = String(html).split(/<h2[^>]*>\s*(?:frequently asked questions|faqs?)[^<]*<\/h2>/i)[1];
+  const faq = String(html).split(/<h2[^>]*>\s*(?:<[^>]+>\s*)*(?:frequently asked questions|faqs?)[\s\S]*?<\/h2>/i)[1];
   if (!faq) return null;
   const pairs = [...faq.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>/gi)].map((m) => ({
     '@type': 'Question',

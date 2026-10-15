@@ -60,3 +60,10 @@ test('the FAQ is published as the site accordion', async () => {
   assert.equal(faqAccordion(out), out);
   assert.equal(faqAccordion('<h2>Intro</h2><p>x</p>'), '<h2>Intro</h2><p>x</p>');
 });
+
+test('a bold FAQ heading is found too', async () => {
+  const { faqAccordion, faqSchema } = await import('../lib/strategy/core');
+  const html = '<h2><strong>Frequently Asked Questions</strong></h2><h3><strong>Q?</strong></h3><p>A.</p>';
+  assert.match(faqAccordion(html), /uic-faq-accordion/);
+  assert.match(String(faqSchema(html)), /FAQPage/);
+});

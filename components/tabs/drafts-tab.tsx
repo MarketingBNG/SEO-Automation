@@ -164,6 +164,17 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   const [coverAlt, setCoverAlt] = useState('');
   const [wordNote, setWordNote] = useState('');
   const wordInput = useRef<HTMLInputElement>(null);
+  // Publishing takes a while (images, cover, WordPress): a bar with the step and the time, then
+  // what WordPress really holds (live or not, the address, the FAQ format), read back from it.
+  const [pub, setPub] = useState<{ state: 'running' | 'done' | 'error'; started: number; text: string; check?: any; url?: string } | null>(null);
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    if (pub?.state !== 'running') return;
+    const started = Date.now();
+    const t = setInterval(() => setSecs(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [pub?.state]);
+
   const [wpStatus, setWpStatus] = useState('publish');
   const topRef = useRef<HTMLDivElement>(null);
 
@@ -338,20 +349,22 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   async function publish() {
     setSaving(true);
     setMessage('');
+    setSecs(0);
+    setPub({ state: 'running', started: 0, text: 'Sending to WordPress' });
     try {
       const res = await fetch(`/api/drafts/${draft.id}/publish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wpStatus }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (!res.ok) throw new Error(json.error);
       jobsChanged();
-      setMessage(`Published to WordPress: ${json.wpPostUrl}`);
+      setPub({ state: 'done', started: 0, text: wpStatus === 'publish' ? 'Done' : 'Sent as a WordPress draft', check: json.check, url: json.wpPostUrl });
       onChange();
       loadDraft(false);
     } catch (err: any) {
-      setMessage('Error: ' + err.message);
+      setPub({ state: 'error', started: 0, text: err.message });
     } finally {
       setSaving(false);
     }
@@ -593,6 +606,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           ) : null}
         </div>
         )}
+        {draft.kind !== 'article' && pub && <PublishProgress pub={pub} secs={secs} />}
 
         {draft.wp_post_url && (
           <p className="text-sm text-muted-foreground">
@@ -770,6 +784,56 @@ function OriginalityLine({ draft }: { draft: any }) {
         {result ? 'Check again' : 'Check now'}
       </button>
       {err && <span className="block text-xs text-red-600">{err}</span>}
+    </div>
+  );
+}
+
+// The publish bar: moving while WordPress works (with the seconds so far), then the result.
+function PublishProgress({ pub, secs }: { pub: any; secs: number }) {
+  if (pub.state === 'running') {
+    const step = secs < 8 ? 'Uploading the cover and images' : secs < 25 ? 'Sending the article to WordPress' : 'Saving SEO fields and checking the post';
+    return (
+      <div className="space-y-1 rounded-lg border p-3 text-sm">
+        <div className="flex justify-between">
+          <span>{step}…</span>
+          <span className="text-muted-foreground tabular-nums">{secs}s</span>
+        </div>
+        <div className="h-2 overflow-hidden rounded bg-muted">
+          <div className="h-full rounded bg-primary transition-all" style={{ width: `${Math.min(95, 10 + secs * 2.5)}%` }} />
+        </div>
+      </div>
+    );
+  }
+  if (pub.state === 'error') {
+    return (
+      <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm">
+        <div className="font-semibold text-red-700 dark:text-red-400">Not published</div>
+        <div>{pub.text}</div>
+      </div>
+    );
+  }
+  const c = pub.check;
+  const ok = (v: boolean | null | undefined, yes: string, no: string) => (v === null || v === undefined ? null : <li className={v ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}>{v ? '✓ ' : '! '}{v ? yes : no}</li>);
+  return (
+    <div className="space-y-1 rounded-lg border border-emerald-600/40 bg-emerald-500/10 p-3 text-sm">
+      <div className="h-2 overflow-hidden rounded bg-muted">
+        <div className="h-full w-full rounded bg-emerald-600" />
+      </div>
+      <div className="font-semibold">{pub.text}</div>
+      {c ? (
+        <ul className="space-y-0.5">
+          {ok(c.live, 'Live on the website', `Not live: WordPress status is "${c.status}"`)}
+          {ok(c.slugOk, `Address as planned: ${c.link}`, `Address is ${c.link} (planned /${c.wantSlug}/: another post or draft on WordPress already uses it; trash it and press Update again)`)}
+          {ok(c.faqBoxes, 'FAQ shown as click-to-open boxes', 'FAQ not in the box format')}
+        </ul>
+      ) : (
+        <div className="text-muted-foreground">Sent. WordPress could not be read back to confirm.</div>
+      )}
+      {pub.url && (
+        <a className="text-primary underline" href={pub.url} target="_blank" rel="noreferrer">
+          Open the post
+        </a>
+      )}
     </div>
   );
 }
