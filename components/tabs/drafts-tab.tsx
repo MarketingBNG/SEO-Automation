@@ -578,7 +578,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
           </NativeSelect>
           <Button onClick={publish} disabled={saving || !(draft.status === 'approved' || (draft.status === 'published' && draft.wp_post_id)) || dirty}>
             <Send />
-            {draft.status === 'published' && draft.wp_post_url && !/[?&]p=\d+/.test(draft.wp_post_url) ? 'Update the live post' : draft.schedule && !draft.wp_post_url ? 'Publish now (skips the scheduled slot)' : 'Publish to WordPress'}
+            {draft.wp_post_id ? `Update the live post (WordPress #${draft.wp_post_id})` : draft.schedule ? 'Publish now (skips the scheduled slot)' : 'Publish to WordPress'}
           </Button>
           {draft.wp_post_id && !draft.wp_post_url ? (
             <span className="text-sm text-amber-700 dark:text-amber-400">On WordPress as a draft only (post {draft.wp_post_id}): it is NOT on the website. Choose &quot;Publish live&quot; to make it live.</span>
