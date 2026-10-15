@@ -7,7 +7,7 @@ import prisma from '../prisma';
 import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { researchAndWriteBlog, verifyAndCorrect } from '../anthropic';
-import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia } from '../wordpress';
+import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia, freeSlug } from '../wordpress';
 import { listSites, getSiteRankings, addTrackedKeyword } from '../seranking';
 import { getTermsForKeyword } from '../surfer';
 import { submitIndexNow, resubmitSitemap } from '../indexing';
@@ -272,6 +272,9 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
     post = await updatePost(found[0].id, { title: checked.title, contentHtml: html, excerpt: checked.meta_description, metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, status: 'publish' });
   } else {
     const fields = { title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId: cover?.id, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined };
+    // The planned address must be free: a copy that was never live is moved to the trash.
+    const freed = await freeSlug(fields.slug, checked.wp_post_id).catch(() => null);
+    if (freed?.trashed.length) await activity.log('wordpress.duplicate_trashed', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}": moved WordPress post(s) ${freed.trashed.map((x) => `#${x}`).join(', ')} (never live) to the trash to free /${fields.slug}/` });
     // Sent to WordPress earlier as a draft (from Drafts & Review): publish that post, not a second copy.
     const existing = checked.wp_post_id ? await wpRequest('GET', `/wp/v2/posts/${checked.wp_post_id}`, { query: { context: 'edit', _fields: 'status' } }).then((r: any) => r.json?.status).catch(() => null) : null;
     post = existing && existing !== 'trash' ? await updatePost(checked.wp_post_id, fields) : await publishPost(fields);

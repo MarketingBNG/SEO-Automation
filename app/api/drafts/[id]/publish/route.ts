@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { uploadMedia, publishPost, updatePost, seoSlug } from '@/lib/wordpress';
+import { uploadMedia, publishPost, updatePost, seoSlug, freeSlug } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
@@ -106,6 +106,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       metaDescription: draft.meta_description,
       focusKeyphrase: keyword,
     };
+    // The planned address must be free: a copy that was never live is moved to the trash.
+    const freed = wpStatus === 'publish' ? await freeSlug(fields.slug, draft.wp_post_id).catch(() => null) : null;
+    if (freed?.trashed.length) await activity.log('wordpress.duplicate_trashed', { entityType: 'draft', entityId: nid, details: `"${draft.title}": moved WordPress post(s) ${freed.trashed.map((x) => `#${x}`).join(', ')} (never live) to the trash to free /${fields.slug}/`, actor: await getActor() });
     // Already on WordPress (as a draft): update that post instead of making another one.
     const post: any = draft.wp_post_id && wpLive ? await updatePost(draft.wp_post_id, fields) : await publishPost(fields);
     const yoastSaved = Boolean(post.meta && post.meta._yoast_wpseo_metadesc);
@@ -130,7 +133,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     // Read the post back from WordPress, so the screen says what really happened.
     const check = await checkPost(post.id, fields.slug, Boolean(faqSchema(draft.content_html)));
-    return NextResponse.json({ ok: true, wpPostId: post.id, wpPostUrl: check?.link || post.link, yoastSaved, check }, { status: 200 });
+    return NextResponse.json({ ok: true, wpPostId: post.id, wpPostUrl: check?.link || post.link, yoastSaved, check: check && { ...check, trashed: freed?.trashed || [], liveHolder: freed?.liveHolder || null } }, { status: 200 });
   } catch (err: any) {
     console.error(err);
     await activity.log('wordpress.publish_failed', {

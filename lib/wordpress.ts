@@ -259,7 +259,27 @@ async function findPostByUrl(url) {
   return results[0];
 }
 
+// Before a blog goes live at an address: a post that holds the same address but was never live
+// (a draft, pending or private copy, for example one sent here earlier as a draft) is moved to the
+// trash, which frees the address. A live post is never touched: it is returned, so the caller can
+// say the address is taken. Trash can be undone in WordPress for 30 days.
+async function freeSlug(slug: string, keepId?: number | null): Promise<{ trashed: number[]; liveHolder: { id: number; link: string } | null }> {
+  const out = { trashed: [] as number[], liveHolder: null as { id: number; link: string } | null };
+  if (!slug) return out;
+  const { json } = await wpRequest('GET', '/wp/v2/posts', { query: { slug, status: 'publish,future,draft,pending,private', context: 'edit', per_page: 20, _fields: 'id,status,link' } }).catch(() => ({ json: [] }));
+  for (const p of Array.isArray(json) ? json : []) {
+    if (p.id === keepId) continue;
+    if (p.status === 'publish' || p.status === 'future') {
+      out.liveHolder = { id: p.id, link: p.link };
+      continue;
+    }
+    await wpRequest('DELETE', `/wp/v2/posts/${p.id}`).then(() => out.trashed.push(p.id)).catch(() => {});
+  }
+  return out;
+}
+
 export {
+  freeSlug,
   testConnection,
   uploadBuffer,
   uploadFeaturedImage,

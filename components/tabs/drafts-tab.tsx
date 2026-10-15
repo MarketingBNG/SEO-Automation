@@ -823,7 +823,8 @@ function PublishProgress({ pub, secs }: { pub: any; secs: number }) {
       {c ? (
         <ul className="space-y-0.5">
           {ok(c.live, 'Live on the website', `Not live: WordPress status is "${c.status}"`)}
-          {ok(c.slugOk, `Address as planned: ${c.link}`, `Address is ${c.link} (planned /${c.wantSlug}/: another post or draft on WordPress already uses it; trash it and press Update again)`)}
+          {c.trashed?.length > 0 && <li className="text-emerald-700 dark:text-emerald-400">✓ Removed {c.trashed.length} duplicate copy (never live, now in WordPress Trash): {c.trashed.map((x: number) => `#${x}`).join(', ')}</li>}
+          {ok(c.slugOk, `Address as planned: ${c.link}`, c.liveHolder ? `Address is ${c.link}: the planned /${c.wantSlug}/ belongs to another LIVE post (${c.liveHolder.link}), which is not touched. Change one of them in WordPress.` : `Address is ${c.link} (planned /${c.wantSlug}/). Press Update once more.`)}
           {ok(c.faqBoxes, 'FAQ shown as click-to-open boxes', 'FAQ not in the box format')}
         </ul>
       ) : (
