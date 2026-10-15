@@ -2,6 +2,7 @@
 // Runs the approved month automatically: drafts blogs ahead of their slot, opens the 48-hour review
 // window, auto-approves and publishes on schedule behind the automatic fact check and writing rules,
 // does the after-publish steps, checks ranks daily and compares plan vs actual weekly.
+import { createHash } from 'node:crypto';
 import prisma from '../prisma';
 import * as activity from '../activity';
 import { sqlNow } from '../time';
@@ -161,12 +162,23 @@ async function addInternalLinks(newUrl, title, keyword) {
 // sources, corrects what is wrong, and repeats until two checks in a row are clean. The corrected
 // draft is saved. A draft that cannot be fully verified is never published.
 // `verify` is injectable for tests.
+const textHash = (d: any) => createHash('sha256').update(`${d.title || ''}\n${d.meta_description || ''}\n${d.content_html || ''}`).digest('hex');
+
 async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   const prev = row.fact_check ? JSON.parse(row.fact_check) : null;
   if (prev && prev.stamp === draft.updated_at) return { ...prev, draft };
+  // Only the words count: a new cover or alt text (which also moves updated_at) needs no new check.
+  const words = textHash(draft);
+  if (prev && prev.textHash === words) {
+    const record = { ...prev, stamp: draft.updated_at };
+    await update(row.id, { fact_check: JSON.stringify(record) });
+    return { ...record, draft };
+  }
+  // Why it runs, shown on the progress bar.
+  const why = !prev ? 'first check before publishing' : 'the text changed since the last check';
   const startClean = prev?.inlineStamp && prev.inlineStamp === draft.updated_at ? 1 : 0;
   const facts = await prisma.facts.findMany({ where: { draft_id: draft.id }, select: { fact_id: true, claim: true, source_url: true } });
-  const result = await timed(`factcheck-${draft.id}`, 'fact-check', `Fact check: ${draft.title}`, () =>
+  const result = await timed(`factcheck-${draft.id}`, 'fact-check', `Fact check before publishing (${why}): ${draft.title}`, () =>
     verify(
       { title: draft.title, meta: draft.meta_description, content: draft.content_html || '', facts },
       { mustCheckOf: (html) => extractClaims(html).map((c) => c.sentence), startClean }
@@ -180,7 +192,7 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
       data: { title: result.draft.title, meta_description: result.draft.meta, content_html: result.draft.content, updated_at: sqlNow() },
     });
   }
-  const record = { stamp: saved.updated_at, ok: result.ok, rounds: result.rounds, corrected: changed, log: result.log, checkedAt: sqlNow(), inlineCounted: Boolean(startClean) };
+  const record = { stamp: saved.updated_at, textHash: textHash(saved), ok: result.ok, rounds: result.rounds, corrected: changed, log: result.log, checkedAt: sqlNow(), inlineCounted: Boolean(startClean) };
   await update(row.id, { fact_check: JSON.stringify(record) });
   await activity.log('schedule.fact_checked', {
     entityType: 'draft',
