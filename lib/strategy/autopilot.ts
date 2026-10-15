@@ -271,7 +271,10 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
     if (!found?.[0]) throw new Error(`Refresh target not found: ${row.refresh_url}`);
     post = await updatePost(found[0].id, { title: checked.title, contentHtml: html, excerpt: checked.meta_description, metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, status: 'publish' });
   } else {
-    post = await publishPost({ title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId: cover?.id, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined });
+    const fields = { title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId: cover?.id, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined };
+    // Sent to WordPress earlier as a draft (from Drafts & Review): publish that post, not a second copy.
+    const existing = checked.wp_post_id ? await wpRequest('GET', `/wp/v2/posts/${checked.wp_post_id}`, { query: { context: 'edit', _fields: 'status' } }).then((r: any) => r.json?.status).catch(() => null) : null;
+    post = existing && existing !== 'trash' ? await updatePost(checked.wp_post_id, fields) : await publishPost(fields);
   }
   await prisma.drafts.update({
     where: { id: checked.id },
@@ -345,6 +348,26 @@ async function reviseRow(row, verify = verifyAndCorrect, write = researchAndWrit
 let running = false;
 
 // The scheduler job. Meant to run every 15 minutes; every step is idempotent.
+// "Publish now" from the calendar: a reviewed or approved blog goes to the website at once instead
+// of waiting for its slot (a paused one is resumed). The usual publish checks still apply; when one
+// fails, the blog is held with the reason. Returns 'published' or 'held'.
+export async function publishScheduleNow(id: number, actor = 'system') {
+  const row = await prisma.blog_schedule.findUnique({ where: { id } });
+  if (!row) throw Object.assign(new Error('Not found'), { status: 404 });
+  if (row.status === 'published') throw Object.assign(new Error('Already published'), { status: 409 });
+  if (['drafting', 'revising'].includes(row.status)) throw Object.assign(new Error('It is being written right now. Try again in a few minutes.'), { status: 409 });
+  const draft = row.draft_id ? await prisma.drafts.findUnique({ where: { id: row.draft_id } }) : null;
+  if (!draft) throw Object.assign(new Error('This blog has no draft yet.'), { status: 409 });
+  if (!row.reviewed_at && draft.status !== 'approved') throw Object.assign(new Error('Approve it first (Approve here or in Drafts & Review), then publish.'), { status: 409 });
+  const now = new Date();
+  const back = row.status === 'paused' ? row.paused_from || 'in_review' : row.status;
+  const ready = await prisma.blog_schedule.update({ where: { id }, data: { status: back, paused_from: null, paused_by: null, publish_at: sqlNow(now), updated_at: sqlNow() } });
+  await activity.log('schedule.publish_now', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}": Publish now pressed (slot was ${row.publish_at} UTC)`, actor });
+  const result = await publishRow(ready, now);
+  const after = await prisma.blog_schedule.findUnique({ where: { id } });
+  return { result, wp_post_url: after?.wp_post_url || null, hold_reasons: JSON.parse(after?.hold_reasons || '[]') };
+}
+
 export async function runDaily(now = new Date(), opts: { maxDrafts?: number; verify?: any; write?: any } = {}) {
   if (running) return { skipped: 'A previous run is still in progress.' };
   running = true;

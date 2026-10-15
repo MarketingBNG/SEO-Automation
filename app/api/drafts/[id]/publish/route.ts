@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { uploadMedia, publishPost, seoSlug } from '@/lib/wordpress';
+import { uploadMedia, publishPost, updatePost, seoSlug } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
@@ -16,14 +16,25 @@ import { ensureOriginality, originalityReason } from '@/lib/originality';
 
 export const runtime = 'nodejs';
 
+// 'publish', 'draft', 'trash'..., or null when the post is gone.
+async function wpPostStatus(id: number): Promise<string | null> {
+  const { wpRequest } = await import('@/lib/wordpress');
+  const r: any = await wpRequest('GET', `/wp/v2/posts/${id}`, { query: { context: 'edit', _fields: 'status' } }).catch(() => null);
+  const st = r?.json?.status || null;
+  return st === 'trash' ? null : st;
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const nid = toId(id);
 
   const draft: any = await prisma.drafts.findUnique({ where: { id: nid } });
   if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 });
-  if (draft.status !== 'approved') {
-    return NextResponse.json({ error: 'Draft must be approved before publishing' }, { status: 400 });
+  // A blog sent to WordPress earlier as a draft (not live) can be sent again: the same post is
+  // updated, so no second copy is made.
+  const wpLive = draft.wp_post_id ? await wpPostStatus(draft.wp_post_id) : null;
+  if (draft.status !== 'approved' && !(draft.status === 'published' && wpLive !== 'publish')) {
+    return NextResponse.json({ error: draft.status === 'published' ? 'This blog is already live on the website.' : 'Draft must be approved before publishing' }, { status: 400 });
   }
   if (/\[(PRACTITIONER NOTE NEEDED|VERIFY|AUTHOR NAME|REVIEWER NAME|VISUAL SUGGESTION)/i.test(draft.content_html || '')) {
     return NextResponse.json({ error: 'The draft still has a reviewer placeholder ([AUTHOR NAME], [REVIEWER NAME], [PRACTITIONER NOTE NEEDED], [VISUAL SUGGESTION] or [VERIFY]). Replace or remove it before publishing.' }, { status: 400 });
@@ -65,7 +76,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Images a person placed in the article move to the WordPress Media Library first.
     const inline = await publishDraftImages(nid, draft.content_html || '');
     const contentHtml = `${withByline(inline.html, author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null, image: cover?.url || null }) || ''}`;
-    const post: any = await publishPost({
+    const fields = {
       title: draft.title,
       contentHtml,
       author: authorId || undefined,
@@ -75,18 +86,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       slug: seoSlug(keyword || draft.title),
       metaDescription: draft.meta_description,
       focusKeyphrase: keyword,
-    });
+    };
+    // Already on WordPress (as a draft): update that post instead of making another one.
+    const post: any = draft.wp_post_id && wpLive ? await updatePost(draft.wp_post_id, fields) : await publishPost(fields);
     const yoastSaved = Boolean(post.meta && post.meta._yoast_wpseo_metadesc);
 
     await prisma.drafts.update({
       where: { id: nid },
-      data: { status: 'published', wp_post_id: post.id, wp_post_url: post.link, updated_at: sqlNow() },
+      // Live: published, with its address. A WordPress draft is not on the website: the blog stays
+      // approved (so it can be published live later), with the post id kept to update that post.
+      data: wpStatus === 'publish' ? { status: 'published', wp_post_id: post.id, wp_post_url: post.link, updated_at: sqlNow() } : { status: 'approved', wp_post_id: post.id, wp_post_url: null, updated_at: sqlNow() },
     });
+    // A calendar blog published here counts as published on the calendar too (it does not publish again).
+    if (wpStatus === 'publish') {
+      await prisma.blog_schedule.updateMany({ where: { draft_id: nid, status: { not: 'published' } }, data: { status: 'published', wp_post_url: post.link, hold_reasons: null, updated_at: sqlNow() } }).catch(() => {});
+    }
 
     await activity.log('wordpress.published', {
       entityType: 'draft',
       entityId: Number(id),
-      details: `"${draft.title}" → ${post.link} (${wpStatus})`,
+      details: `"${draft.title}" → ${post.link} (${wpStatus === 'publish' ? 'live on the website' : 'WordPress draft, NOT live yet'})`,
       actor: await getActor(),
     });
 

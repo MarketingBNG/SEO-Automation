@@ -3,13 +3,15 @@
 // Pause, Resume and Reschedule for one calendar blog, with suggested new times. Used on Home and
 // in Monthly Strategy.
 import { useState } from 'react';
-import { CalendarClock, Loader2, Pause, Play } from 'lucide-react';
+import { CalendarClock, Loader2, Pause, Play, Send } from 'lucide-react';
+import { useRole } from '@/hooks/use-role';
 import { Button } from '@/components/ui/button';
 
 export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (msg: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<{ suggestions: any[]; custom: string } | null>(null);
+  const me = useRole();
   if (['published', 'failed', 'drafting', 'revising'].includes(row.status)) return null;
 
   async function act(body: any, done: string) {
@@ -48,6 +50,16 @@ export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (m
         ) : (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => act({ action: 'pause' }, `Paused "${row.title}". Nothing happens to it until you resume or reschedule it.`)}>
             <Pause /> Pause
+          </Button>
+        )}
+        {me.can('blog.publish_now') && row.draft_id && (
+          <Button
+            size="sm"
+            disabled={busy}
+            title="Publish it on the website now, instead of at its slot. It must be approved first."
+            onClick={() => window.confirm(`Publish "${row.title}" on the website now?`) && act({ action: 'publish_now' }, `Published "${row.title}" on the website.`)}
+          >
+            <Send /> Publish now
           </Button>
         )}
         <Button size="sm" variant="outline" disabled={busy} onClick={toggleMove}>

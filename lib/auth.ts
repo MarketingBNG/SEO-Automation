@@ -41,6 +41,13 @@ export const authOptions: NextAuthOptions = {
         if (m) {
           token.role = m.role;
           token.blocked = m.blocked;
+          // Pages and actions this person may use (role access plus their own grants).
+          const { accessFor } = await import('./access');
+          const a = await accessFor(m.email, m.role).catch(() => null);
+          if (a) {
+            token.access = a.access;
+            token.grants = a.grants;
+          }
         }
       }
       return token;
@@ -49,6 +56,8 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         (session.user as any).role = (token.role as Role) || 'user';
         (session.user as any).blocked = Boolean(token.blocked);
+        (session.user as any).access = token.access || null;
+        (session.user as any).grants = token.grants || [];
       }
       return session;
     },

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
-import { getActor } from '@/lib/auth';
+import { getActor, getMe } from '@/lib/auth';
+import { canDo } from '@/lib/access';
+import { deniedMessage } from '@/lib/permissions';
 import { sqlNow } from '@/lib/time';
 import { methodNotAllowed, toId } from '../../../_lib/http';
 import { aiLeftovers, needsExpertReview } from '@/lib/strategy/core';
@@ -16,6 +18,7 @@ export const runtime = 'nodejs';
 //   { action: 'reject', feedback: '...' } the blog is rewritten with the feedback and comes back for review
 //   { action: 'pause' }                   stops everything for this blog until it is resumed
 //   { action: 'resume' }                  goes back to where it was (needs a new time if its slot passed)
+//   { action: 'publish_now' }             a reviewed or approved blog goes live at once
 //   { action: 'reschedule', publishAt }   moves it to a new time (UTC 'YYYY-MM-DD HH:MM:SS' or ISO);
 //                                         a paused blog is resumed at the same time
 // Doing nothing for 48 hours approves it automatically.
@@ -74,6 +77,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json(updated);
   }
 
+  if (action === 'publish_now') {
+    // Publishing at once is the admin's or a manager's call (or anyone given "Publish now" access).
+    const me = await getMe();
+    if (!me || !(await canDo(me, 'blog.publish_now'))) return NextResponse.json({ error: deniedMessage('blog.publish_now') }, { status: 403 });
+    try {
+      const { publishScheduleNow } = await import('@/lib/strategy/autopilot');
+      const r = await publishScheduleNow(id, actor);
+      if (r.result !== 'published') return NextResponse.json({ error: `Not published. ${r.hold_reasons.join(' ') || 'It was held; see its status.'}`, ...r }, { status: 409 });
+      return NextResponse.json(r);
+    } catch (e: any) {
+      return NextResponse.json({ error: e.message }, { status: e.status || 500 });
+    }
+  }
+
   if (action === 'reschedule') {
     if (['drafting', 'revising'].includes(row.status)) return NextResponse.json({ error: 'It is being written right now. Reschedule it in a few minutes.' }, { status: 409 });
     const raw = String(publishAt || '');
@@ -86,7 +103,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await activity.log('schedule.rescheduled', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}" moved from ${row.publish_at} to ${toSql(ms)} UTC`, actor });
     return NextResponse.json({ ...updated, note: early ? 'This is earlier than its writing and 48-hour review can finish, so it publishes when the review ends.' : null });
   }
-  return NextResponse.json({ error: 'action must be approve, reject, pause, resume or reschedule' }, { status: 400 });
+  return NextResponse.json({ error: 'action must be approve, reject, pause, resume, publish_now or reschedule' }, { status: 400 });
 }
 
 // GET: suggested new publish times for this blog.

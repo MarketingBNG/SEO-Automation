@@ -137,7 +137,7 @@ export default function Dashboard() {
 
   const who = useRole();
   // Read once when the page loads (the clock is not read during render).
-  const visible = (key: string) => !HIDDEN[who.role].includes(key);
+  const visible = (key: string) => (who.loaded ? who.sees(key) : !HIDDEN[who.role].includes(key));
   // A page the role cannot see (for example from an old link) falls back to Home.
   const shown: TabKey = who.loaded && !visible(tab) ? 'home' : tab;
   const current = TABS.find((t) => t.key === shown)!;

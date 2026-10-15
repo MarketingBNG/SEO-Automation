@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
-import { actionFor, can, deniedMessage, isRole } from '@/lib/permissions';
+import { actionFor, allows, deniedMessage, isRole, roleAccess, type Access, type Grant } from '@/lib/permissions';
 import { draftTokenAllows, hasDraftToken } from '@/lib/draftToken';
 
 // Replaces the old middleware.js Basic Auth: every page and API route needs a signed-in
@@ -40,7 +40,10 @@ export async function proxy(req: NextRequest) {
         return NextResponse.json({ error: 'Your account is blocked from taking actions. Ask an admin or your manager.' }, { status: 403 });
       }
       const action = actionFor(req.method, pathname);
-      if (action && !can(role, action)) return NextResponse.json({ error: deniedMessage(action) }, { status: 403 });
+      // The token carries the person's access (role access as the admin set it, plus own grants);
+      // an older token without it falls back to the role's standard access.
+      const access = (token.access as Access) || roleAccess(role);
+      if (action && role !== 'admin' && !allows(access, (token.grants as Grant[]) || [], action)) return NextResponse.json({ error: deniedMessage(action) }, { status: 403 });
     }
     return NextResponse.next();
   }

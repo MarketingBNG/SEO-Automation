@@ -164,7 +164,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   const [coverAlt, setCoverAlt] = useState('');
   const [wordNote, setWordNote] = useState('');
   const wordInput = useRef<HTMLInputElement>(null);
-  const [wpStatus, setWpStatus] = useState('draft');
+  const [wpStatus, setWpStatus] = useState('publish');
   const topRef = useRef<HTMLDivElement>(null);
 
   // resetFields=false refreshes the draft's status, facts and image but keeps whatever is typed in
@@ -573,14 +573,18 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
         ) : (
         <div className="flex flex-wrap items-center gap-2">
           <NativeSelect value={wpStatus} onChange={(e) => setWpStatus(e.target.value)}>
-            <option value="draft">Send to WordPress as Draft</option>
-            <option value="publish">Publish live immediately</option>
+            <option value="publish">Publish live on the website now</option>
+            <option value="draft">Send to WordPress as a draft (NOT live)</option>
           </NativeSelect>
-          <Button onClick={publish} disabled={saving || draft.status !== 'approved' || dirty}>
+          <Button onClick={publish} disabled={saving || !(draft.status === 'approved' || (draft.status === 'published' && /[?&]p=\d+/.test(draft.wp_post_url || ''))) || dirty}>
             <Send />
             {draft.schedule && !draft.wp_post_url ? 'Publish now (skips the scheduled slot)' : 'Publish to WordPress'}
           </Button>
-          {draft.status === 'published' ? (
+          {draft.wp_post_id && !draft.wp_post_url ? (
+            <span className="text-sm text-amber-700 dark:text-amber-400">On WordPress as a draft only (post {draft.wp_post_id}): it is NOT on the website. Choose &quot;Publish live&quot; to make it live.</span>
+          ) : draft.status === 'published' && /[?&]p=\d+/.test(draft.wp_post_url || '') ? (
+            <span className="text-sm text-amber-700 dark:text-amber-400">Sent as a WordPress draft: it is NOT on the website. Choose &quot;Publish live&quot; and press the button to make it live.</span>
+          ) : draft.status === 'published' ? (
             <StatusBadge status="published">published</StatusBadge>
           ) : draft.status !== 'approved' ? (
             <span className="text-sm text-muted-foreground">Approve the draft first before publishing.</span>

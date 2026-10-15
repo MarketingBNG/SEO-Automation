@@ -132,7 +132,7 @@ async function publishPost({ title, contentHtml, excerpt, featuredMediaId, statu
 
 // Updates an EXISTING post in place - used when the human chooses "replace an existing post"
 // instead of publishing a new one.
-async function updatePost(postId, { title, contentHtml, excerpt, featuredMediaId, status, metaDescription, focusKeyphrase }) {
+async function updatePost(postId, { title, contentHtml, excerpt, featuredMediaId, status, metaDescription, focusKeyphrase, slug, author }: any) {
   const { siteUrl, authHeader } = getConfig();
 
   const res = await fetch(`${siteUrl}/wp-json/wp/v2/posts/${postId}`, {
@@ -147,6 +147,8 @@ async function updatePost(postId, { title, contentHtml, excerpt, featuredMediaId
       ...(excerpt ? { excerpt } : {}),
       ...(status ? { status } : {}),
       ...(featuredMediaId ? { featured_media: featuredMediaId } : {}),
+      ...(slug ? { slug } : {}),
+      ...(author ? { author } : {}),
       ...yoastMeta({ metaDescription, focusKeyphrase }),
     }),
   });

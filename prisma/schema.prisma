@@ -591,3 +591,16 @@ model ai_replay {
 
   @@unique([scope, hash])
 }
+
+// Extra access the admin gives one person (lib/access.ts): a page ('page:<key>') or an action,
+// for good (expires_at empty) or until a UTC time.
+model access_grants {
+  id         Int     @id @default(autoincrement())
+  email      String
+  grant_key  String
+  expires_at String? // UTC 'YYYY-MM-DD HH:MM:SS'; empty = always
+  granted_by String?
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([email])
+}
