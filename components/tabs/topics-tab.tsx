@@ -70,7 +70,13 @@ function TopicCard({ t, canWork, onChanged }: { t: any; canWork: boolean; onChan
       {open && (
         <div className="mt-2 space-y-2 text-sm">
           {t.why && <p>{t.why}</p>}
-          {t.relevance && <RelevanceBox r={t.relevance} />}
+          {t.relevance ? (
+            <RelevanceBox r={t.relevance} />
+          ) : (
+            <Button variant="outline" size="sm" disabled={!!busy} onClick={() => act('relevance')}>
+              {busy === 'relevance' ? 'Checking…' : 'Why this matters for USAIndiaCFO'}
+            </Button>
+          )}
           {t.keywords?.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {t.keywords.map((k: string) => <span key={k} className="rounded-full border px-2 py-px text-xs">{k}</span>)}

@@ -132,6 +132,28 @@ export async function topicsTick(now = new Date()) {
   await researchTopics(now).catch((e) => console.error('Topics research failed:', e.message));
 }
 
+// For a topic researched before the relevance note existed: why it matters to us, written on
+// request (one short call, no web search), and saved on the topic.
+export async function explainRelevance(id: number) {
+  const t: any = await prisma.topics.findUnique({ where: { id } });
+  if (!t) throw Object.assign(new Error('Topic not found'), { status: 404 });
+  if (t.relevance) return { relevance: JSON.parse(t.relevance) };
+  const focus = String((await settings.get('focus_services')) || 'ITIN, EIN, US company formation for Indians, NRI tax, FEMA compliance, virtual CFO').split(/\n|;/).map((x) => x.trim()).filter(Boolean);
+  const { text } = (await callClaude(
+    `${SYSTEM}\nNow you judge one topic already found. Be honest: say "skip" when it is only loosely related. Return ONLY JSON between ===JSON=== and ===END===.`,
+    [{ role: 'user', content: `Services we sell: ${focus.join('; ')}.\nTopic: ${t.title}\nWhat happened: ${t.why || ''}\nSources: ${JSON.parse(t.sources || '[]').map((x: any) => `${x.title} ${x.url}`).join(' | ')}\n\nReturn {"forUs":"which of our services or client groups this touches and how, one or two sentences","useful":"what a reader can do with it: a deadline, a filing, a cost, a risk to plan for","verdict":"write|maybe|skip","reason":"one line: why write it now, or why it is weak"}. Inside string values never use a double quote.` }],
+    undefined,
+    { maxUses: 0, effort: 'medium', feature: 'other' }
+  )) as { text: string };
+  let r: Relevance | null = null;
+  try {
+    r = cleanRelevance(parseJson(text));
+  } catch {}
+  if (!r) throw new Error('The answer could not be read. Try again.');
+  await prisma.topics.update({ where: { id }, data: { relevance: JSON.stringify(r) } });
+  return { relevance: r };
+}
+
 const topicNotes = (t: any) => `Topic from the daily research (${t.day}): ${t.title}. Why now: ${t.why || ''}. Keywords to use: ${JSON.parse(t.keywords || '[]').join(', ')}. Sources: ${JSON.parse(t.sources || '[]').map((s: any) => s.url).join(', ')}.`;
 
 // Writes a blog for the topic with the normal blog pipeline (research, fact check, review).

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import mammoth from 'mammoth';
 import { getActor } from '@/lib/auth';
-import { startTopicBlog, startTopicArticle, attachManual, compareManual, finalizeManual } from '@/lib/topics';
+import { startTopicBlog, startTopicArticle, attachManual, compareManual, finalizeManual, explainRelevance } from '@/lib/topics';
 import { methodNotAllowed, toId } from '../../_lib/http';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
-// POST (JSON) { action: 'blog' | 'article' | 'compare' | 'finalize', comments? }
+// POST (JSON) { action: 'blog' | 'article' | 'relevance' | 'compare' | 'finalize', comments? }
 // POST (multipart) file=<.docx> [title]: upload a piece written by hand; it is audited at once.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const id = toId((await params).id);
@@ -29,12 +29,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         return NextResponse.json(await startTopicBlog(id), { status: 202 });
       case 'article':
         return NextResponse.json(await startTopicArticle(id), { status: 202 });
+      case 'relevance':
+        return NextResponse.json(await explainRelevance(id));
       case 'compare':
         return NextResponse.json(await compareManual(id));
       case 'finalize':
         return NextResponse.json(await finalizeManual(id, String(body.comments || ''), actor), { status: 202 });
       default:
-        return NextResponse.json({ error: 'action must be blog, article, compare or finalize' }, { status: 400 });
+        return NextResponse.json({ error: 'action must be blog, article, relevance, compare or finalize' }, { status: 400 });
     }
   } catch (err: any) {
     if (!err.status) console.error(err);
