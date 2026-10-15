@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
-  Activity, BarChart3, Bot, BrainCircuit, CalendarClock, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
+  Activity, BarChart3, BookOpen, Bot, BrainCircuit, CalendarClock, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
   LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
@@ -35,6 +35,7 @@ import MeetingsTab from '@/components/tabs/meetings-tab';
 import ActivityTab from '@/components/tabs/activity-tab';
 import SettingsTab from '@/components/tabs/settings-tab';
 import TeamTab from '@/components/tabs/team-tab';
+import GuideTab from '@/components/tabs/guide-tab';
 import { useRole } from '@/hooks/use-role';
 import type { Role } from '@/lib/permissions';
 
@@ -43,6 +44,7 @@ import type { Role } from '@/lib/permissions';
 const TABS = [
   { key: 'home', label: 'Home', icon: House, group: 'Start', hint: 'What waits for you today and what publishes next' },
   { key: 'assistant', label: 'Assistant', icon: Bot, group: 'Start', hint: 'Ask anything, change the website' },
+  { key: 'guide', label: 'Guide & map', icon: BookOpen, group: 'Start', hint: 'Every page on one map, and a step-by-step guide for each role' },
 
   { key: 'strategy', label: 'Monthly Strategy', icon: CalendarRange, group: 'Plan', hint: 'The 30-day plan: keywords, blogs, fixes; approve it here' },
   { key: 'calendar', label: 'Blog Calendar', icon: CalendarClock, group: 'Plan', hint: 'Automatic blogs: approve, reject, pause, reschedule' },
@@ -268,6 +270,7 @@ export default function Dashboard() {
               {k === 'activity' && <ActivityTab />}
               {k === 'settings' && <SettingsTab />}
               {k === 'team' && <TeamTab />}
+              {k === 'guide' && <GuideTab tabs={TABS} groups={GROUP_LABEL} onOpen={setTab} />}
             </div>
           ))}
           </div>

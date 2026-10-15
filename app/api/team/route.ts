@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { canDo } from '@/lib/access';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getMe } from '@/lib/auth';
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
   const notes: string[] = [];
 
   if (body.role !== undefined || !existing) {
-    if (!can(me.role, 'team.roles')) return NextResponse.json({ error: 'Only an admin can add people or change roles.' }, { status: 403 });
+    if (!(await canDo(me, 'team.roles'))) return NextResponse.json({ error: 'Only an admin can add people or change roles.' }, { status: 403 });
     const role = body.role ?? 'user';
     if (!isRole(role)) return NextResponse.json({ error: 'Role must be admin, manager, analyst or user.' }, { status: 400 });
     if (email === OWNER_EMAIL && role !== 'admin') return NextResponse.json({ error: 'The owner always stays admin.' }, { status: 400 });
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
     data.role_expires_at = role === 'tester' ? new Date(Date.now() + TESTER_HOURS * 3600000).toISOString().slice(0, 19).replace('T', ' ') : null;
     notes.push(role === 'tester' ? `role tester until ${data.role_expires_at} UTC` : `role ${role}`);
   }
-  if (body.name !== undefined && can(me.role, 'team.roles')) data.name = String(body.name).slice(0, 100) || null;
+  if (body.name !== undefined && (await canDo(me, 'team.roles'))) data.name = String(body.name).slice(0, 100) || null;
   if (body.blocked !== undefined) {
     if (!canBlock(me.role, target, email)) return NextResponse.json({ error: me.role === 'manager' ? 'Managers can block only users and analysts.' : 'This person cannot be blocked.' }, { status: 403 });
     data.blocked = Boolean(body.blocked);

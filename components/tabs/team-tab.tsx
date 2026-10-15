@@ -11,11 +11,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
 import { useRole } from '@/hooks/use-role';
 import { canBlock, ROLES, type Role } from '@/lib/permissions';
+import { AccessAdmin } from '@/components/shared/access-admin';
 
 const ROLE_TEXT: Record<Role, string> = {
   admin: 'Everything, including settings, AI credits and the team',
-  manager: 'Sees reports, approves and edits strategy, assigns tasks, blocks users and analysts',
-  analyst: 'Sees and downloads reports, does content work, sees AI credits',
+  manager: 'Sees reports, approves and edits strategy, publishes blogs, assigns tasks, blocks users and analysts (standard access; the admin can change it below)',
+  analyst: 'Sees and downloads reports, does content work, sees AI credits (standard access; the admin can change it below)',
   user: 'Sees the strategy, asks the assistant, does tasks assigned to them',
   tester: 'For 48 hours: everything except managing the team, then back to user automatically',
 };
@@ -114,6 +115,8 @@ export default function TeamTab() {
           </DataTable>
         </CardContent>
       </Card>
+
+      {isAdmin && <AccessAdmin people={rows} />}
 
       {isAdmin && (
         <Card>

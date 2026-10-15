@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { canDo } from '@/lib/access';
 import { guideFor, setManualDone, assignTask, assignedTo } from '@/lib/strategy/manual';
 import { timed } from '@/lib/jobTimer';
 import { getMe } from '@/lib/auth';
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
   if (!me) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
   try {
     if (action === 'assign') {
-      if (!can(me.role, 'manual.assign')) return NextResponse.json({ error: 'Only an admin or a manager can assign tasks.' }, { status: 403 });
+      if (!(await canDo(me, 'manual.assign'))) return NextResponse.json({ error: 'Only an admin or a manager can assign tasks.' }, { status: 403 });
       await assignTask(kind, Number(id), email || null, me.name);
       return NextResponse.json({ ok: true });
     }
