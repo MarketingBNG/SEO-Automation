@@ -28,6 +28,7 @@ export async function GET() {
       ...r,
       keywords: JSON.parse(r.keywords || '[]'),
       sources: JSON.parse(r.sources || '[]'),
+      relevance: JSON.parse(r.relevance || 'null'),
       comparison: r.comparison ? JSON.parse(r.comparison) : null,
       draft: r.draft_id ? byDraft.get(r.draft_id) || null : null,
       article: r.article_draft_id ? byDraft.get(r.article_draft_id) || null : null,

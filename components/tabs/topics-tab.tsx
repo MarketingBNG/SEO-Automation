@@ -70,6 +70,7 @@ function TopicCard({ t, canWork, onChanged }: { t: any; canWork: boolean; onChan
       {open && (
         <div className="mt-2 space-y-2 text-sm">
           {t.why && <p>{t.why}</p>}
+          {t.relevance && <RelevanceBox r={t.relevance} />}
           {t.keywords?.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {t.keywords.map((k: string) => <span key={k} className="rounded-full border px-2 py-px text-xs">{k}</span>)}
@@ -220,6 +221,28 @@ export default function TopicsTab() {
           <CardContent>{list(earlier)}</CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+// Why the topic matters to USAIndiaCFO and whether it is worth writing, so the team can decide
+// before spending a draft and a review on it.
+const VERDICT: Record<string, { label: string; cls: string }> = {
+  write: { label: 'Worth writing', cls: 'border-emerald-600/40 text-emerald-700 dark:text-emerald-400' },
+  maybe: { label: 'Optional: decide', cls: 'border-amber-600/40 text-amber-700 dark:text-amber-400' },
+  skip: { label: 'Probably skip', cls: 'border-red-600/40 text-red-700 dark:text-red-400' },
+};
+function RelevanceBox({ r }: { r: any }) {
+  const v = VERDICT[r.verdict] || VERDICT.maybe;
+  return (
+    <div className="space-y-1 rounded-lg border bg-muted/20 p-2">
+      <div className="flex flex-wrap items-center gap-2 font-semibold">
+        Why this matters for USAIndiaCFO
+        <span className={`rounded-full border px-2 py-px text-xs font-medium ${v.cls}`}>{v.label}</span>
+      </div>
+      {r.forUs && <p><span className="text-muted-foreground">Relevant because: </span>{r.forUs}</p>}
+      {r.useful && <p><span className="text-muted-foreground">Useful for clients: </span>{r.useful}</p>}
+      {r.reason && <p><span className="text-muted-foreground">Write it? </span>{r.reason}</p>}
     </div>
   );
 }
