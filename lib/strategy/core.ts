@@ -353,6 +353,28 @@ export function writingRuleIssues({ title, meta, html, surferScore, siteHost }: 
   return issues;
 }
 
+// The FAQ section as the website shows it: each question a click-to-open box, the same markup and
+// styling as the FAQs already on usaindiacfo.com (div.uic-faq-accordion with <details>). Applied
+// when publishing only; the draft keeps plain <h3> questions and <p> answers. An answer runs until
+// the next question or the next <h2>.
+const FAQ_BOX = 'border:1px solid #d9dde3;border-radius:4px;margin:0 0 10px;';
+const FAQ_Q = 'cursor:pointer;font-weight:600;padding:14px 18px;background:#f5f7fa;';
+const FAQ_A = 'padding:14px 18px;margin:0;';
+export function faqAccordion(html: string): string {
+  const m = String(html).match(/(<h2[^>]*>\s*(?:frequently asked questions|faqs?)[^<]*<\/h2>)([\s\S]*?)(?=<h2\b|$)/i);
+  if (!m || /uic-faq-accordion/.test(m[2])) return html;
+  const items = [...m[2].matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>([\s\S]*?)(?=<h3\b|$)/gi)];
+  if (!items.length) return html;
+  const before = m[2].slice(0, items[0].index).trim();
+  const boxes = items
+    .map(([, q, a]) => {
+      const answer = a.trim().replace(/<p(\s[^>]*)?>/gi, `<p style="${FAQ_A}">`);
+      return `<details style="${FAQ_BOX}">\n<summary style="${FAQ_Q}">${q.trim()}</summary>${answer}\n</details>`;
+    })
+    .join('\n');
+  return html.replace(m[0], `${m[1]}${before ? `\n${before}` : ''}<div class="uic-faq-accordion">\n${boxes}\n</div>\n`);
+}
+
 // FAQ schema from the FAQ section, added automatically to every published blog.
 export function faqSchema(html: string): string | null {
   const faq = String(html).split(/<h2[^>]*>\s*(?:frequently asked questions|faqs?)[^<]*<\/h2>/i)[1];

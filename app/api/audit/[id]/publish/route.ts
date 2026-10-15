@@ -4,6 +4,7 @@ import { updatePost, publishPost, seoSlug } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed, toId } from '../../../_lib/http';
+import { faqAccordion } from '@/lib/strategy/core';
 
 export const runtime = 'nodejs';
 
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // Existing post: keep its URL (no slug change), refresh content and the meta description.
       post = await updatePost(audit.wp_post_id, {
         title: audit.rewrite_title,
-        contentHtml: audit.rewrite_content_html,
+        contentHtml: faqAccordion(audit.rewrite_content_html),
         excerpt: audit.rewrite_meta || undefined,
         status: wpStatus,
         metaDescription: audit.rewrite_meta,
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     } else {
       post = await publishPost({
         title: audit.rewrite_title,
-        contentHtml: audit.rewrite_content_html,
+        contentHtml: faqAccordion(audit.rewrite_content_html),
         excerpt: audit.rewrite_meta || '',
         status: wpStatus,
         slug: seoSlug(audit.rewrite_title),

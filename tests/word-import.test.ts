@@ -52,3 +52,11 @@ test('the picture above the title is returned as the cover', () => {
   assert.ok(!blog.content.includes('QUJD'));
   assert.equal(blogFromWordHtml('<h1>Title</h1><p>Body.</p>').cover, null);
 });
+
+test('the FAQ is published as the site accordion', async () => {
+  const { faqAccordion } = await import('../lib/strategy/core');
+  const out = faqAccordion('<h2>FAQs</h2><h3>Q?</h3><p>A.</p><h2>Next</h2>');
+  assert.match(out, /<div class="uic-faq-accordion">\n<details style="[^"]+">\n<summary style="[^"]+">Q\?<\/summary><p style="[^"]+">A\.<\/p>/);
+  assert.equal(faqAccordion(out), out);
+  assert.equal(faqAccordion('<h2>Intro</h2><p>x</p>'), '<h2>Intro</h2><p>x</p>');
+});

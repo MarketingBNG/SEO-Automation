@@ -24,7 +24,7 @@ import { makeCover, coverAlt } from '../cover';
 import { publishDraftImages } from '../inlineMedia';
 import { saveFile } from '../storage';
 import { callClaude } from '../anthropic';
-import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, keywordKey, crawlIsFresh, needsExpertReview, reviewOverdue, REVIEW_HOURS } from './core';
+import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, faqAccordion, keywordKey, crawlIsFresh, needsExpertReview, reviewOverdue, REVIEW_HOURS } from './core';
 import { requireExpert } from '../reviewers';
 import { submitToBing } from '../bing';
 import { withByline, expertSchema } from '../byline';
@@ -265,7 +265,7 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
     }
     cover = imageKey ? await uploadMedia(imageKey, { altText: coverAlt(checked), title: checked.title }).catch(() => null) : null;
   }
-  const html = `${withByline(inline.html, authorName, row.expert_reviewer)}\n${faqSchema(checked.content_html) || ''}\n${expertSchema({ title: checked.title, author: authorName, reviewer: row.expert_reviewer, image: cover?.url || null }) || ''}`;
+  const html = `${withByline(faqAccordion(inline.html), authorName, row.expert_reviewer)}\n${faqSchema(checked.content_html) || ''}\n${expertSchema({ title: checked.title, author: authorName, reviewer: row.expert_reviewer, image: cover?.url || null }) || ''}`;
   if (row.refresh_url) {
     const { json: found } = await wpRequest('GET', '/wp/v2/posts', { query: { slug: new URL(row.refresh_url).pathname.split('/').filter(Boolean).pop(), _fields: 'id,link' } });
     if (!found?.[0]) throw new Error(`Refresh target not found: ${row.refresh_url}`);

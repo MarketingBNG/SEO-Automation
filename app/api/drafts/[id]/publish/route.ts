@@ -5,7 +5,7 @@ import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
 import { methodNotAllowed, toId } from '../../../_lib/http';
-import { aiLeftovers, needsExpertReview, faqSchema } from '@/lib/strategy/core';
+import { aiLeftovers, needsExpertReview, faqSchema, faqAccordion } from '@/lib/strategy/core';
 import { CREDENTIAL, expertReviewers, requireExpert } from '@/lib/reviewers';
 import { withByline, expertSchema } from '@/lib/byline';
 import { authorNames, pickAuthor, wpAuthorId } from '@/lib/authors';
@@ -33,8 +33,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // A blog sent to WordPress earlier as a draft (not live) can be sent again: the same post is
   // updated, so no second copy is made.
   const wpLive = draft.wp_post_id ? await wpPostStatus(draft.wp_post_id) : null;
-  if (draft.status !== 'approved' && !(draft.status === 'published' && wpLive !== 'publish')) {
-    return NextResponse.json({ error: draft.status === 'published' ? 'This blog is already live on the website.' : 'Draft must be approved before publishing' }, { status: 400 });
+  // A live blog can be sent again too: that updates the same live post (for example after an edit).
+  if (draft.status !== 'approved' && !(draft.status === 'published' && draft.wp_post_id)) {
+    return NextResponse.json({ error: 'Draft must be approved before publishing' }, { status: 400 });
   }
   if (/\[(PRACTITIONER NOTE NEEDED|VERIFY|AUTHOR NAME|REVIEWER NAME|VISUAL SUGGESTION)/i.test(draft.content_html || '')) {
     return NextResponse.json({ error: 'The draft still has a reviewer placeholder ([AUTHOR NAME], [REVIEWER NAME], [PRACTITIONER NOTE NEEDED], [VISUAL SUGGESTION] or [VERIFY]). Replace or remove it before publishing.' }, { status: 400 });
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (leftovers.length) return NextResponse.json({ error: `Remove the AI notes first. ${leftovers.join(' ')}` }, { status: 400 });
 
   const body: any = await req.json().catch(() => ({}));
-  const wpStatus = (body && body.wpStatus) || 'publish'; // 'publish' (live) or 'draft'
+  const wpStatus = wpLive === 'publish' ? 'publish' : (body && body.wpStatus) || 'publish'; // 'publish' (live) or 'draft'
   const reviewer = String(body?.reviewer || '').trim();
   const kw = (await prisma.keywords.findUnique({ where: { id: draft.keyword_id }, select: { keyword: true } }))?.keyword;
   if (wpStatus === 'publish' && (await requireExpert()) && needsExpertReview(kw, draft.title)) {
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     // Images a person placed in the article move to the WordPress Media Library first.
     const inline = await publishDraftImages(nid, draft.content_html || '');
-    const contentHtml = `${withByline(inline.html, author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null, image: cover?.url || null }) || ''}`;
+    const contentHtml = `${withByline(faqAccordion(inline.html), author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null, image: cover?.url || null }) || ''}`;
     const fields = {
       title: draft.title,
       contentHtml,
