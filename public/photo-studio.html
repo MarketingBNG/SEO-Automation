@@ -22,7 +22,7 @@ button:disabled{opacity:.5;cursor:default}
 #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-top:24px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:grid}
 .card .imgs{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:var(--line)}
-.card .imgs.three{grid-template-columns:1fr 1fr 1fr}
+.card .imgs.one{grid-template-columns:1fr}.card .imgs.three{grid-template-columns:1fr 1fr 1fr}
 .card figure{margin:0;background:repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/16px 16px;aspect-ratio:4/5;display:flex;align-items:center;justify-content:center;position:relative}
 .card figure{overflow:hidden;min-width:0}
 .card figure img{display:block;width:100%;height:100%;object-fit:contain}
@@ -39,7 +39,7 @@ select{padding:9px;border-radius:6px;border:1px solid var(--line);background:var
 small{color:var(--mute)}
 </style></head><body>
 <h1>Photo Studio</h1>
-<p class="sub">Photo ya ZIP daalo. Har photo ka background AI se hatega (aapke browser mein hi, koi upload nahi). Phir jo photos aap select karoge, unko studio-style professional photo banaya jayega.</p>
+<p class="sub">Photo ya ZIP daalo. Har photo ka background AI se hatega (aapke browser mein hi, koi upload nahi). Duplicate photos apne aap hat jaati hain, aur sirf woh photos dikhti hain jinka background hat gaya. Phir aap select karke unhe studio look de sakte ho, ya AI se professional bana sakte ho.</p>
 
 <div class="panel">
   <div class="row">
@@ -54,6 +54,7 @@ small{color:var(--mute)}
   <div id="status">Ready. Pehli baar AI model (~40MB) download hoga, thoda time lagega.</div>
 </div>
 
+<div id="dupInfo" class="sub" style="margin-top:16px"></div>
 <div id="grid"></div>
 
 <div class="bar">
@@ -61,7 +62,9 @@ small{color:var(--mute)}
   <label>Background: <select id="bgSel">
     <option value="grey">Studio grey</option><option value="white">Pure white</option>
     <option value="blue">Corporate blue</option><option value="navy">Dark navy</option></select></label>
-  <button id="proBtn" disabled>Selected ko Professional banao</button>
+  <button id="proBtn" disabled>Selected ko Studio look do</button>
+  <input id="aiKey" type="password" placeholder="OpenAI API key (AI ke liye)" style="padding:9px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:220px">
+  <button id="aiBtn" disabled>Selected ko AI se Professional banao</button>
   <button class="ghost" id="dlBtn" disabled>Sab download (ZIP)</button>
 </div>
 
@@ -80,14 +83,26 @@ async function addFile(f){
     for(const e of ents){ const b=await e.async('blob'); addImage(new File([b],e.name.split('/').pop(),{type:'image/'+(e.name.split('.').pop().toLowerCase().replace('jpg','jpeg'))})); }
   } else if(f.type.startsWith('image/')||isImg(f.name)) addImage(f);
 }
-function addImage(file){
+const seenHash=[], seenName=new Set(); let dups=[], fails=0;
+const normName=n=>n.toLowerCase().replace(/\.[^.]+$/,'').replace(/\s*(\(\d+\)|-\s*copy|copy|_\d+)$/,'').replace(/[^a-z0-9]/g,'');
+async function dhash(file){ // 9x8 difference hash: same photo stays same even after resize/re-save
+  const b=await createImageBitmap(file); const c=new OffscreenCanvas(9,8), g=c.getContext('2d'); g.drawImage(b,0,0,9,8);
+  const d=g.getImageData(0,0,9,8).data, gr=[]; for(let i=0;i<72;i++) gr.push(d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11);
+  const h=[]; for(let y=0;y<8;y++)for(let x=0;x<8;x++) h.push(gr[y*9+x]>gr[y*9+x+1]?1:0); return h; }
+const ham=(a,b)=>a.reduce((n,v,i)=>n+(v!==b[i]),0);
+function showDups(){ $('#dupInfo').textContent=(dups.length?`${dups.length} duplicate photo(s) hata di: ${dups.join(', ')}. `:'')+(fails?`${fails} photo(s) ka background nahi hata, isliye nahi dikhayi.`:''); }
+function addImage(file){ queue=queue.then(async()=>{
+  const nn=normName(file.name); let h=null; try{ h=await dhash(file); }catch{}
+  if(seenName.has(nn) || (h && seenHash.some(x=>ham(x,h)<=6))){ dups.push(file.name); showDups(); return; }
+  seenName.add(nn); if(h) seenHash.push(h); await addImage2(file); }); }
+function addImage2(file){
   const it={file,name:file.name.replace(/\.[^.]+$/,''),orig:URL.createObjectURL(file),cut:null,pro:null};
   const el=document.createElement('div'); el.className='card';
-  el.innerHTML=`<div class="imgs"><figure><figcaption>Original</figcaption><img src="${it.orig}"></figure><figure class="c"><figcaption>No BG</figcaption></figure></div>
+  el.innerHTML=`<div class="imgs one"><figure class="c"><figcaption>No BG</figcaption></figure></div>
   <div class="meta"><div class="name"></div><span class="pill wait">Queue mein…</span>
   <label class="pick"><input type="checkbox"> Professional banana hai</label></div>`;
-  el.querySelector('.name').textContent=file.name; it.el=el; it.chk=el.querySelector('input'); grid.append(el); items.push(it);
-  queue=queue.then(()=>process(it));
+  el.querySelector('.name').textContent=file.name; it.el=el; it.chk=el.querySelector('input'); items.push(it);
+  return process(it);
 }
 async function process(it){
   const pill=it.el.querySelector('.pill'); pill.textContent='Background hat raha hai…';
@@ -96,10 +111,10 @@ async function process(it){
       progress:(k,c,t)=>{ if(k.includes('fetch')) status.textContent=`AI model load: ${Math.round(c/t*100)}%`; }});
     it.cut=blob; const u=URL.createObjectURL(blob);
     it.el.querySelector('figure.c').insertAdjacentHTML('beforeend',`<img src="${u}">`);
-    pill.className='pill done'; pill.textContent='Background hat gaya';
-  }catch(e){ pill.className='pill err'; pill.textContent='Error: '+e.message; }
-  const done=items.filter(i=>i.cut).length; status.textContent=`${done}/${items.length} photos ho gayi.`;
-  $('#proBtn').disabled=$('#dlBtn').disabled=!done;
+    pill.className='pill done'; pill.textContent='Background hat gaya'; grid.append(it.el);
+  }catch(e){ fails++; items.splice(items.indexOf(it),1); console.error(it.file.name,e); showDups(); }
+  const done=items.filter(i=>i.cut).length; status.textContent=`${done} photos ka background hat gaya.`;
+  $('#proBtn').disabled=$('#dlBtn').disabled=$('#aiBtn').disabled=!done;
 }
 
 const BGS={grey:['#d9dce1','#8f959e'],white:['#ffffff','#ffffff'],blue:['#cfe0f3','#5b84b8'],navy:['#3a4c6b','#141c2b']};
@@ -117,14 +132,28 @@ async function makePro(it){
   g.save(); g.filter='blur(18px) brightness(0)'; g.globalAlpha=0.25; g.drawImage(img,dx+12,dy+18,dw,dh); g.restore();
   g.filter='brightness(1.06) contrast(1.08) saturate(1.05)'; g.drawImage(img,dx,dy,dw,dh); g.filter='none';
   it.pro=await c.convertToBlob({type:'image/jpeg',quality:0.95});
-  const figs=it.el.querySelector('.imgs'); figs.classList.add('three'); figs.querySelector('.p')?.remove();
-  figs.insertAdjacentHTML('beforeend',`<figure class="p"><figcaption>Professional</figcaption><img src="${URL.createObjectURL(it.pro)}"></figure>`);
+  addFig(it,'p','Studio',it.pro);
 }
 $('#proBtn').onclick=async()=>{ const sel=items.filter(i=>i.chk.checked&&i.cut); if(!sel.length){status.textContent='Pehle photos select karo.';return;}
   for(const [n,it] of sel.entries()){ status.textContent=`Professional bana rahe: ${n+1}/${sel.length}`; await makePro(it); } status.textContent=`${sel.length} professional photos ready. Dekh lo, phir download karo.`; };
+function addFig(it,cls,label,blob){ const figs=it.el.querySelector('.imgs'); figs.classList.remove('one'); figs.querySelector('.'+cls)?.remove();
+  figs.insertAdjacentHTML('beforeend',`<figure class="${cls}"><figcaption>${label}</figcaption><img src="${URL.createObjectURL(blob)}"></figure>`);
+  const n=figs.children.length; figs.style.gridTemplateColumns=`repeat(${n},1fr)`; }
+const AI_PROMPT='Turn this person into a professional corporate headshot. Keep the exact same face, identity, age, skin tone, hairstyle and expression. Dress them in neat formal business attire suited to them. Plain soft grey studio background, soft even studio lighting, sharp focus, chest-up framing, looking at camera, photorealistic.';
+$('#aiBtn').onclick=async()=>{ const key=$('#aiKey').value.trim(); const sel=items.filter(i=>i.chk.checked&&i.cut);
+  if(!key){status.textContent='AI ke liye OpenAI API key daalo (platform.openai.com → API keys).';return;}
+  if(!sel.length){status.textContent='Pehle photos select karo.';return;}
+  for(const [n,it] of sel.entries()){ status.textContent=`AI professional bana raha: ${n+1}/${sel.length} (har photo ~30-60 sec)`;
+    try{ const fd=new FormData(); fd.append('model','gpt-image-1'); fd.append('image',new File([it.cut],it.name+'.png',{type:'image/png'}));
+      fd.append('prompt',AI_PROMPT); fd.append('size','1024x1536'); fd.append('quality','high');
+      const r=await fetch('https://api.openai.com/v1/images/edits',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd}); const j=await r.json();
+      if(!r.ok) throw new Error(j.error?.message||r.status);
+      const bin=Uint8Array.from(atob(j.data[0].b64_json),c=>c.charCodeAt(0)); it.ai=new Blob([bin],{type:'image/png'}); addFig(it,'a','AI Professional',it.ai);
+    }catch(e){ status.textContent=`${it.name}: AI error: ${e.message}`; return; } }
+  status.textContent=`${sel.length} AI professional photos ready. Dekh lo, phir download karo.`; };
 $('#selAll').onclick=()=>{const all=items.every(i=>i.chk.checked); items.forEach(i=>i.chk.checked=!all);};
 $('#dlBtn').onclick=async()=>{ const z=new JSZip();
-  items.forEach(i=>{ if(i.cut) z.file(`no-background/${i.name}.png`,i.cut); if(i.pro) z.file(`professional/${i.name}.jpg`,i.pro); });
+  items.forEach(i=>{ if(i.cut) z.file(`no-background/${i.name}.png`,i.cut); if(i.pro) z.file(`studio/${i.name}.jpg`,i.pro); if(i.ai) z.file(`ai-professional/${i.name}.png`,i.ai); });
   const b=await z.generateAsync({type:'blob'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='photos-processed.zip'; a.click(); };
 
 const drop=$('#drop'), fi=$('#file'), fo=$('#folder');
