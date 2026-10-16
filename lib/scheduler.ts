@@ -48,6 +48,10 @@ async function tick() {
   const { topicsTick } = await import('./topics');
   await topicsTick(now).catch((e: any) => console.error('Scheduler: topics failed:', e.message));
 
+  // Directory listings for the day (per-day count from the approved strategy), after 10:00 IST.
+  const { directoriesTick } = await import('./strategy/directories');
+  await directoriesTick(now).catch((e: any) => console.error('Scheduler: directories failed:', e.message));
+
   // Associate Training: lessons and tests once a day after 09:00 IST.
   const { trainingTick } = await import('./associateTraining');
   await trainingTick(now).catch((e: any) => console.error('Scheduler: training failed:', e.message));

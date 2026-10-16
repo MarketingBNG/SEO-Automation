@@ -31,7 +31,17 @@ export const SECTION_ORDER = [
 ] as const;
 
 // Sections a reviewer may edit (summary text, tables and targets). 7, 10 and 11 are fixed.
-export const EDITABLE_SECTIONS = ['summary', 'included', 'keywords', 'blogPlan', 'aeoGeo', 'backlinks', 'technical', 'targets'] as const;
+export const EDITABLE_SECTIONS = ['summary', 'included', 'keywords', 'blogPlan', 'aeoGeo', 'backlinks', 'technical', 'targets', 'directories'] as const;
+
+// Directory and citation listings a person does each day (new quality directories come in at 10:00
+// IST). Per day and per month go together: the month is the day count times the strategy's 30 days.
+export const STRATEGY_DAYS = 30;
+export const DEFAULT_DIRECTORIES_PER_DAY = 5;
+export function directoryTargets(plan: any): { perDay: number; perMonth: number } {
+  const d = plan?.directories;
+  const perDay = Number.isFinite(Number(d?.perDay)) && Number(d.perDay) >= 0 ? Math.round(Number(d.perDay)) : DEFAULT_DIRECTORIES_PER_DAY;
+  return { perDay, perMonth: perDay * STRATEGY_DAYS };
+}
 
 export const SAFE_BACKLINK_METHODS = [
   'Outreach to SE Ranking backlink gap site',

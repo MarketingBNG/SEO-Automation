@@ -7,7 +7,7 @@ import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { saveFile } from '../storage';
 import { parseScreamingFrogCsv } from '../technicalAudit';
-import { validatePlan, approvalBlockers, keywordKey, EDITABLE_SECTIONS, crawlIsFresh, priorityScore } from './core';
+import { validatePlan, approvalBlockers, keywordKey, EDITABLE_SECTIONS, crawlIsFresh, priorityScore, STRATEGY_DAYS } from './core';
 import { technicalFixesFromCrawl, calendarSlots } from './generate';
 import { fixKind } from './fixer';
 import * as settings from '../settings';
@@ -110,6 +110,14 @@ export async function editSection(id: number, section: string, value: any, revie
   if (approved && !String(why || '').trim()) throw Object.assign(new Error('This strategy is approved. Say why you are changing it.'), { status: 400 });
   const plan = JSON.parse(row.plan_json);
   const oldValue = plan[section];
+  // Directories: per day decides, per month follows (or per month given alone is divided by the days).
+  if (section === 'directories') {
+    const day = Number(value?.perDay);
+    const month = Number(value?.perMonth);
+    const perDay = Number.isFinite(day) && day >= 0 ? Math.round(day) : Number.isFinite(month) && month >= 0 ? Math.round(month / STRATEGY_DAYS) : NaN;
+    if (!Number.isFinite(perDay) || perDay > 50) throw Object.assign(new Error('Directories per day must be a number from 0 to 50.'), { status: 400 });
+    value = { perDay, perMonth: perDay * STRATEGY_DAYS };
+  }
   plan[section] = value;
   if (section === 'keywords') rescore(plan);
   if (section === 'blogPlan') fillPublishDates(plan);

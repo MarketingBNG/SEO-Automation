@@ -321,7 +321,7 @@ export function StrategyView({ s, onChanged, active = true }: { s: any; onChange
   // Saves only the sections that changed; each save is one audit-log entry.
   async function saveEdits() {
     let latest = null;
-    for (const section of ['summary', 'included', 'keywords', 'blogPlan', 'aeoGeo', 'backlinks', 'technical', 'targets']) {
+    for (const section of ['summary', 'included', 'keywords', 'blogPlan', 'aeoGeo', 'backlinks', 'technical', 'targets', 'directories']) {
       if (JSON.stringify(draft[section]) === JSON.stringify(plan[section])) continue;
       latest = await call('save', `/api/strategy/${s.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ section, value: draft[section], why: editWhy }) });
       if (!latest) return;
@@ -523,6 +523,7 @@ export function StrategyView({ s, onChanged, active = true }: { s: any; onChange
 
       {/* 6 */}
       <Section title="6. Backlink plan" description="Safe methods only: SE Ranking backlink gap outreach, unlinked brand mentions, broken link replacement, directory and citation listings, automatic internal linking. Never paid links, link farms, comment spam or private blog networks. After approval the dashboard finds each site's contact email and adds it to the Smartlead outreach campaign on its date (up to 5 a day, no duplicates); Smartlead sends the emails and follow-ups. A task is marked done when SE Ranking finds the link. Directory listings need a person.">
+        <DirectoryCounts value={p.directories} editing={editing} onChange={(v) => upd('directories', v)} />
         <EditTable
           rows={p.backlinks}
           editing={editing}
@@ -971,6 +972,37 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
         </>
       )}
       <MonthRunning />
+    </div>
+  );
+}
+
+// Directory listings per day and per month (30 days). Changing one changes the other; new quality
+// directories come in as tasks every day at 10:00 IST.
+function DirectoryCounts({ value, editing, onChange }: { value: any; editing: boolean; onChange: (v: any) => void }) {
+  const DAYS = 30;
+  const perDay = Number.isFinite(Number(value?.perDay)) ? Number(value.perDay) : 5;
+  const perMonth = perDay * DAYS;
+  const box = 'h-8 w-24 rounded-md border bg-background px-2';
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm">
+      <span className="font-semibold">Directory listings</span>
+      {editing ? (
+        <>
+          <label className="flex items-center gap-1">
+            <input type="number" min={0} max={50} className={box} value={perDay} onChange={(e) => onChange({ perDay: Math.max(0, Math.round(Number(e.target.value) || 0)), perMonth: Math.max(0, Math.round(Number(e.target.value) || 0)) * DAYS })} />
+            per day
+          </label>
+          <label className="flex items-center gap-1">
+            <input type="number" min={0} step={DAYS} className={box} value={perMonth} onChange={(e) => { const d = Math.round((Number(e.target.value) || 0) / DAYS); onChange({ perDay: d, perMonth: d * DAYS }); }} />
+            per month
+          </label>
+        </>
+      ) : (
+        <span>
+          <strong>{perDay}</strong> per day, <strong>{perMonth}</strong> per month
+        </span>
+      )}
+      <span className="text-muted-foreground">New quality directories are added as tasks every day at 10:00 IST (Tasks for your team).</span>
     </div>
   );
 }

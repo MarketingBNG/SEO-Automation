@@ -8,6 +8,8 @@ import { callClaude } from '../anthropic';
 import { gatherStrategyInputs, keywordData } from './inputs';
 import {
   CORE_OBJECTIVE, SAFEGUARDS, SAFE_BACKLINK_METHODS, CHANNELS, priorityScore, validatePlan, keywordKey, metric, strategyWindow, windowOf,
+  DEFAULT_DIRECTORIES_PER_DAY,
+  STRATEGY_DAYS,
 } from './core';
 
 // The strongest model available, at maximum effort, for strategy research. Override in Vercel.
@@ -279,6 +281,7 @@ export async function buildPlan(ai, inputs, period, window = windowOf(period)) {
       refreshes: refreshes.slice(0, 40),
     },
     targets,
+    directories: { perDay: DEFAULT_DIRECTORIES_PER_DAY, perMonth: DEFAULT_DIRECTORIES_PER_DAY * STRATEGY_DAYS },
     safeguards: SAFEGUARDS,
   };
 }
