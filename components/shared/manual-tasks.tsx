@@ -163,7 +163,10 @@ function TaskRow({ t, m }: { t: Task; m: M }) {
       <div className="flex items-start gap-2">
         <input type="checkbox" className="mt-1" checked={t.done} disabled={!!busy} onChange={() => run(t.done ? 'undo' : 'done')} title="Tick when it is done" />
         <div className="min-w-0 flex-1">
-          <div className={t.done ? 'font-medium text-muted-foreground line-through' : 'font-medium'}>{t.title}</div>
+          <div className={t.done ? 'font-medium text-muted-foreground line-through' : 'font-medium'}>
+            {!t.done && t.date && t.date.slice(0, 10) < todayIst() && <span className="mr-2 rounded bg-red-500/15 px-1.5 py-px text-xs font-semibold text-red-700 dark:text-red-400">Due</span>}
+            {t.title}
+          </div>
           <div className="text-xs text-muted-foreground">
             {t.kind === 'fix' ? 'Website fix for a developer or WordPress admin' : 'Profile or listing to create'}
             {t.date ? `, planned ${t.date.slice(0, 10)}` : ''}. {t.detail}
@@ -219,7 +222,7 @@ export function ManualTaskList({ m }: { m: M }) {
   if (!m.tasks.length) return <p className="text-sm text-muted-foreground">Nothing needs a person right now. Everything in this strategy runs automatically.</p>;
   return (
     <ul className="space-y-2">
-      {m.tasks.map((t) => (
+      {sortDue(m.tasks).map((t) => (
         <TaskRow key={`${t.kind}-${t.id}`} t={t} m={m} />
       ))}
     </ul>
@@ -265,4 +268,14 @@ export function ManualTasksBanner({ m, strategyId }: { m: M; strategyId: number 
       </Dialog>
     </>
   );
+}
+
+// Today in India (YYYY-MM-DD). A task not done from an earlier day shows "Due" and comes first.
+function todayIst() {
+  return new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+}
+function sortDue(tasks: any[]) {
+  const today = todayIst();
+  const due = (t: any) => !t.done && t.date && t.date.slice(0, 10) < today;
+  return [...tasks].sort((a, b) => Number(due(b)) - Number(due(a)) || Number(a.done) - Number(b.done));
 }
