@@ -24,7 +24,10 @@ button:disabled{opacity:.5;cursor:default}
 .card .imgs{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:var(--line)}
 .card .imgs.three{grid-template-columns:1fr 1fr 1fr}
 .card figure{margin:0;background:repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/16px 16px;aspect-ratio:4/5;display:flex;align-items:center;justify-content:center;position:relative}
-.card figure img{max-height:100%;object-fit:contain}
+.card figure{overflow:hidden;min-width:0}
+.card figure img{display:block;width:100%;height:100%;object-fit:contain}
+img{max-width:100%}
+.card{min-width:0}
 .card figcaption{position:absolute;left:4px;top:4px;font-size:11px;background:#000a;color:#fff;padding:1px 6px;border-radius:4px}
 .card .meta{padding:10px 12px;display:grid;gap:6px}
 .name{font-weight:600;overflow-wrap:anywhere}
