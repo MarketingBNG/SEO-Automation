@@ -68,7 +68,7 @@ small{color:var(--mute)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script type="module">
 let removeBackground=null;
-async function getRemover(){ if(!removeBackground){ const m=await import("https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/+esm"); removeBackground=m.removeBackground||m.default; } return removeBackground; }
+async function getRemover(){ if(!removeBackground){ let m; try{ m=await import("https://esm.sh/@imgly/background-removal@1.4.5"); }catch(e){ m=await import("https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/+esm"); } removeBackground=m.removeBackground||m.default; } return removeBackground; }
 const $=s=>document.querySelector(s), grid=$('#grid'), status=$('#status');
 const items=[]; let queue=Promise.resolve();
 const isImg=n=>/\.(jpe?g|png|webp|bmp|gif|heic)$/i.test(n);
