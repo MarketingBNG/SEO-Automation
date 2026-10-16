@@ -4,20 +4,11 @@
 // The photo comes from Pexels (free stock photos, real photography) matched to the blog's topic; when
 // no good photo is found, an AI photo is made (OpenAI, paid per image). Each photo is used once.
 // Made once per blog and saved as its cover; without keys the branded cover (lib/cover.ts) stays.
-import path from 'path';
-import sharp, { type OverlayOptions } from 'sharp';
 import prisma from './prisma';
 import * as settings from './settings';
 import { saveFile } from './storage';
+import { composeCover } from './cover';
 
-const W = 1200;
-const H = 630;
-const BOLD = path.join(process.cwd(), 'assets/fonts/Montserrat-Bold.ttf');
-const REGULAR = path.join(process.cwd(), 'assets/fonts/Montserrat-Regular.ttf');
-// The full logo with white lettering (made for dark backgrounds), placed top left on the dark side.
-const LOGO = path.join(process.cwd(), 'public/logo-mark.png');
-const GOLD = '#E8B04B';
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // Topic words -> what the photo should show (searched on Pexels, newest topic match first).
 const SCENES: [RegExp, string[]][] = [
@@ -74,48 +65,6 @@ async function aiPhoto(topic: string): Promise<Buffer | null> {
   if (!res?.ok) return null;
   const b64 = ((await res.json().catch(() => ({}))) as any)?.data?.[0]?.b64_json;
   return b64 ? Buffer.from(b64, 'base64') : null;
-}
-
-// "Main: Rest" -> white main line(s), gold second part; else the last words go gold.
-export function splitTitle(title: string): { white: string; gold: string; sub: string } {
-  const t = String(title || '').trim();
-  const colon = t.match(/^(.{8,}?):\s*(.+)$/);
-  if (colon) return { white: colon[1], gold: colon[2], sub: '' };
-  const amp = t.match(/^(.+?)\s+(&|and)\s+(.+)$/i);
-  if (amp && amp[1].length >= 6) return { white: amp[1], gold: `${amp[2] === '&' ? '&' : 'and'} ${amp[3]}`, sub: '' };
-  const words = t.split(/\s+/);
-  const cut = Math.max(1, Math.ceil(words.length * 0.6));
-  return { white: words.slice(0, cut).join(' '), gold: words.slice(cut).join(' '), sub: '' };
-}
-
-async function text(markup: string, font: string, family: string, width: number, dpi: number) {
-  return sharp({ text: { text: markup, font: family, fontfile: font, width, rgba: true, dpi, wrap: 'word' } }).png().toBuffer();
-}
-
-export async function composeCover(photo: Buffer, title: string): Promise<Buffer> {
-  const base = await sharp(photo).resize(W, H, { fit: 'cover', position: 'attention' }).modulate({ saturation: 1.05 }).toBuffer();
-  const shade = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0" stop-color="#0B1430" stop-opacity="0.88"/><stop offset="0.45" stop-color="#0B1430" stop-opacity="0.62"/><stop offset="0.75" stop-color="#0B1430" stop-opacity="0.12"/><stop offset="1" stop-color="#0B1430" stop-opacity="0"/>
-      </linearGradient></defs>
-      <rect width="100%" height="100%" fill="url(#g)"/>
-    </svg>`
-  );
-  const { white, gold } = splitTitle(title);
-  const size = title.length > 70 ? 230 : title.length > 45 ? 270 : 320;
-  const head = await text(`<span foreground="#FFFFFF">${esc(white)}</span>${gold ? `\n<span foreground="${GOLD}">${esc(gold)}</span>` : ''}`, BOLD, 'Montserrat Bold', 640, size);
-  const headMeta = await sharp(head).metadata();
-  const top = Math.max(150, Math.round((H - (headMeta.height || 300)) / 2) + 10);
-  const layers: OverlayOptions[] = [
-    { input: shade, left: 0, top: 0 },
-    { input: head, left: 64, top },
-    { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="88" height="5"><rect width="88" height="5" rx="2" fill="${GOLD}"/></svg>`), left: 66, top: Math.min(H - 40, top + (headMeta.height || 300) + 22) },
-  ];
-  try {
-    layers.push({ input: await sharp(LOGO).resize({ height: 84, fit: 'inside' }).png().toBuffer(), left: 58, top: 34 });
-  } catch {}
-  return sharp(base).composite(layers).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
 }
 
 // Makes and saves the photo cover for a draft that has none. Returns the stored key, or null when
