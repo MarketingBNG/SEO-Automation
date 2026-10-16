@@ -44,8 +44,10 @@ small{color:var(--mute)}
     <button id="driveBtn">Drive se laao</button>
   </div>
   <small>Drive kabhi-kabhi browser ko seedha download nahi karne deta. Agar error aaye to Drive se ZIP download karke neeche daal do.</small>
-  <div class="drop" id="drop">Yahan photo / ZIP drag karo, ya click karke chuno<br><small>JPG, PNG, WEBP, ZIP</small></div>
+  <div class="drop" id="drop">Yahan photos, ZIP ya poora folder drag karke chhodo<br><small>JPG, PNG, WEBP, ZIP, folder</small></div>
   <input id="file" type="file" accept="image/*,.zip" multiple hidden>
+  <input id="folder" type="file" webkitdirectory multiple hidden>
+  <div class="row"><button class="ghost" id="pickFiles">Photos / ZIP chuno</button><button class="ghost" id="pickFolder">Poora folder chuno</button></div>
   <div id="status">Ready. Pehli baar AI model (~40MB) download hoga, thoda time lagega.</div>
 </div>
 
@@ -62,7 +64,8 @@ small{color:var(--mute)}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script type="module">
-import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/+esm";
+let removeBackground=null;
+async function getRemover(){ if(!removeBackground){ const m=await import("https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/+esm"); removeBackground=m.removeBackground||m.default; } return removeBackground; }
 const $=s=>document.querySelector(s), grid=$('#grid'), status=$('#status');
 const items=[]; let queue=Promise.resolve();
 const isImg=n=>/\.(jpe?g|png|webp|bmp|gif|heic)$/i.test(n);
@@ -86,7 +89,7 @@ function addImage(file){
 async function process(it){
   const pill=it.el.querySelector('.pill'); pill.textContent='Background hat raha hai…';
   try{
-    const blob=await removeBackground(it.file,{model:'isnet',output:{format:'image/png',quality:1},
+    const rb=await getRemover(); const blob=await rb(it.file,{model:'isnet',output:{format:'image/png',quality:1},
       progress:(k,c,t)=>{ if(k.includes('fetch')) status.textContent=`AI model load: ${Math.round(c/t*100)}%`; }});
     it.cut=blob; const u=URL.createObjectURL(blob);
     it.el.querySelector('figure.c').insertAdjacentHTML('beforeend',`<img src="${u}">`);
@@ -121,12 +124,23 @@ $('#dlBtn').onclick=async()=>{ const z=new JSZip();
   items.forEach(i=>{ if(i.cut) z.file(`no-background/${i.name}.png`,i.cut); if(i.pro) z.file(`professional/${i.name}.jpg`,i.pro); });
   const b=await z.generateAsync({type:'blob'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='photos-processed.zip'; a.click(); };
 
-const drop=$('#drop'), fi=$('#file');
-drop.onclick=()=>fi.click(); fi.onchange=()=>[...fi.files].forEach(addFile);
-drop.ondragover=e=>{e.preventDefault();drop.classList.add('on')}; drop.ondragleave=()=>drop.classList.remove('on');
-drop.ondrop=e=>{e.preventDefault();drop.classList.remove('on');[...e.dataTransfer.files].forEach(addFile)};
+const drop=$('#drop'), fi=$('#file'), fo=$('#folder');
+const addMany=fs=>{ const list=[...fs]; const ok=list.filter(f=>isImg(f.name)||/\.zip$/i.test(f.name)||f.type.startsWith('image/'));
+  status.textContent=ok.length?`${ok.length} file(s) mili, process ho rahi hain…`:'Isme koi photo ya ZIP nahi mili.'; ok.forEach(addFile); };
+drop.onclick=()=>fi.click(); $('#pickFiles').onclick=()=>fi.click(); $('#pickFolder').onclick=()=>fo.click();
+fi.onchange=()=>{addMany(fi.files);fi.value=''}; fo.onchange=()=>{addMany(fo.files);fo.value=''};
+function readEntry(en,out){ return new Promise(res=>{
+  if(en.isFile) en.file(f=>{out.push(f);res()},()=>res());
+  else if(en.isDirectory){ const r=en.createReader(), all=[]; const next=()=>r.readEntries(async es=>{ if(!es.length){ for(const e of all) await readEntry(e,out); res(); } else { all.push(...es); next(); } },()=>res()); next(); }
+  else res(); }); }
+// whole page accepts drops, so Chrome never opens the file instead
+addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('on')});
+addEventListener('dragleave',e=>{ if(!e.relatedTarget) drop.classList.remove('on')});
+addEventListener('drop',async e=>{ e.preventDefault(); drop.classList.remove('on');
+  const ents=[...e.dataTransfer.items||[]].map(i=>i.webkitGetAsEntry&&i.webkitGetAsEntry()).filter(Boolean);
+  if(ents.length){ const out=[]; for(const en of ents) await readEntry(en,out); addMany(out); } else addMany(e.dataTransfer.files); });
 $('#driveBtn').onclick=async()=>{ const m=$('#drive').value.match(/(?:\/d\/|id=)([\w-]{20,})/);
-  if(!m){status.textContent='Yeh Drive file link nahi lag raha. Folder link ho to folder ko ZIP download karke daalo.';return;}
+  if(!m){status.textContent='Yeh Drive file link nahi lag raha. Drive folder ka link browser se nahi khulta: Drive mein folder par right-click → Download karo, phir woh ZIP yahan daalo.';return;}
   status.textContent='Drive se download ho raha hai…';
   try{ const r=await fetch(`https://drive.usercontent.google.com/download?id=${m[1]}&export=download&confirm=t`); if(!r.ok) throw 0;
     const b=await r.blob(); const zip=b.type.includes('zip'); await addFile(new File([b],zip?'drive.zip':'drive-photo.jpg',{type:b.type}));
