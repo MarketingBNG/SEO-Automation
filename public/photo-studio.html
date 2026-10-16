@@ -92,7 +92,7 @@ function addImage(file){
 async function process(it){
   const pill=it.el.querySelector('.pill'); pill.textContent='Background hat raha hai…';
   try{
-    const rb=await getRemover(); const blob=await rb(it.file,{model:'isnet',output:{format:'image/png',quality:1},
+    const rb=await getRemover(); const blob=await rb(it.file,{model:'medium',output:{format:'image/png',quality:1},
       progress:(k,c,t)=>{ if(k.includes('fetch')) status.textContent=`AI model load: ${Math.round(c/t*100)}%`; }});
     it.cut=blob; const u=URL.createObjectURL(blob);
     it.el.querySelector('figure.c').insertAdjacentHTML('beforeend',`<img src="${u}">`);
