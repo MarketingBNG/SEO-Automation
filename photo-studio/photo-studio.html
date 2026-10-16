@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Photo Studio</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+/* Layout: top input bar, then a grid of photo cards, sticky action bar at bottom */
+:root{--bg:#f3f4f6;--card:#fff;--fg:#1d2430;--mute:#5d6878;--line:#d9dde4;--accent:#1f5fae;--ok:#1e8a4c;--warn:#b26a00;
+--display:"Fraunces",Georgia,serif;--body:"IBM Plex Sans",system-ui,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#12161c;--card:#1b2129;--fg:#e6e9ee;--mute:#9aa5b4;--line:#2c3440;--accent:#6aa5ee;color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);padding:24px max(16px,env(safe-area-inset-left)) 120px}
+h1{font-family:var(--display);font-size:2rem;margin:0 0 4px}
+p.sub{color:var(--mute);margin:0 0 20px;max-width:65ch}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:12px;max-width:900px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input[type=url]{flex:1;min-width:220px;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+button,.btn{padding:10px 16px;border:0;border-radius:6px;background:var(--accent);color:#fff;font:600 14px var(--body);cursor:pointer}
+button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+.drop{border:2px dashed var(--line);border-radius:8px;padding:24px;text-align:center;color:var(--mute);cursor:pointer}
+.drop.on{border-color:var(--accent);color:var(--accent)}
+#status{color:var(--mute);font-size:14px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-top:24px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:grid}
+.card .imgs{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:var(--line)}
+.card .imgs.three{grid-template-columns:1fr 1fr 1fr}
+.card figure{margin:0;background:repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/16px 16px;aspect-ratio:4/5;display:flex;align-items:center;justify-content:center;position:relative}
+.card figure img{max-height:100%;object-fit:contain}
+.card figcaption{position:absolute;left:4px;top:4px;font-size:11px;background:#000a;color:#fff;padding:1px 6px;border-radius:4px}
+.card .meta{padding:10px 12px;display:grid;gap:6px}
+.name{font-weight:600;overflow-wrap:anywhere}
+.pill{font-size:12px;padding:2px 8px;border-radius:99px;justify-self:start;border:1px solid}
+.pill.wait{color:var(--mute)}.pill.done{color:var(--ok)}.pill.err{color:#c0392b}
+label.pick{display:flex;gap:8px;align-items:center;cursor:pointer}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px max(16px,env(safe-area-inset-left));display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+select{padding:9px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+small{color:var(--mute)}
+</style></head><body>
+<h1>Photo Studio</h1>
+<p class="sub">Photo ya ZIP daalo. Har photo ka background AI se hatega (aapke browser mein hi, koi upload nahi). Phir jo photos aap select karoge, unko studio-style professional photo banaya jayega.</p>
+
+<div class="panel">
+  <div class="row">
+    <input id="drive" type="url" placeholder="Google Drive link (file 'Anyone with the link' par share honi chahiye)">
+    <button id="driveBtn">Drive se laao</button>
+  </div>
+  <small>Drive kabhi-kabhi browser ko seedha download nahi karne deta. Agar error aaye to Drive se ZIP download karke neeche daal do.</small>
+  <div class="drop" id="drop">Yahan photo / ZIP drag karo, ya click karke chuno<br><small>JPG, PNG, WEBP, ZIP</small></div>
+  <input id="file" type="file" accept="image/*,.zip" multiple hidden>
+  <div id="status">Ready. Pehli baar AI model (~40MB) download hoga, thoda time lagega.</div>
+</div>
+
+<div id="grid"></div>
+
+<div class="bar">
+  <button class="ghost" id="selAll">Sab select</button>
+  <label>Background: <select id="bgSel">
+    <option value="grey">Studio grey</option><option value="white">Pure white</option>
+    <option value="blue">Corporate blue</option><option value="navy">Dark navy</option></select></label>
+  <button id="proBtn" disabled>Selected ko Professional banao</button>
+  <button class="ghost" id="dlBtn" disabled>Sab download (ZIP)</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script type="module">
+import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/+esm";
+const $=s=>document.querySelector(s), grid=$('#grid'), status=$('#status');
+const items=[]; let queue=Promise.resolve();
+const isImg=n=>/\.(jpe?g|png|webp|bmp|gif|heic)$/i.test(n);
+
+async function addFile(f){
+  if(/\.zip$/i.test(f.name)||f.type.includes('zip')){
+    const z=await JSZip.loadAsync(f); const ents=Object.values(z.files).filter(e=>!e.dir&&isImg(e.name)&&!e.name.includes('__MACOSX'));
+    status.textContent=`ZIP mein ${ents.length} photos mili.`;
+    for(const e of ents){ const b=await e.async('blob'); addImage(new File([b],e.name.split('/').pop(),{type:'image/'+(e.name.split('.').pop().toLowerCase().replace('jpg','jpeg'))})); }
+  } else if(f.type.startsWith('image/')||isImg(f.name)) addImage(f);
+}
+function addImage(file){
+  const it={file,name:file.name.replace(/\.[^.]+$/,''),orig:URL.createObjectURL(file),cut:null,pro:null};
+  const el=document.createElement('div'); el.className='card';
+  el.innerHTML=`<div class="imgs"><figure><figcaption>Original</figcaption><img src="${it.orig}"></figure><figure class="c"><figcaption>No BG</figcaption></figure></div>
+  <div class="meta"><div class="name"></div><span class="pill wait">Queue mein…</span>
+  <label class="pick"><input type="checkbox"> Professional banana hai</label></div>`;
+  el.querySelector('.name').textContent=file.name; it.el=el; it.chk=el.querySelector('input'); grid.append(el); items.push(it);
+  queue=queue.then(()=>process(it));
+}
+async function process(it){
+  const pill=it.el.querySelector('.pill'); pill.textContent='Background hat raha hai…';
+  try{
+    const blob=await removeBackground(it.file,{model:'isnet',output:{format:'image/png',quality:1},
+      progress:(k,c,t)=>{ if(k.includes('fetch')) status.textContent=`AI model load: ${Math.round(c/t*100)}%`; }});
+    it.cut=blob; const u=URL.createObjectURL(blob);
+    it.el.querySelector('figure.c').insertAdjacentHTML('beforeend',`<img src="${u}">`);
+    pill.className='pill done'; pill.textContent='Background hat gaya';
+  }catch(e){ pill.className='pill err'; pill.textContent='Error: '+e.message; }
+  const done=items.filter(i=>i.cut).length; status.textContent=`${done}/${items.length} photos ho gayi.`;
+  $('#proBtn').disabled=$('#dlBtn').disabled=!done;
+}
+
+const BGS={grey:['#d9dce1','#8f959e'],white:['#ffffff','#ffffff'],blue:['#cfe0f3','#5b84b8'],navy:['#3a4c6b','#141c2b']};
+async function makePro(it){
+  const img=await createImageBitmap(it.cut);
+  // subject bounding box from alpha
+  const t=new OffscreenCanvas(img.width,img.height), tc=t.getContext('2d'); tc.drawImage(img,0,0);
+  const d=tc.getImageData(0,0,img.width,img.height).data; let x0=img.width,y0=img.height,x1=0,y1=0;
+  for(let y=0;y<img.height;y+=2)for(let x=0;x<img.width;x+=2){ if(d[(y*img.width+x)*4+3]>40){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } }
+  const sw=x1-x0, sh=y1-y0; const W=1200,H=1500; const c=new OffscreenCanvas(W,H), g=c.getContext('2d');
+  const [c1,c2]=BGS[$('#bgSel').value]; const gr=g.createRadialGradient(W/2,H*0.35,50,W/2,H*0.45,H*0.85); gr.addColorStop(0,c1); gr.addColorStop(1,c2); g.fillStyle=gr; g.fillRect(0,0,W,H);
+  // headshot framing: subject fills ~78% width, head near top with ~8% headroom, bottom bleeds off
+  const s=Math.min(W*0.78/sw, H*1.05/sh); const dw=img.width*s, dh=img.height*s;
+  const dx=W/2-(x0+sw/2)*s, dy=H*0.08-y0*s;
+  g.save(); g.filter='blur(18px) brightness(0)'; g.globalAlpha=0.25; g.drawImage(img,dx+12,dy+18,dw,dh); g.restore();
+  g.filter='brightness(1.06) contrast(1.08) saturate(1.05)'; g.drawImage(img,dx,dy,dw,dh); g.filter='none';
+  it.pro=await c.convertToBlob({type:'image/jpeg',quality:0.95});
+  const figs=it.el.querySelector('.imgs'); figs.classList.add('three'); figs.querySelector('.p')?.remove();
+  figs.insertAdjacentHTML('beforeend',`<figure class="p"><figcaption>Professional</figcaption><img src="${URL.createObjectURL(it.pro)}"></figure>`);
+}
+$('#proBtn').onclick=async()=>{ const sel=items.filter(i=>i.chk.checked&&i.cut); if(!sel.length){status.textContent='Pehle photos select karo.';return;}
+  for(const [n,it] of sel.entries()){ status.textContent=`Professional bana rahe: ${n+1}/${sel.length}`; await makePro(it); } status.textContent=`${sel.length} professional photos ready. Dekh lo, phir download karo.`; };
+$('#selAll').onclick=()=>{const all=items.every(i=>i.chk.checked); items.forEach(i=>i.chk.checked=!all);};
+$('#dlBtn').onclick=async()=>{ const z=new JSZip();
+  items.forEach(i=>{ if(i.cut) z.file(`no-background/${i.name}.png`,i.cut); if(i.pro) z.file(`professional/${i.name}.jpg`,i.pro); });
+  const b=await z.generateAsync({type:'blob'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='photos-processed.zip'; a.click(); };
+
+const drop=$('#drop'), fi=$('#file');
+drop.onclick=()=>fi.click(); fi.onchange=()=>[...fi.files].forEach(addFile);
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('on')}; drop.ondragleave=()=>drop.classList.remove('on');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('on');[...e.dataTransfer.files].forEach(addFile)};
+$('#driveBtn').onclick=async()=>{ const m=$('#drive').value.match(/(?:\/d\/|id=)([\w-]{20,})/);
+  if(!m){status.textContent='Yeh Drive file link nahi lag raha. Folder link ho to folder ko ZIP download karke daalo.';return;}
+  status.textContent='Drive se download ho raha hai…';
+  try{ const r=await fetch(`https://drive.usercontent.google.com/download?id=${m[1]}&export=download&confirm=t`); if(!r.ok) throw 0;
+    const b=await r.blob(); const zip=b.type.includes('zip'); await addFile(new File([b],zip?'drive.zip':'drive-photo.jpg',{type:b.type}));
+  }catch{ status.textContent='Drive ne browser ko file nahi di (Google ki security). Drive mein file kholo → Download, phir woh file yahan daal do.'; } };
+</script></body></html>
