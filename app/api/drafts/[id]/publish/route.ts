@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { ensurePhotoCover } from '@/lib/coverPhoto';
 import { uploadMedia, publishPost, updatePost, seoSlug, freeSlug } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
@@ -84,7 +85,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     // The cover: the uploaded one, or the branded cover made from the title and author (the same
     // one the preview and the Word file show).
-    let imageKey = draft.featured_image_path;
+    let imageKey = draft.featured_image_path || (await ensurePhotoCover(nid).catch(() => null));
     if (!imageKey) {
       imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(keyword || draft.title)}.png`, await makeCover(draft.title, author), 'image/png').catch(() => null);
       if (imageKey) await prisma.drafts.update({ where: { id: nid }, data: { featured_image_path: imageKey } });

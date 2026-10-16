@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { makeCover } from '@/lib/cover';
 import { readFile, mimeFor } from '@/lib/storage';
+import { sqlNow } from '@/lib/time';
 import { methodNotAllowed, toId } from '../../../_lib/http';
 
 export const runtime = 'nodejs';
@@ -32,4 +33,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }
   return new Response(new Uint8Array(png), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=300' } });
 }
-export { methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };
+// POST: make a new photo cover for this blog (a different real photo, or an AI photo when none fits),
+// replacing the current cover. Used by "New photo cover" in Drafts & Review.
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const id = toId((await params).id);
+  const draft = await prisma.drafts.findUnique({ where: { id }, select: { id: true, featured_image_path: true, wp_post_url: true } });
+  if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 });
+  const { ensurePhotoCover } = await import('@/lib/coverPhoto');
+  await prisma.drafts.update({ where: { id }, data: { featured_image_path: null } });
+  const key = await ensurePhotoCover(id).catch(() => null);
+  if (!key) {
+    await prisma.drafts.update({ where: { id }, data: { featured_image_path: draft.featured_image_path } });
+    return NextResponse.json({ error: 'No photo cover could be made. Add PEXELS_API_KEY (free) or OPENAI_API_KEY in Coolify.' }, { status: 400 });
+  }
+  await prisma.drafts.update({ where: { id }, data: { updated_at: sqlNow() } });
+  return NextResponse.json({ ok: true, key });
+}
+export { methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

@@ -578,6 +578,30 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
               <Upload />
               Upload cover
             </Button>
+            {!draft.wp_post_url && (
+              <Button
+                variant="outline"
+                disabled={saving}
+                title="A new cover in the house design: a different real photo for this topic (or an AI photo when none fits), with the title and logo"
+                onClick={async () => {
+                  setSaving(true);
+                  setMessage('Making a new photo cover…');
+                  try {
+                    const res = await fetch(`/api/drafts/${draft.id}/cover`, { method: 'POST' });
+                    const j = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+                    setMessage('New photo cover made. Check its alt text below the picture.');
+                    loadDraft(false);
+                  } catch (e: any) {
+                    setMessage('Error: ' + e.message);
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
+                New photo cover
+              </Button>
+            )}
           </div>
         </div>
 

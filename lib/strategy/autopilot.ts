@@ -86,6 +86,8 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
       target_wp_post_id: null,
     },
   });
+  // The photo cover (real photo for the topic, house design), made in the background.
+  void import('../coverPhoto').then((m) => m.ensurePhotoCover(draft.id)).catch(() => {});
   // Plagiarism check in the background, so the result is ready for the review.
   void import('../originality').then((m) => m.checkDraftOriginality(draft.id)).catch(() => {});
   for (const f of result.facts) {
@@ -258,7 +260,7 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   let cover: { id: number; url: string } | null = null;
   if (!row.refresh_url) {
     authorId = await wpAuthorId(authorName).catch(() => null);
-    let imageKey = checked.featured_image_path;
+    let imageKey = checked.featured_image_path || (await import('../coverPhoto').then((m) => m.ensurePhotoCover(checked.id)).catch(() => null));
     if (!imageKey) {
       imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(row.main_keyword)}.png`, await makeCover(checked.title, authorName), 'image/png').catch(() => null);
       if (imageKey) await prisma.drafts.update({ where: { id: checked.id }, data: { featured_image_path: imageKey } });

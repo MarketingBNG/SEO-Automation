@@ -87,6 +87,8 @@ async function runBlogJobOnce(keyword: any, controller: AbortController, send: (
         status: 'pending_review',
       },
     });
+  // The photo cover (real photo for the topic, house design), made in the background.
+  void import('./coverPhoto').then((m) => m.ensurePhotoCover(draft.id)).catch(() => {});
     // Plagiarism check in the background, so the result is ready when someone reviews the draft.
     void import('./originality').then((m) => m.checkDraftOriginality(draft.id)).catch(() => {});
 
