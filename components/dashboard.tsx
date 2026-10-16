@@ -18,6 +18,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { JobProgress } from '@/components/shared/job-progress';
 import { PeekingOctopus } from '@/components/shared/peeking-octopus';
 import { StatusLight } from '@/components/shared/status-light';
+import { PageJump } from '@/components/shared/page-jump';
 
 import HomeTab from '@/components/tabs/home-tab';
 import TopicsTab from '@/components/tabs/topics-tab';
@@ -246,6 +247,7 @@ export default function Dashboard() {
             </div>
           )}
           {/* Kept mounted (just hidden) so a running conversation keeps streaming while you look at other tabs. */}
+          {shown !== 'assistant' && <PageJump key={`jump-${shown}-${reloadKey}`} rootId={`tab-${shown}`} />}
           <div className={shown === 'assistant' ? 'block' : 'hidden'}>
             <AssistantTab seed={assistantSeed} />
           </div>
@@ -253,7 +255,7 @@ export default function Dashboard() {
               mounted but hidden, so switching back shows them at once. */}
           <div key={`tabs-${reloadKey}`} className="contents">
           {[...visited].filter((k) => k !== 'assistant' && visible(k)).map((k) => (
-            <div key={k} className={shown === k ? 'block' : 'hidden'}>
+            <div key={k} id={`tab-${k}`} className={shown === k ? 'block' : 'hidden'}>
               {k === 'home' && <HomeTab />}
               {k === 'topics' && <TopicsTab />}
               {k === 'calendar' && <MonthRunning standalone />}

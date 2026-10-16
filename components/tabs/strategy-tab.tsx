@@ -45,14 +45,36 @@ function Tags({ tags }: { tags: string[] }) {
   );
 }
 
+// A strategy section; its body can be folded away to shorten the page (remembered in this browser).
 function Section({ title, description, children }: { title: ReactNode; description?: ReactNode; children: ReactNode }) {
+  const key = `strategy-fold:${typeof title === 'string' ? title : ''}`;
+  const [folded, setFolded] = useState(false);
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (typeof title === 'string' && localStorage.getItem(key) === '1') setFolded(true);
+    } catch {}
+  }, [key, title]);
+  const toggle = () => {
+    setFolded((f) => {
+      try {
+        localStorage.setItem(key, f ? '0' : '1');
+      } catch {}
+      return !f;
+    });
+  };
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle>{title}</CardTitle>
+          <button type="button" onClick={toggle} className="shrink-0 text-xs text-primary underline">
+            {folded ? 'Show' : 'Hide'}
+          </button>
+        </div>
+        {description && !folded && <CardDescription>{description}</CardDescription>}
       </CardHeader>
-      <CardContent className="space-y-3">{children}</CardContent>
+      {!folded && <CardContent className="space-y-3">{children}</CardContent>}
     </Card>
   );
 }
