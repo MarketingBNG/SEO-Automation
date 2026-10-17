@@ -86,7 +86,7 @@ export function LineChart({ title, labels, series, splitAt }: { title: string; l
           category axis can only mark the week itself, so the line sits on the first week of this period. */}
       <ChartContainer config={config} className="aspect-auto h-[260px] w-full" aria-label={title} role="img">
         <ReLineChart data={data} margin={{ left: 4, right: 12, top: 16 }}>
-          <CartesianGrid vertical={false} />
+          <CartesianGrid strokeOpacity={0.5} />
           <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval={1} />
           <YAxis tickLine={false} axisLine={false} width={48} tickFormatter={(v) => fmt(v)} domain={[0, (max: number) => Math.max(1, max)]} />
           <ChartTooltip content={<ChartTooltipContent labelFormatter={(l) => `Week of ${l}`} />} />
@@ -100,7 +100,7 @@ export function LineChart({ title, labels, series, splitAt }: { title: string; l
             />
           )}
           {series.map((s, k) => (
-            <Line key={s.name} dataKey={`s${k}`} name={s.name} type="linear" stroke={`var(--color-s${k})`} strokeWidth={2.5} dot={{ r: 3, fill: `var(--color-s${k})` }} isAnimationActive={false} />
+            <Line key={s.name} dataKey={`s${k}`} name={s.name} type="monotone" stroke={`var(--color-s${k})`} strokeWidth={2.5} dot={{ r: 4.5, fill: `var(--color-s${k})`, stroke: 'var(--card)', strokeWidth: 2 }} activeDot={{ r: 6, stroke: 'var(--card)', strokeWidth: 2 }} isAnimationActive={false} />
           ))}
         </ReLineChart>
       </ChartContainer>

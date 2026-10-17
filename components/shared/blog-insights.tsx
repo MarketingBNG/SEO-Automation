@@ -97,6 +97,23 @@ function Kpis({ kpis }: { kpis: any[] }) {
 
 const COLORS = ['#3b5bdb', '#D7392E', '#5BB947', '#D4AF37', '#E85A2C'];
 
+// A smooth line through the points that never overshoots them (monotone cubic), like the
+// rank-tracking charts: it bends gently between points instead of drawing sharp corners.
+function smoothPath(pts: number[][]): string {
+  if (pts.length < 3) return pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join(' ');
+  const n = pts.length;
+  const d = pts.slice(0, -1).map((p, i) => (pts[i + 1][1] - p[1]) / (pts[i + 1][0] - p[0] || 1));
+  const m = pts.map((_, i) => (i === 0 ? d[0] : i === n - 1 ? d[n - 2] : d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2));
+  let path = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = pts[i];
+    const [x1, y1] = pts[i + 1];
+    const dx = (x1 - x0) / 3;
+    path += ` C${x0 + dx},${y0 + m[i] * dx} ${x1 - dx},${y1 - m[i + 1] * dx} ${x1},${y1}`;
+  }
+  return path;
+}
+
 // Weekly line chart. The dashed line marks where "this period" starts, so the left part of the
 // graph is the previous period for comparison.
 function LineChart({ title, labels, series, splitAt }: { title: string; labels: any[]; series: any[]; splitAt: number }) {
@@ -131,14 +148,15 @@ function LineChart({ title, labels, series, splitAt }: { title: string; labels: 
             <text x={x(splitAt) - (x(1) - x(0)) / 2 - 6} y={pad.t + 12} fontSize={10} textAnchor="end" fill="currentColor" opacity={0.6}>previous period</text>
           </g>
         )}
+        {labels.map((_, i) => <line key={`v${i}`} x1={x(i)} x2={x(i)} y1={pad.t} y2={pad.t + h} stroke="currentColor" opacity={0.07} />)}
         {labels.map((l, i) => (i % 2 === 0 ? <text key={i} x={x(i)} y={H - 8} fontSize={10} textAnchor="middle" fill="currentColor" opacity={0.7}>{l}</text> : null))}
         {series.map((s, k) => {
           const c = COLORS[k % COLORS.length];
           return (
             <g key={s.name}>
-              <polyline points={s.values.map((v: number, i: number) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke={c} strokeWidth={2.5} />
+              <path d={smoothPath(s.values.map((v: number, i: number) => [x(i), y(v)]))} fill="none" stroke={c} strokeWidth={2.5} strokeLinecap="round" />
               {s.values.map((v: number, i: number) => (
-                <circle key={i} cx={x(i)} cy={y(v)} r={3} fill={c}>
+                <circle key={i} cx={x(i)} cy={y(v)} r={4.5} fill={c} stroke="var(--card)" strokeWidth={2}>
                   <title>{`${s.name}, week of ${labels[i]}: ${fmt(v)}`}</title>
                 </circle>
               ))}
