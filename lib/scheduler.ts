@@ -50,7 +50,8 @@ async function tick() {
 
   // Directory listings for the day (per-day count from the approved strategy), after 10:00 IST.
   const { directoriesTick } = await import('./strategy/directories');
-  await directoriesTick(now).catch((e: any) => console.error('Scheduler: directories failed:', e.message));
+  // Not awaited: it runs in batch mode (half price) and can take a while; the rest of the run goes on.
+  void directoriesTick(now).catch((e: any) => console.error('Scheduler: directories failed:', e.message));
 
   // Associate Training: lessons and tests once a day after 09:00 IST.
   const { trainingTick } = await import('./associateTraining');

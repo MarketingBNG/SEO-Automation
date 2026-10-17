@@ -1,3 +1,5 @@
+import { cachedCall } from './apiCache';
+
 const BASE_URL = 'https://api.seranking.com/v1';
 
 function getApiKey() {
@@ -32,7 +34,13 @@ function throttledFetch(url: string, init: any = {}): Promise<Response> {
   return p;
 }
 
-async function get(path, { signal }: any = {}) {
+async function get(path, opts: any = {}) {
+  // Data API reads use SE Ranking credits and change slowly: the same one within 24 hours is reused.
+  if (/^\/(backlinks|ai-search)\//.test(path)) return cachedCall('seranking', path, 24, () => getLive(path, opts));
+  return getLive(path, opts);
+}
+
+async function getLive(path, { signal }: any = {}) {
   const res = await throttledFetch(`${BASE_URL}${path}`, {
     headers: { Authorization: `Token ${getApiKey()}` },
     signal,
@@ -88,6 +96,10 @@ async function getSiteRankings(siteId, { signal }: any = {}) {
 }
 
 async function researchKeywords(type, seed, { source = 'us', limit = 30 }: any = {}) {
+  return cachedCall('seranking-kw', { type, seed, source, limit }, 24, () => researchKeywordsLive(type, seed, { source, limit }));
+}
+
+async function researchKeywordsLive(type, seed, { source = 'us', limit = 30 }: any = {}) {
   const validTypes = ['similar', 'related', 'questions', 'longtail'];
   if (!validTypes.includes(type)) throw new Error(`Invalid research type: ${type}`);
 

@@ -1,7 +1,7 @@
 // @ts-nocheck -- reads untyped Claude JSON.
 // Daily directory listings: every day after 10:00 IST the approved strategy's "directories per day"
 // (default 5) new, legitimate business directories are added as tasks for a person (sign-up and
-// verification need a human). Claude finds them with web search; each must be a real, live site,
+// verification need a human). Claude finds them with web search (batch mode: half price, same answer, nobody waits on it); each must be a real, live site,
 // relevant to a CFO, tax and accounting firm serving US and India businesses, with free or standard
 // listings (never paid-link schemes), and never one we already have a task for. Each task gets its
 // step-by-step guide on demand ("How to do it"), as before.
@@ -34,7 +34,7 @@ Quality rules, all required:
 Return ONLY JSON between ===JSON=== and ===END===: [{"name":"...","domain":"example.com","signupUrl":"https://...","why":"one line: what it is and why it helps (audience, authority)","type":"B2B marketplace|accounting directory|startup database|local listing|review site|other"}]`,
     [{ role: 'user', content: `Give exactly ${count} directories. Already used (never repeat): ${exclude.join(', ') || 'none'}.` }],
     undefined,
-    { maxUses: 10, effort: 'medium', feature: 'outreach' }
+    { maxUses: 10, effort: 'medium', feature: 'outreach', batch: true }
   );
   const rows = parseJson(text);
   return Array.isArray(rows) ? rows : [];

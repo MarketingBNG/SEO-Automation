@@ -331,7 +331,10 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
       continue;
     }
 
-    const cached = maxUses >= 10 ? withCache(systemPrompt, conversation) : { system: systemPrompt, messages: conversation };
+    // Long turns that search the web are often continued in several parts, each re-sending the same
+    // system prompt and article; caching them makes each re-read cost a tenth (same request, same answer).
+    const longFirst = typeof conversation[0]?.content === 'string' && conversation[0].content.length > 15000;
+    const cached = maxUses >= 10 || (maxUses >= 4 && longFirst) ? withCache(systemPrompt, conversation) : { system: systemPrompt, messages: conversation };
     const params = {
       model,
       max_tokens: 32000,

@@ -54,7 +54,14 @@ async function getTerms(id) {
 // Polls until the Content Editor finishes SERP analysis (usually under a minute), then returns
 // the recommended terms to use while writing. One credit total, regardless of how long this
 // polling loop takes.
-async function getTermsForKeyword(mainKeyword, { maxWaitMs = 90000, pollMs = 4000 }: any = {}) {
+// Each new Content Editor costs a Surfer credit. Its terms for a keyword are kept 7 days, so a blog
+// checked again (for example on every publish attempt while it is held) uses the same terms.
+async function getTermsForKeyword(mainKeyword, opts: any = {}) {
+  const { cachedCall } = await import('./apiCache');
+  return cachedCall('surfer-terms', String(mainKeyword || '').toLowerCase().trim(), 24 * 7, () => getTermsForKeywordLive(mainKeyword, opts));
+}
+
+async function getTermsForKeywordLive(mainKeyword, { maxWaitMs = 90000, pollMs = 4000 }: any = {}) {
   const editor = await createContentEditor({ mainKeyword });
   const start = Date.now();
   let state = editor.state;
