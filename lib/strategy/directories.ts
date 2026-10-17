@@ -23,18 +23,33 @@ async function isLive(url: string) {
   return !!res && res.status < 500 && res.status !== 404 && res.status !== 410;
 }
 
+// Sites where our competitors already have links or listings and we do not (SE Ranking backlink gap,
+// answers kept 24 hours). The best directories for us are the ones our niche already uses.
+export async function competitorSites(): Promise<{ competitors: string[]; sites: { domain: string; linksTo: string[] }[] }> {
+  const { competitorList } = await import('../competitors');
+  const competitors = (await competitorList().catch(() => ({ domains: [] as string[] }))).domains.slice(0, 5);
+  if (!competitors.length || !process.env.SERANKING_API_KEY) return { competitors, sites: [] };
+  const { getBacklinkGap } = await import('../seranking');
+  const sites = await getBacklinkGap(domainOf(SITE()), competitors, 120).catch(() => []);
+  return { competitors, sites };
+}
+
 export async function findDirectories(count: number, exclude: string[]) {
+  const { competitors, sites } = await competitorSites();
+  const gap = sites.length ? sites.map((x) => `${x.domain} (links to: ${x.linksTo.join(', ')})`).join('\n') : 'none available';
   const { text } = await callClaude(
-    `You pick business directories and citation sites for ${SITE()}, a CFO, tax, accounting and compliance firm (BNG Advisors Private Limited, brand USAIndiaCFO) serving Indian founders with US companies, NRIs and US-India businesses.
-Quality rules, all required:
-- A real, established, currently live directory with real traffic, that Google trusts (for example B2B service marketplaces, accounting and finance directories, startup databases, local business listings in the US and India, maps and review platforms, chambers of commerce).
-- Relevant to professional services, accounting, tax, finance, startups or US/India business.
-- Listing is free or a normal company profile. Never paid-link schemes, link farms, PBNs, "submit to 1000 directories" lists, spam or low-quality article directories.
-- Use web search and open the page to confirm the sign-up page exists. Never invent a domain or URL.
-Return ONLY JSON between ===JSON=== and ===END===: [{"name":"...","domain":"example.com","signupUrl":"https://...","why":"one line: what it is and why it helps (audience, authority)","type":"B2B marketplace|accounting directory|startup database|local listing|review site|other"}]`,
-    [{ role: 'user', content: `Give exactly ${count} directories. Already used (never repeat): ${exclude.join(', ') || 'none'}.` }],
+    `You pick business directories and listing sites for ${SITE()}, a CFO, tax, accounting and compliance firm (BNG Advisors Private Limited, brand USAIndiaCFO) serving Indian founders with US companies, NRIs and US-India businesses.
+Our competitors in this niche: ${competitors.join(', ') || 'not known; find firms that sell US-India tax, accounting and CFO services with a web search'}.
+Rules, all required:
+- PREFER sites where these competitors (or other US-India tax, accounting or CFO firms) are already listed or have a profile. Check with web search (for example search the site for a competitor's name) and say which competitor you found there.
+- The site must let an accounting, tax, CFO, finance or professional-services firm create its own listing or company profile. NEVER sites that only list advertising, marketing, design or software agencies, NEVER job portals or job boards, never freelancer gig sites, never news sites or blogs that sell posts.
+- A real, established, live directory or listing platform with real traffic: B2B service marketplaces that include accounting/finance, accounting and tax directories, CPA/CA directories, startup databases, US and India business listings, chambers of commerce, review platforms for professional services.
+- Free or normal company profile. Never paid-link schemes, link farms, PBNs, mass-submission lists or spam directories.
+- Confirm the sign-up or "list your firm" page exists by opening it. Never invent a domain or URL.
+Return ONLY JSON between ===JSON=== and ===END===: [{"name":"...","domain":"example.com","signupUrl":"https://...","competitorsListed":["competitor.com"],"why":"one line: what it is, who uses it, why it helps us","type":"B2B marketplace|accounting directory|CPA/CA directory|startup database|local listing|review site|chamber|other"}]`,
+    [{ role: 'user', content: `Give exactly ${count} directories, best first.\nSites that link to our competitors but not to us (check these first; keep only real directories or listing sites that fit the rules):\n${gap}\n\nAlready given to us (never repeat): ${exclude.join(', ') || 'none'}.` }],
     undefined,
-    { maxUses: 10, effort: 'medium', feature: 'outreach', batch: true }
+    { maxUses: 15, effort: 'medium', feature: 'outreach', batch: true }
   );
   const rows = parseJson(text);
   return Array.isArray(rows) ? rows : [];
@@ -117,7 +132,7 @@ export async function directoriesTick(now = new Date(), find = findDirectories) 
         send_date: today,
         tags: JSON.stringify(['Directory']),
         status: 'manual',
-        note: `Sign up: ${signup}. ${String(d.why || '').slice(0, 200)} Directory sign-up needs a person (forms and verification).`,
+        note: `Sign up: ${signup}. ${String(d.why || '').slice(0, 200)}${Array.isArray(d.competitorsListed) && d.competitorsListed.length ? ` Competitors listed here: ${d.competitorsListed.slice(0, 4).join(', ')}.` : ''} Directory sign-up needs a person (forms and verification).`,
       },
     });
     added++;
