@@ -4,7 +4,7 @@ import prisma from './prisma';
 import { rethrowFriendly } from './apiErrors';
 import { anthropicClient, clientKeyKind, secondaryKeyConfigured, switchedToSecondary } from './anthropicClient';
 import { replayScope, requestHash, savedStep, saveStep } from './aiReplay';
-import { assertCredits, recordUsage, onApiError } from './aiCredits';
+import { assertCredits, recordUsage, onApiError, CreditPausedError } from './aiCredits';
 import { validateDraft, markUsedQuestions } from './validation';
 import { getWriterPlaybook, getAuditGates } from './playbook';
 import { gatherBrief, formatBrief, aiOverviewSummary } from './researchBrief';
@@ -292,7 +292,7 @@ async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
 // Haiku has only the basic web search tool; the dynamic-filtering version is Opus and Sonnet only.
 const searchTool = (model: string): any => (/haiku/.test(model) ? 'web_search_20250305' : 'web_search_20260209');
 
-async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40, onActivity, idleMs = IDLE_MS() }: any = {}) {
+async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40, onActivity, idleMs = IDLE_MS(), cache = false }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
   const assistantMessages: any[] = [];
@@ -337,12 +337,12 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
     // Long turns that search the web are often continued in several parts, each re-sending the same
     // system prompt and article; caching them makes each re-read cost a tenth (same request, same answer).
     const longFirst = typeof conversation[0]?.content === 'string' && conversation[0].content.length > 15000;
-    const cached = maxUses >= 10 || (maxUses >= 4 && longFirst) ? withCache(systemPrompt, conversation) : { system: systemPrompt, messages: conversation };
+    const cached = cache || maxUses >= 10 || (maxUses >= 4 && longFirst) ? withCache(systemPrompt, conversation) : { system: systemPrompt, messages: conversation };
     const params = {
       model,
       max_tokens: 32000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
+      // Haiku has no server-side refusal fallback.
+      ...(/haiku/.test(model) ? {} : { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }),
       output_config: { effort },
       system: cached.system,
       tools: [{ type: searchTool(model), name: 'web_search', max_uses: maxUses }],
@@ -581,7 +581,124 @@ procedure, an absolute word, a cross-border rule, a page that fails to load.`;
 // shared between up to FACT_CHECK_PARALLEL checkers that run at the same time, so a 30-claim article
 // is checked in a third of the time; the first checker also looks for claims nobody listed.
 // targeted: check only the given sentences (the ones a correction changed), not the whole article.
-async function factCheckDraft(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
+async function factCheckDraft(result, signal, opts: any = {}) {
+  return FACT_CHECK_MODE() === 'grouped' ? factCheckGrouped(result, signal, opts) : factCheckPerClaim(result, signal, opts);
+}
+
+// One claim per request: a low-effort checker cannot stop early when it has only one claim, and an
+// article of any length (up to MAX_CLAIMS) is fully covered. Every request also gets the whole
+// article (cached, so re-sending it costs a tenth) to judge "true but incomplete" claims.
+const FACT_CHECK_MODE = () => process.env.FACT_CHECK_MODE || 'per-claim';
+const MAX_CLAIMS = 200;
+const PER_CLAIM_SEARCHES = 5;
+const PER_CLAIM_PARALLEL = () => Math.max(1, Math.min(20, Number(process.env.FACT_CHECK_PER_CLAIM_PARALLEL) || 8));
+
+// Lists every checkable claim in the article (no verdicts), up to MAX_CLAIMS.
+export async function listClaims(result, signal, { model = FACT_CHECK_MODEL() }: any = {}): Promise<string[]> {
+  const system = `You list the checkable claims in a US-India tax article. Do not judge them.
+A claim is any figure, rate, threshold, date, deadline, form or section number, penalty, who must file,
+exception, procedure name, or rule stated or implied ("no penalty applies"). Split a sentence that holds
+two facts into two claims. Quote each claim exactly as it appears in the article. Up to ${MAX_CLAIMS}
+claims. Return ONLY JSON between ===JSON=== and ===END===: {"claims":["..."]}`;
+  const { text } = await callClaude(system, [{ role: 'user', content: `Title: ${result.title}\nMeta: ${result.meta}\n\n${result.content}` }], signal, {
+    maxUses: 1,
+    effort: process.env.FACT_CHECK_LIST_EFFORT || 'high',
+    model,
+    feature: 'fact-check',
+  });
+  const m = text.match(/===JSON===([\s\S]*?)===END===/);
+  try {
+    const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
+    return Array.isArray(parsed.claims) ? parsed.claims.map((c) => String(c || '').trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function factCheckPerClaim(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const listed = targeted ? [] : await listClaims(result, signal, { model });
+  const claims = [...new Set([...(targeted ? [] : (result.facts || []).map((f) => f.claim)), ...mustCheck, ...listed].map((c) => String(c || '').trim()).filter(Boolean))].slice(0, MAX_CLAIMS);
+  // The listing failed and there is nothing else to check: never let the draft through as checked.
+  if (!claims.length) return { checks: [{ claim: 'No claims could be listed for the fact check', verdict: 'unverifiable', correction: '', source_url: '' }], model, checkers: 0 };
+  // Same system prompt for every claim (instructions + article), so it is cached after the first call.
+  const system = `You are a senior US-India tax fact checker. You did not write this article. Today is ${today}.
+You check ONE claim from the article below against a primary source (irs.gov, treasury.gov, fincen.gov,
+ecfr.gov, uscode.house.gov, incometax.gov.in, incometaxindia.gov.in, cbic-gst.gov.in, rbi.org.in,
+sebi.gov.in, mca.gov.in, the treaty text). You have up to ${PER_CLAIM_SEARCHES} web searches.
+Read the whole article for context: a claim that is true but leaves out a condition that changes what the
+reader must do (who it applies to, the trigger, a threshold or limit, "whichever is earlier", the order of
+steps, an exemption or exception the source states), and that the article does not give elsewhere, is
+"incorrect", with the complete version as the correction.
+
+${FACT_CHECK_METHOD}
+
+Return ONLY JSON between ===JSON=== and ===END===:
+{"verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}
+
+ARTICLE
+Title: ${result.title}
+Meta: ${result.meta}
+
+${result.content}`;
+
+  const totals = claims.map(() => ({ searches: 0, chars: 0 }));
+  let done = 0;
+  const report = (note?: string) =>
+    onActivity?.({ searches: totals.reduce((n, t) => n + t.searches, 0), chars: totals.reduce((n, t) => n + t.chars, 0), maxSearches: PER_CLAIM_SEARCHES * claims.length, checkers: claims.length, note: note || `${done} of ${claims.length} claims checked` });
+  const local = new AbortController();
+  const onAbort = () => local.abort();
+  signal?.addEventListener('abort', onAbort);
+  const checks: any[] = new Array(claims.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < claims.length) {
+      const i = next++;
+      const claim = claims[i];
+      try {
+        const { text } = await callClaude(system, [{ role: 'user', content: `CLAIM TO CHECK: ${claim}` }], local.signal, {
+          maxUses: PER_CLAIM_SEARCHES,
+          effort: FACT_CHECK_EFFORT(),
+          model,
+          feature: 'fact-check',
+          cache: true,
+          onActivity: (a) => {
+            totals[i] = { searches: a.searches, chars: a.chars };
+            report();
+          },
+        });
+        const m = text.match(/===JSON===([\s\S]*?)===END===/);
+        const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
+        const verdict = ['correct', 'incorrect', 'unverifiable'].includes(parsed.verdict) ? parsed.verdict : 'unverifiable';
+        checks[i] = { claim, verdict, correction: String(parsed.correction || ''), source_url: String(parsed.source_url || '') };
+      } catch (err: any) {
+        // Stopped, or out of credit: stop every checker. Anything else marks only this claim unchecked.
+        if (local.signal.aborted || err instanceof CreditPausedError) throw err;
+        checks[i] = { claim, verdict: 'unverifiable', correction: 'The check for this claim failed; check it again.', source_url: '' };
+      }
+      done++;
+      report();
+    }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(PER_CLAIM_PARALLEL(), claims.length) }, worker));
+  } catch (err) {
+    local.abort();
+    throw err;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
+  // K4: a rule backed only by a blog or news site is not confirmed.
+  for (const c of checks) {
+    if (c.verdict === 'correct' && c.source_url && !isOfficialSource(c.source_url)) {
+      c.verdict = 'unverifiable';
+      c.correction = `Only a non-official source (${c.source_url}) was found; link the official source (IRS, CBDT, FinCEN, RBI, MCA, the treaty text or the state site) or remove the claim.`;
+    }
+  }
+  return { checks, model, checkers: claims.length };
+}
+
+async function factCheckGrouped(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
   const today = new Date().toISOString().slice(0, 10);
   const groups = batchClaims([...(targeted ? [] : (result.facts || []).map((f) => f.claim)), ...mustCheck], FACT_CHECK_PARALLEL());
   if (!groups.length) groups.push([]);
