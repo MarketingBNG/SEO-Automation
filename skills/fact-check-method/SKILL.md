@@ -5,6 +5,23 @@ description: The deep fact-check method (what the most thorough checker run did 
 
 # Fact-check method (deep research workflow)
 
+## The 8-step problem-finding workflow (how Opus max found 21 problems on draft #2)
+Use this every time you check claims, learn a new problem type, or run a fact check:
+1. **List every claim first.** Read the whole article and write down every claim before any search.
+2. **Check the figure is still right this year.** Search for this year's adjustment, or a notice
+   that cancelled it (it found the OMB memo cancelling the 2026 penalty increase).
+3. **Read the full official document.** Open the full IRS instructions, the law, the US-India treaty
+   and the India-US FATCA agreement and search inside them; never rely on a search snippet.
+4. **Read the law to find penalty levels.** A quoted penalty may be only one tier ("$500,000 and 10
+   years" is only the aggravated tier).
+5. **Treat an error page as a clue.** A 404 or missing option means: check whether the program or
+   rule ended (that is how the July 2026 removal of the Delinquent FBAR procedures was found).
+6. **Look for what the article left out.** Conditions, tests and exceptions the source states (the
+   tax home and 330-day tests behind "living abroad").
+7. **Test absolute words.** "never", "every", "does not", "automatic", "always".
+8. **Check the India side too.** Every cross-border claim gets an India check (EPF ₹2.5 lakh rule).
+Then apply the five questions and the habits below to every claim.
+
 Follow every step in order. Do not skip a step to save time. A claim counts as checked only when
 it has an official source link next to it.
 
