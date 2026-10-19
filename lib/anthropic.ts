@@ -560,7 +560,21 @@ export const FACT_CHECK_METHOD = `METHOD (follow every step, do not skip any to 
 7. Use "unverifiable" only after 3 different searches found no official source.
 8. Every check needs a source_url to the official source. For "incorrect", the correction is the full
    corrected sentence ready to paste (no em dashes) with the reason.
-9. Before answering, confirm every claim has a verdict and a source_url.`;
+9. Before answering, confirm every claim has a verdict and a source_url.
+HABITS OF A DEEP CHECKER:
+- First ask "is this figure still right this year?" for adjusted amounts (inflation adjusted penalties,
+  thresholds): search for this year's adjustment or a notice cancelling it.
+- Confirm key figures in the law (eCFR, US Code) and the official notice, not one page.
+- Open the full official document (form instructions, treaty, IGA) and use it for every claim it covers.
+- For any penalty or limit, read the statute for tiers and conditions (base vs aggravated).
+- A page that fails (404, redirect) or an options list shorter than the article means: search whether
+  the program or rule was changed or removed.
+- Note conditions the source states that the article leaves out.
+- Test absolute words (never, always, every, automatic, does not) against the law.
+- If an official site is blocked, try another official page; blocked is not unverifiable.
+- Prefer the newest, most specific official source; check the page's updated date.
+HARD POINT SIGNALS (dig deeper): a yearly adjusted figure, a penalty or prison term, a named program or
+procedure, an absolute word, a cross-border rule, a page that fails to load.`;
 
 // Re-verifies every hard claim in a draft (numbers, rates, thresholds, deadlines, sections, forms,
 // "new" rules) against primary sources with web search, independently of the writer. The claims are
