@@ -597,16 +597,24 @@ async function factCheckDraft(result, signal, opts: any = {}) {
 // article (cached, so re-sending it costs a tenth) to judge "true but incomplete" claims.
 const FACT_CHECK_MODE = () => process.env.FACT_CHECK_MODE || 'per-claim';
 const MAX_CLAIMS = 200;
-const PER_CLAIM_SEARCHES = 5;
 const PER_CLAIM_PARALLEL = () => Math.max(1, Math.min(20, Number(process.env.FACT_CHECK_PER_CLAIM_PARALLEL) || 8));
 
-// Lists every checkable claim in the article (no verdicts), up to MAX_CLAIMS.
-export async function listClaims(result, signal, { model = FACT_CHECK_MODEL() }: any = {}): Promise<string[]> {
+// Claims that share a topic are checked together, a few per request, so one official page read once
+// answers all of them (the deep checker's habit) instead of every claim searching for the same page.
+const CLAIMS_PER_GROUP = () => Math.max(1, Number(process.env.FACT_CHECK_GROUP_SIZE) || 5);
+const SEARCHES_PER_GROUP = () => Number(process.env.FACT_CHECK_GROUP_SEARCHES) || 4;
+
+// Lists every checkable claim in the article (no verdicts), up to MAX_CLAIMS, each with a short topic
+// and whether it needs a search (arithmetic, unit conversions and the article's own assumptions do not).
+export async function listClaims(result, signal, { model = FACT_CHECK_MODEL() }: any = {}): Promise<{ text: string; topic: string; search: boolean }[]> {
   const system = `You list the checkable claims in a US-India tax article. Do not judge them.
 A claim is any figure, rate, threshold, date, deadline, form or section number, penalty, who must file,
 exception, procedure name, or rule stated or implied ("no penalty applies"). Split a sentence that holds
 two facts into two claims. Quote each claim exactly as it appears in the article. Up to ${MAX_CLAIMS}
-claims. Return ONLY JSON between ===JSON=== and ===END===: {"claims":["..."]}`;
+claims. Give each a short topic (claims answered by the same official source share a topic, e.g.
+"India TDS on NRI sale", "RBI repatriation", "US home sale exclusion") and "search": false only for
+arithmetic, unit conversions and the article's own stated assumptions.
+Return ONLY JSON between ===JSON=== and ===END===: {"claims":[{"text":"...","topic":"...","search":true}]}`;
   const { text } = await callClaude(system, [{ role: 'user', content: `Title: ${result.title}\nMeta: ${result.meta}\n\n${result.content}` }], signal, {
     maxUses: 1,
     effort: process.env.FACT_CHECK_LIST_EFFORT || 'high',
@@ -616,7 +624,11 @@ claims. Return ONLY JSON between ===JSON=== and ===END===: {"claims":["..."]}`;
   const m = text.match(/===JSON===([\s\S]*?)===END===/);
   try {
     const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
-    return Array.isArray(parsed.claims) ? parsed.claims.map((c) => String(c || '').trim()).filter(Boolean) : [];
+    if (!Array.isArray(parsed.claims)) return [];
+    return parsed.claims
+      .map((c) => (typeof c === 'string' ? { text: c, topic: '', search: true } : { text: String(c?.text || ''), topic: String(c?.topic || ''), search: c?.search !== false }))
+      .map((c) => ({ ...c, text: c.text.trim() }))
+      .filter((c) => c.text);
   } catch {
     return [];
   }
@@ -642,6 +654,7 @@ incometax.gov.in, indiacode.nic.in, rbi.org.in, irs.gov, ecfr.gov, uscode.house.
    abroad, residents vs non-residents, joint owners).
 4. Who the reader is (the article's audience) and which rules apply to that reader.
 Read full official pages, not snippets. Keep it under 600 words, as plain bullet points with source links.
+End with SOURCES: each official page you read, with the key rule it states, so checkers can reuse it.
 Return ONLY the brief between ===BRIEF=== and ===END===.`;
   const { text } = await callClaude(system, [{ role: 'user', content: `Title: ${result.title}\nMeta: ${result.meta}\n\n${result.content}` }], signal, {
     maxUses: 15,
@@ -683,14 +696,34 @@ Return ONLY JSON between ===JSON=== and ===END===:
 async function factCheckPerClaim(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
   const today = new Date().toISOString().slice(0, 10);
   const [listed, brief] = await Promise.all([targeted ? [] : listClaims(result, signal, { model }), buildTopicBrief(result, signal)]);
-  const claims = [...new Set([...(targeted ? [] : (result.facts || []).map((f) => f.claim)), ...mustCheck, ...listed].map((c) => String(c || '').trim()).filter(Boolean))].slice(0, MAX_CLAIMS);
+  const seen = new Set<string>();
+  const items = [
+    ...(targeted ? [] : (result.facts || []).map((f) => ({ text: f.claim, topic: '', search: true }))),
+    ...mustCheck.map((c) => ({ text: c, topic: '', search: true })),
+    ...listed,
+  ]
+    .map((c) => ({ ...c, text: String(c.text || '').trim() }))
+    .filter((c) => c.text && !seen.has(c.text) && seen.add(c.text))
+    .slice(0, MAX_CLAIMS);
   // The listing failed and there is nothing else to check: never let the draft through as checked.
-  if (!claims.length) return { checks: [{ claim: 'No claims could be listed for the fact check', verdict: 'unverifiable', correction: '', source_url: '' }], model, checkers: 0 };
-  // Same system prompt for every claim (instructions + article), so it is cached after the first call.
+  if (!items.length) return { checks: [{ claim: 'No claims could be listed for the fact check', verdict: 'unverifiable', correction: '', source_url: '' }], model, checkers: 0 };
+  // Groups of up to CLAIMS_PER_GROUP claims on one topic; claims that need no search go in their own groups.
+  const byTopic = new Map<string, string[]>();
+  for (const c of items) {
+    const key = c.search ? `s:${c.topic.toLowerCase() || c.text}` : 'n:';
+    byTopic.set(key, [...(byTopic.get(key) || []), c.text]);
+  }
+  const groups: { claims: string[]; search: boolean }[] = [];
+  for (const [key, list] of byTopic) {
+    for (let i = 0; i < list.length; i += CLAIMS_PER_GROUP()) groups.push({ claims: list.slice(i, i + CLAIMS_PER_GROUP()), search: key.startsWith('s:') });
+  }
+  // Same system prompt for every group (instructions + brief + article), so it is cached after the first call.
   const system = `You are a senior US-India tax fact checker. You did not write this article. Today is ${today}.
-You check ONE claim from the article below against a primary source (irs.gov, treasury.gov, fincen.gov,
-ecfr.gov, uscode.house.gov, incometax.gov.in, incometaxindia.gov.in, cbic-gst.gov.in, rbi.org.in,
-sebi.gov.in, mca.gov.in, the treaty text). You have up to ${PER_CLAIM_SEARCHES} web searches.
+You check the numbered claims you are given (usually on one topic) against a primary source (irs.gov,
+treasury.gov, fincen.gov, ecfr.gov, uscode.house.gov, incometax.gov.in, incometaxindia.gov.in,
+cbic-gst.gov.in, rbi.org.in, sebi.gov.in, mca.gov.in, the treaty text). Use the official sources already
+in the TOPIC BRIEF first and search only for what the brief does not settle; one official page read in
+full usually answers every claim on its topic. Give every claim its own verdict: do not skip any.
 Read the whole article for context: a claim that is true but leaves out a condition that changes what the
 reader must do (who it applies to, the trigger, a threshold or limit, "whichever is earlier", the order of
 steps, an exemption or exception the source states), and that the article does not give elsewhere, is
@@ -701,10 +734,10 @@ describes. Keep a correction short: one or two sentences.
 
 ${FACT_CHECK_METHOD}
 
-Return ONLY JSON between ===JSON=== and ===END===:
-{"verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}
+Return ONLY JSON between ===JSON=== and ===END===, one entry per claim number:
+{"checks":[{"n":1,"verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}]}
 
-TOPIC BRIEF (latest law, changes by year, full rules, reader)
+TOPIC BRIEF (latest law, changes by year, full rules, reader, sources)
 ${brief}
 
 ARTICLE
@@ -713,22 +746,25 @@ Meta: ${result.meta}
 
 ${result.content}`;
 
-  const totals = claims.map(() => ({ searches: 0, chars: 0 }));
+  const totals = groups.map(() => ({ searches: 0, chars: 0 }));
   let done = 0;
+  const maxSearches = groups.reduce((n, g) => n + (g.search ? SEARCHES_PER_GROUP() : 0), 0);
   const report = (note?: string) =>
-    onActivity?.({ searches: totals.reduce((n, t) => n + t.searches, 0), chars: totals.reduce((n, t) => n + t.chars, 0), maxSearches: PER_CLAIM_SEARCHES * claims.length, checkers: claims.length, note: note || `${done} of ${claims.length} claims checked` });
+    onActivity?.({ searches: totals.reduce((n, t) => n + t.searches, 0), chars: totals.reduce((n, t) => n + t.chars, 0), maxSearches, checkers: groups.length, note: note || `${done} of ${items.length} claims checked` });
   const local = new AbortController();
   const onAbort = () => local.abort();
   signal?.addEventListener('abort', onAbort);
-  const checks: any[] = new Array(claims.length);
+  const checks: any[] = [];
   let next = 0;
   const worker = async () => {
-    while (next < claims.length) {
+    while (next < groups.length) {
       const i = next++;
-      const claim = claims[i];
+      const group = groups[i];
+      const failed = (note: string) => group.claims.map((claim) => ({ claim, verdict: 'unverifiable', correction: note, source_url: '' }));
       try {
-        const { text } = await callClaude(system, [{ role: 'user', content: `CLAIM TO CHECK: ${claim}` }], local.signal, {
-          maxUses: PER_CLAIM_SEARCHES,
+        const user = `${group.search ? '' : 'These claims are arithmetic, conversions or the article\'s own assumptions: check them against the article and the brief, without searching.\n'}CLAIMS TO CHECK:\n${group.claims.map((c, k) => `${k + 1}. ${c}`).join('\n')}`;
+        const { text } = await callClaude(system, [{ role: 'user', content: user }], local.signal, {
+          maxUses: group.search ? SEARCHES_PER_GROUP() : 1,
           effort: FACT_CHECK_EFFORT(),
           model,
           feature: 'fact-check',
@@ -740,35 +776,42 @@ ${result.content}`;
         });
         const m = text.match(/===JSON===([\s\S]*?)===END===/);
         const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
-        const verdict = ['correct', 'incorrect', 'unverifiable'].includes(parsed.verdict) ? parsed.verdict : 'unverifiable';
-        checks[i] = { claim, verdict, correction: String(parsed.correction || ''), source_url: String(parsed.source_url || '') };
+        const list = Array.isArray(parsed.checks) ? parsed.checks : [];
+        group.claims.forEach((claim, k) => {
+          const r = list.find((x) => Number(x?.n) === k + 1);
+          // A claim the checker skipped is not checked: never let it through as correct.
+          if (!r) return checks.push({ claim, verdict: 'unverifiable', correction: 'The checker gave no verdict for this claim; check it again.', source_url: '' });
+          const verdict = ['correct', 'incorrect', 'unverifiable'].includes(r.verdict) ? r.verdict : 'unverifiable';
+          checks.push({ claim, verdict, correction: String(r.correction || ''), source_url: String(r.source_url || '') });
+        });
       } catch (err: any) {
-        // Stopped, or out of credit: stop every checker. Anything else marks only this claim unchecked.
+        // Stopped, or out of credit: stop every checker. Anything else marks only this group unchecked.
         if (local.signal.aborted || err instanceof CreditPausedError) throw err;
-        checks[i] = { claim, verdict: 'unverifiable', correction: 'The check for this claim failed; check it again.', source_url: '' };
+        checks.push(...failed('The check for this claim failed; check it again.'));
       }
-      done++;
+      done += group.claims.length;
       report();
     }
   };
   try {
-    await Promise.all(Array.from({ length: Math.min(PER_CLAIM_PARALLEL(), claims.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(PER_CLAIM_PARALLEL(), groups.length) }, worker));
   } catch (err) {
     local.abort();
     throw err;
   } finally {
     signal?.removeEventListener('abort', onAbort);
   }
-  // K4: a rule backed only by a blog or news site is not confirmed.
+  // K4: a rule backed only by a blog or news site is not confirmed. Arithmetic and assumptions need no link.
+  const noSearch = new Set(groups.filter((g) => !g.search).flatMap((g) => g.claims));
   for (const c of checks) {
-    if (c.verdict === 'correct' && c.source_url && !isOfficialSource(c.source_url)) {
+    if (c.verdict === 'correct' && c.source_url && !isOfficialSource(c.source_url) && !noSearch.has(c.claim)) {
       c.verdict = 'unverifiable';
       c.correction = `Only a non-official source (${c.source_url}) was found; link the official source (IRS, CBDT, FinCEN, RBI, MCA, the treaty text or the state site) or remove the claim.`;
     }
   }
   // One review of the whole article with every claim result, for what single-claim checks cannot see.
   if (!targeted) checks.push(...(await reviewWholeArticle(result, brief, checks, signal)));
-  return { checks, model, checkers: claims.length };
+  return { checks, model, checkers: groups.length };
 }
 
 async function factCheckGrouped(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
