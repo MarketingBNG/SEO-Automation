@@ -55,7 +55,7 @@ const BANNED_LINK_WORDS = /\b(paid|buy|sponsored link|link farm|pbn|private blog
 export const SAFEGUARDS = [
   { name: 'Daily rank check', rule: 'Every priority keyword is checked daily. An alert is raised when one drops 5 or more positions.' },
   { name: 'Weekly plan vs actual', rule: 'Every Monday the published blogs, backlink tasks and fixes are compared with the plan.' },
-  { name: 'Automatic fact check', rule: 'Every claim in every blog is checked against official sources, corrected, and checked again until two checks in a row are clean (up to 50 rounds). A blog that cannot be fully verified is held, never published.' },
+  { name: 'Automatic fact check', rule: 'Every claim in every blog is checked against official sources, corrected, and after a correction the changed sentences are checked again, and it passes only when two full checks in a row by two different models are clean (up to 8 rounds). A blog that cannot be fully verified is held, never published.' },
   { name: 'Crawl and indexing pause', rule: 'Auto-publishing pauses while the latest crawl shows server errors or the site is not indexable.' },
 ];
 

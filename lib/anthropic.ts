@@ -539,9 +539,10 @@ const SECOND_CHECK_MODEL = () => {
 // "new" rules) against primary sources with web search, independently of the writer. The claims are
 // shared between up to FACT_CHECK_PARALLEL checkers that run at the same time, so a 30-claim article
 // is checked in a third of the time; the first checker also looks for claims nobody listed.
-async function factCheckDraft(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity }: any = {}) {
+// targeted: check only the given sentences (the ones a correction changed), not the whole article.
+async function factCheckDraft(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
   const today = new Date().toISOString().slice(0, 10);
-  const groups = batchClaims([...(result.facts || []).map((f) => f.claim), ...mustCheck], FACT_CHECK_PARALLEL());
+  const groups = batchClaims([...(targeted ? [] : (result.facts || []).map((f) => f.claim)), ...mustCheck], FACT_CHECK_PARALLEL());
   if (!groups.length) groups.push([]);
   const perChecker = Math.ceil(FACT_CHECK_SEARCHES / groups.length) + (groups.length > 1 ? 5 : 0);
   const article = `Title: ${result.title}\nMeta: ${result.meta}\n\nArticle HTML:\n${result.content}\n\nWriter's Facts Register:\n${(result.facts || [])
@@ -553,7 +554,7 @@ async function factCheckDraft(result, signal, { mustCheck = [], model = FACT_CHE
 incometax.gov.in, incometaxindia.gov.in, cbic-gst.gov.in, rbi.org.in, sebi.gov.in, mca.gov.in, the
 treaty text) as of today, ${today}. You have up to ${perChecker} web searches: one per claim where
 possible, grouping claims that share a source.${
-    i === 0
+    i === 0 && !targeted
       ? ' Also find any OTHER hard claim in the article (a number, rate, threshold, deadline, statute or section, form number, or "new" rule) that is in none of the lists, and verify it too.'
       : ''
   }
@@ -623,7 +624,7 @@ the correction. Otherwise "incorrect" (give the correction) or "unverifiable". R
   return { checks, model, checkers: groups.length };
 }
 
-const FACT_CHECK_ROUNDS = () => Math.max(2, Number(process.env.FACT_CHECK_ROUNDS) || 50);
+const FACT_CHECK_ROUNDS = () => Math.max(3, Number(process.env.FACT_CHECK_ROUNDS) || 8);
 
 // Fixes the claims a fact check flagged: corrects each one from its primary source, or removes it
 // (or rewrites the sentence without the figure) when no primary source confirms it.
@@ -648,30 +649,42 @@ No em dashes. Return ONLY: ===TITLE===<title>===META===<meta description>===CONT
   return { title: get('===TITLE===', '===META===') || draft.title, meta: get('===META===', '===CONTENT===') || draft.meta, content };
 }
 
-// Fact-checks a draft against primary sources over and over, correcting it between rounds, until two
-// independent checks in a row find nothing wrong (and every figure sentence was checked). Gives up
-// after FACT_CHECK_ROUNDS (default 50) rounds; the caller then holds the blog instead of publishing.
+// Fact-checks a draft against primary sources, correcting it between rounds. It passes only when two
+// FULL checks in a row, by two different models, find nothing wrong (and every figure sentence was
+// checked). After a correction, the next round checks only the sentences the correction changed
+// (cheap); once those are clean, full checks run again. So the final gate is the same as before, but
+// the article is not re-checked from scratch after every small fix. Gives up after
+// FACT_CHECK_ROUNDS (default 8) rounds in total; the caller then holds the blog for a person instead
+// of publishing it, so nothing unverified goes live.
 // `check` and `correct` are injectable for tests.
 // `startClean` = 1 when the writer's own independent check already found this exact text clean:
-// then one more clean check, by the other model, is enough (K6: two different models agree).
+// then one more clean full check, by the other model, is enough (K6: two different models agree).
 async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], check = factCheckDraft, correct = correctClaims, maxRounds = FACT_CHECK_ROUNDS(), startClean = 0, onActivity }: any = {}) {
   let current = { title: draft.title, meta: draft.meta, content: draft.content };
   let clean = Math.max(0, Math.min(1, Number(startClean) || 0));
-  // Models alternate every round (FACT, SECOND, FACT...; or SECOND first when the inline check by
-  // FACT already counts), so two clean rounds in a row always come from two different models.
-  const offset = clean;
+  // Full checks alternate models (FACT, SECOND, FACT...; or SECOND first when the inline check by
+  // FACT already counts), so two clean full checks in a row always come from two different models.
+  let fullRounds = clean;
+  let targets: string[] | null = null; // sentences changed by the last correction
   const log = [];
   for (let round = 1; round <= maxRounds; round++) {
-    const mustCheck = mustCheckOf(current.content);
-    const model = (round + offset) % 2 === 1 ? FACT_CHECK_MODEL() : SECOND_CHECK_MODEL();
-    onActivity?.({ round, model, note: `check round ${round}` });
-    const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck, model, onActivity });
+    const all = mustCheckOf(current.content);
+    const targeted = Boolean(targets && targets.length);
+    const mustCheck = targeted ? targets : all;
+    const model = targeted ? FACT_CHECK_MODEL() : fullRounds % 2 === 0 ? FACT_CHECK_MODEL() : SECOND_CHECK_MODEL();
+    onActivity?.({ round, model, note: targeted ? `re-checking ${mustCheck.length} corrected sentence(s), round ${round}` : `full check round ${round}` });
+    const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck, model, onActivity, targeted });
     const bad = result.checks.filter((c) => c.verdict !== 'correct');
     // A figure sentence the checker skipped counts as unverified.
     const checked = result.checks.map((c) => String(c.claim || '').toLowerCase());
     const skipped = mustCheck.filter((sent) => !checked.some((c) => c && (sent.toLowerCase().includes(c) || c.includes(sent.toLowerCase().slice(0, 60)))));
-    log.push({ round, model: result.model || model, claims: result.checks.length, wrong: bad.length, skipped: skipped.length });
+    log.push({ round, model: result.model || model, scope: targeted ? 'corrected sentences' : 'full', claims: result.checks.length, wrong: bad.length, skipped: skipped.length });
+    if (!targeted) fullRounds++;
     if (!bad.length && !skipped.length) {
+      if (targeted) {
+        targets = null; // corrections confirmed: back to full checks
+        continue;
+      }
       clean++;
       if (clean >= 2) {
         await rememberFacts(result.checks, result.model || model).catch(() => 0);
@@ -680,8 +693,17 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
       continue;
     }
     clean = 0;
-    if (!bad.length) continue; // only skipped sentences: check again, they must be covered
+    if (!bad.length) {
+      // Only skipped sentences: check exactly those again.
+      targets = skipped;
+      continue;
+    }
+    const before = new Set(all);
     current = await correct(current, bad, signal);
+    // The next round checks what the correction changed, plus anything that was skipped.
+    const changed = mustCheckOf(current.content).filter((sent) => !before.has(sent));
+    const next = [...new Set([...changed, ...skipped])];
+    targets = next.length ? next : null; // nothing identifiable changed: a full check runs
   }
   return { ok: false, rounds: maxRounds, draft: current, log };
 }

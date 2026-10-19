@@ -21,14 +21,17 @@ test('a wrong figure is corrected, then two clean checks pass', async () => {
   const verifyAndCorrect = await load();
   const r = await verifyAndCorrect(draft, { check, correct, mustCheckOf, maxRounds: 50 });
   assert.equal(r.ok, true);
-  assert.equal(r.rounds, 3); // wrong -> corrected -> clean -> clean
-  assert.equal(checks, 3);
+  // full: wrong -> corrected -> only the changed sentence re-checked: clean -> full clean -> full clean
+  assert.equal(r.rounds, 4);
+  assert.equal(checks, 4);
+  assert.deepEqual(r.log.map((l: any) => l.scope), ['full', 'corrected sentences', 'full', 'full']);
   assert.ok(r.draft.content.includes('April 15'));
 });
 
 test('one clean pass is not enough; a skipped figure sentence is not clean', async () => {
   let n = 0;
-  // Round 1 clean, round 2 skips the sentence, rounds 3 and 4 clean.
+  // Round 1 full clean, round 2 skips the sentence, round 3 re-checks just that sentence,
+  // rounds 4 and 5 are two full clean checks in a row.
   const check = async () => {
     n++;
     return { checks: n === 2 ? [] : [{ claim: 'The FBAR filing deadline is April 30.', verdict: 'correct' }] };
@@ -36,7 +39,8 @@ test('one clean pass is not enough; a skipped figure sentence is not clean', asy
   const verifyAndCorrect = await load();
   const r = await verifyAndCorrect(draft, { check, correct: async (d: any) => d, mustCheckOf, maxRounds: 50 });
   assert.equal(r.ok, true);
-  assert.equal(r.rounds, 4);
+  assert.equal(r.rounds, 5);
+  assert.deepEqual(r.log.map((l: any) => l.scope), ['full', 'full', 'corrected sentences', 'full', 'full']);
 });
 
 test('a claim that can never be verified is held after the round limit', async () => {
