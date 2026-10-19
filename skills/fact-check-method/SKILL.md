@@ -22,6 +22,30 @@ Use this every time you check claims, learn a new problem type, or run a fact ch
 8. **Check the India side too.** Every cross-border claim gets an India check (EPF ₹2.5 lakh rule).
 Then apply the five questions and the habits below to every claim.
 
+## The whole-topic pipeline (how a cheap one-claim checker matches the deep checker)
+1. **Think about the whole topic first: make a topic brief once per article.**
+   - What changed THIS year (new Acts, renumbered sections, new or renamed forms, rates, thresholds,
+     deadlines, circulars, removed procedures). Then last year, then each earlier year, back to the oldest
+     date the article mentions. Start from the latest; give each change's date. (Example: a rule dated
+     2021 may have changed 3 years ago; search year by year until you reach it.)
+   - The law, sections and forms in force today (old number -> new number), e.g. India's Income-tax Act,
+     2025 from 1 April 2026 replaced the 1961 Act sections and forms (15CA/15CB, 16A/16B and others).
+   - The full rule for each point, including the exceptions inside it (NRIs, US persons abroad, residents
+     vs non-residents, joint owners).
+   - Who the reader is, and which rules apply to them.
+2. **List every claim, then check each one alone,** with the full article and the topic brief attached.
+   A claim using a law, section or form the brief shows was replaced is incorrect.
+3. **Read deeply and keep what you read.** Read full official pages, not snippets. Note each finding
+   against its topic, then read more, align the findings, and only then decide.
+4. **Consolidate and review the whole article in one pass.** Put all claim results together, read them
+   with the article and the brief, and look for: one part contradicting another, examples or
+   calculations that do not follow from the stated rules, old sections or forms, rules applied to the
+   wrong reader, and claim results that are wrong in the light of the whole topic. Re-verify those.
+5. **Fix briefly.** Merge fixes to the same sentence, state conditions in as few words as possible, keep
+   the article under 1,600 words, and leave nothing out that a correction requires.
+6. **Keep what worked:** practical coverage (for example the home-sale exclusion), FAQs and a
+   common-mistakes list, in easy, readable language.
+
 Follow every step in order. Do not skip a step to save time. A claim counts as checked only when
 it has an official source link next to it.
 

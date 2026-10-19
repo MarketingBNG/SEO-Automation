@@ -622,9 +622,67 @@ claims. Return ONLY JSON between ===JSON=== and ===END===: {"claims":["..."]}`;
   }
 }
 
+// Stronger model for the two whole-topic steps (the brief before the claim checks and the review after).
+const FACT_CHECK_BRIEF_MODEL = () => process.env.FACT_CHECK_BRIEF_MODEL || 'claude-sonnet-5-5';
+
+// Topic brief, made once per article before the claim checks: what changed this year and in each
+// earlier year back to the oldest date the article mentions, the law and section/form numbers in force
+// today, the full rules with their exceptions (NRI ones especially), and who the reader is. Every
+// one-claim check gets it, so a checker that sees one sentence still knows the whole law changed.
+export async function buildTopicBrief(result, signal, { model = FACT_CHECK_BRIEF_MODEL() }: any = {}): Promise<string> {
+  const today = new Date().toISOString().slice(0, 10);
+  const system = `You prepare a short research brief for fact checkers of a US-India tax article. Today is ${today}.
+Think about the whole topic first, then research it on official sources (incometaxindia.gov.in,
+incometax.gov.in, indiacode.nic.in, rbi.org.in, irs.gov, ecfr.gov, uscode.house.gov, the treaty text):
+1. What changed on this topic THIS year (new Acts, renumbered sections, new or renamed forms, new rates,
+   thresholds, deadlines, circulars, removed procedures). Then the previous year, then each earlier year,
+   back to the oldest year or date the article mentions. Start from the latest and give each change's date.
+2. The law, sections and form numbers in force today (old number -> new number where renumbered).
+3. The full rule for each main point, including the exceptions inside it (for NRIs, US persons living
+   abroad, residents vs non-residents, joint owners).
+4. Who the reader is (the article's audience) and which rules apply to that reader.
+Read full official pages, not snippets. Keep it under 600 words, as plain bullet points with source links.
+Return ONLY the brief between ===BRIEF=== and ===END===.`;
+  const { text } = await callClaude(system, [{ role: 'user', content: `Title: ${result.title}\nMeta: ${result.meta}\n\n${result.content}` }], signal, {
+    maxUses: 15,
+    effort: 'high',
+    model,
+    feature: 'fact-check',
+  });
+  const m = text.match(/===BRIEF===([\s\S]*?)===END===/);
+  return (m ? m[1] : text).trim().slice(0, 8000);
+}
+
+// Whole-article review after the claim checks: reads the article, the brief and every claim result
+// together in one call, and reports what single-claim checks cannot see (one part contradicting another,
+// calculations that do not follow, rules superseded by a law change, the wrong reader) plus any claim
+// result that is wrong in the light of the whole topic.
+async function reviewWholeArticle(result, brief, checks, signal, { model = FACT_CHECK_BRIEF_MODEL() }: any = {}) {
+  const system = `You are the final reviewer of a US-India tax article. You see the article, a research brief on the
+whole topic (latest law changes, current sections and forms, full rules with exceptions, the reader) and
+the result of a separate check of every claim. Read all of it together and find what single-claim checks
+miss: parts of the article that contradict each other, calculations or examples that do not follow from
+the stated rules, old sections or forms that the brief shows were replaced, rules applied to the wrong
+reader, and claim results that are wrong given the brief. You have up to 8 web searches to confirm.
+Do not repeat problems the claim results already flag correctly.
+Return ONLY JSON between ===JSON=== and ===END===:
+{"checks":[{"claim":"exact sentence or phrase","verdict":"incorrect|unverifiable","correction":"","source_url":""}]}`;
+  const results = checks.map((c) => `- [${c.verdict}] ${c.claim}${c.correction ? ` | ${c.correction}` : ''}`).join('\n');
+  const user = `BRIEF\n${brief}\n\nCLAIM RESULTS\n${results}\n\nARTICLE\nTitle: ${result.title}\nMeta: ${result.meta}\n\n${result.content}`;
+  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 8, effort: 'high', model, feature: 'fact-check' });
+  const m = text.match(/===JSON===([\s\S]*?)===END===/);
+  try {
+    const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
+    return Array.isArray(parsed.checks) ? parsed.checks.filter((c) => c && c.claim && c.verdict !== 'correct') : [];
+  } catch {
+    // An unreadable review never lets the draft through as checked.
+    return [{ claim: 'Whole-article review output could not be read', verdict: 'unverifiable', correction: '', source_url: '' }];
+  }
+}
+
 async function factCheckPerClaim(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
   const today = new Date().toISOString().slice(0, 10);
-  const listed = targeted ? [] : await listClaims(result, signal, { model });
+  const [listed, brief] = await Promise.all([targeted ? [] : listClaims(result, signal, { model }), buildTopicBrief(result, signal)]);
   const claims = [...new Set([...(targeted ? [] : (result.facts || []).map((f) => f.claim)), ...mustCheck, ...listed].map((c) => String(c || '').trim()).filter(Boolean))].slice(0, MAX_CLAIMS);
   // The listing failed and there is nothing else to check: never let the draft through as checked.
   if (!claims.length) return { checks: [{ claim: 'No claims could be listed for the fact check', verdict: 'unverifiable', correction: '', source_url: '' }], model, checkers: 0 };
@@ -637,11 +695,17 @@ Read the whole article for context: a claim that is true but leaves out a condit
 reader must do (who it applies to, the trigger, a threshold or limit, "whichever is earlier", the order of
 steps, an exemption or exception the source states), and that the article does not give elsewhere, is
 "incorrect", with the complete version as the correction.
+Use the TOPIC BRIEF: if it shows a law, section or form was replaced or a rule changed, a claim using the
+old one is "incorrect". Check the full rule including the exceptions inside it, for the reader the brief
+describes. Keep a correction short: one or two sentences.
 
 ${FACT_CHECK_METHOD}
 
 Return ONLY JSON between ===JSON=== and ===END===:
 {"verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}
+
+TOPIC BRIEF (latest law, changes by year, full rules, reader)
+${brief}
 
 ARTICLE
 Title: ${result.title}
@@ -702,6 +766,8 @@ ${result.content}`;
       c.correction = `Only a non-official source (${c.source_url}) was found; link the official source (IRS, CBDT, FinCEN, RBI, MCA, the treaty text or the state site) or remove the claim.`;
     }
   }
+  // One review of the whole article with every claim result, for what single-claim checks cannot see.
+  if (!targeted) checks.push(...(await reviewWholeArticle(result, brief, checks, signal)));
   return { checks, model, checkers: claims.length };
 }
 
@@ -802,6 +868,9 @@ async function correctClaims(draft, bad, signal) {
 correction and primary source are given, use the corrected fact and link the source; if it is
 unverifiable, remove the claim or rewrite the sentence without the unverified figure. Keep everything
 else exactly as it is (structure, headings, links, FAQ, tone). Never add a new number, rate or deadline.
+Keep each fix short and complete: merge several fixes to one sentence into one clean sentence, state the
+condition in as few words as possible, and keep the article under 1,600 words (tighten nearby wording if a
+fix adds words). Nothing a correction requires may be left out.
 No em dashes. Return ONLY: ===TITLE===<title>===META===<meta description>===CONTENT===<full HTML>===END===`;
   const user = `Flagged claims:\n${bad
     .map((c) => `- "${c.claim}" (${c.verdict})${c.correction ? ` Correct: ${c.correction}` : ''}${c.source_url ? ` Source: ${c.source_url}` : ''}`)
