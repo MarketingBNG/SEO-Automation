@@ -169,6 +169,21 @@ Ask these five questions of every claim:
    real rule: a co-owner reports the FULL account value, not half. Check that the answer matches the
    question, and check counting rules (full value vs share, per account vs aggregate).
 
+### Four more problem types (property-sale blog test, October 2026)
+Found by the deep auditor and missed by cheaper checkers. Ask these of every claim too:
+6. **Does the rule still hold if the property was rented out or inherited?** The US home-sale
+   exclusion does not cover depreciation from rental years (taxed at up to 25%) or gain from
+   non-main-home use after 2008, and a rented flat may go on Form 4797. An inherited flat's US basis
+   is generally its market value at death (IRC 1014), not the parent's cost.
+7. **Does the form depend on who the buyer and seller are, and on the date?** For an NRI seller the
+   buyer's TDS certificate is Form 131, or Form 132 only when a resident individual or HUF buyer pays
+   through Form 141 from 1 October 2026 (CBDT Notification 121/2026); before April 2026 it was
+   Form 16A, not 16B (16B is for resident sellers).
+8. **Does one relief also cover a second tax?** The foreign tax credit does not reduce the 3.8% NIIT,
+   and only the Indian tax finally owed is creditable (refunded TDS is not).
+9. **Is every date, circular or notification one you actually read?** A cheap checker once cited an
+   RBI circular with a made-up date. Cite only what the source shows; never supply a date yourself.
+
 ### Signals that mean "this is a hard point, dig deeper"
 - A figure that is adjusted every year, or a date in the current or last year.
 - A penalty, fine or prison term (look for tiers).

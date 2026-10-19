@@ -580,6 +580,10 @@ ASK OF EVERY CLAIM:
 - Is the law settled? Split the claim into the confirmed part and the part with no official answer.
 - Does the sentence answer the question its heading raises? Check counting rules (full value vs
   share, per account vs total).
+- Does the rule still hold if the property was rented out or inherited (depreciation, non-main-home
+  use, inherited cost basis)? Does the form depend on who the buyer and seller are and on the date?
+- Does one tax credit or exemption also cover a second tax the article mentions, or not?
+- Is every date, circular or notification cited one you actually read? Never supply a date yourself.
 HARD POINT SIGNALS (dig deeper): a yearly adjusted figure, a penalty or prison term, a named program or
 procedure, an absolute word, a cross-border rule, a page that fails to load.`;
 
