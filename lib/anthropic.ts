@@ -871,6 +871,9 @@ else exactly as it is (structure, headings, links, FAQ, tone). Never add a new n
 Keep each fix short and complete: merge several fixes to one sentence into one clean sentence, state the
 condition in as few words as possible, and keep the article under 1,600 words (tighten nearby wording if a
 fix adds words). Nothing a correction requires may be left out.
+Keep it easy to read: put the action first and the section or form number after it in brackets, use at
+most one section or form number per sentence, and when old law numbers changed, list old and new numbers
+once in a small table instead of repeating "formerly ..." in sentences.
 No em dashes. Return ONLY: ===TITLE===<title>===META===<meta description>===CONTENT===<full HTML>===END===`;
   const user = `Flagged claims:\n${bad
     .map((c) => `- "${c.claim}" (${c.verdict})${c.correction ? ` Correct: ${c.correction}` : ''}${c.source_url ? ` Source: ${c.source_url}` : ''}`)

@@ -45,6 +45,10 @@ Then apply the five questions and the habits below to every claim.
    the article under 1,600 words, and leave nothing out that a correction requires.
 6. **Keep what worked:** practical coverage (for example the home-sale exclusion), FAQs and a
    common-mistakes list, in easy, readable language.
+7. **Keep fixes readable.** Put the action first and the section or form number after it in brackets
+   ("Apply for a lower TDS certificate before the sale (Form 128)"). Use at most one section or form
+   number per sentence. When law numbers changed, put old and new numbers once in a small table instead
+   of repeating "formerly ..." in sentences.
 
 Follow every step in order. Do not skip a step to save time. A claim counts as checked only when
 it has an official source link next to it.
