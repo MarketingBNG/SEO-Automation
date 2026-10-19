@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { creditStatus, setBalance, resumeAi, pauseAi, autoResumeAi } from '@/lib/aiCredits';
+import { creditStatus, setBalance, resumeAi, pauseAi, autoResumeAi, spendWindow } from '@/lib/aiCredits';
 import { checkKey } from '@/lib/anthropicClient';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../_lib/http';
@@ -7,8 +7,10 @@ import { methodNotAllowed } from '../_lib/http';
 export const runtime = 'nodejs';
 
 // GET: models in use, estimated spend and remaining credit, pause state.
-export async function GET() {
-  return NextResponse.json(await creditStatus());
+// ?days=N adds the spend of the last N days by kind of work and model.
+export async function GET(req: NextRequest) {
+  const days = Math.min(90, Math.max(0, Number(req.nextUrl.searchParams.get('days')) || 0));
+  return NextResponse.json({ ...(await creditStatus()), ...(days ? { window: await spendWindow(days) } : {}) });
 }
 
 // POST { action: 'set_balance', balance, threshold? } after a top-up (also lifts the pause),

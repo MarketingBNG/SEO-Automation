@@ -138,6 +138,21 @@ async function checkUsageAlert(s: { balance: number | null; spentSinceBalance: n
   );
 }
 
+// Spend over the last `days` days, per kind of work and per model (for "what used credits lately").
+export async function spendWindow(days: number) {
+  const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  const rows = await prisma.ai_usage.groupBy({
+    by: ['feature', 'model'],
+    where: { created_at: { gte: since } },
+    _sum: { cost_usd: true, web_searches: true, input_tokens: true, output_tokens: true },
+    _count: { _all: true },
+  });
+  const byFeature = rows
+    .map((r: any) => ({ feature: r.feature, model: r.model, calls: r._count._all, cost: r._sum.cost_usd || 0, webSearches: r._sum.web_searches || 0, inputTokens: r._sum.input_tokens || 0, outputTokens: r._sum.output_tokens || 0 }))
+    .sort((a, b) => b.cost - a.cost);
+  return { days, since, total: byFeature.reduce((n, r) => n + r.cost, 0), byFeature };
+}
+
 export async function creditStatus() {
   const st = await settings.getMany(['credit_balance_usd', 'credit_balance_set_at', 'credit_pause_below_usd', 'ai_paused', 'ai_paused_reason', 'credit_balance_after_id']);
   const balance = num(st.credit_balance_usd);

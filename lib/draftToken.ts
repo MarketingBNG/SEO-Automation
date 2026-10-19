@@ -1,7 +1,7 @@
 // Blog edits from Claude Code (scripts/draft.ts), without the dashboard's AI and its API credits.
 //
 // A request carrying `Authorization: Bearer <DRAFT_EDIT_TOKEN>` may only read drafts and change a
-// draft's title, meta description and article: never approve, reject, publish, delete or touch
+// draft's title, meta description and article, and read the AI credit spend: never approve, reject, publish, delete or touch
 // anything else. Unset (or shorter than 24 characters) = switched off.
 
 const ALLOWED: { method: string; path: RegExp }[] = [
@@ -9,6 +9,8 @@ const ALLOWED: { method: string; path: RegExp }[] = [
   { method: 'GET', path: /^\/api\/drafts\/\d+$/ },
   { method: 'PATCH', path: /^\/api\/drafts\/\d+$/ },
   { method: 'GET', path: /^\/api\/drafts\/\d+\/download$/ },
+  // Read-only: AI credit spend, so Claude Code can report what costs what (cannot change anything).
+  { method: 'GET', path: /^\/api\/ai-credits$/ },
 ];
 
 export const DRAFT_TOKEN_ACTOR = 'Claude Code (edit token)';
