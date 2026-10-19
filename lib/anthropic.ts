@@ -289,6 +289,9 @@ async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
   return result;
 }
 
+// Haiku has only the basic web search tool; the dynamic-filtering version is Opus and Sonnet only.
+const searchTool = (model: string): any => (/haiku/.test(model) ? 'web_search_20250305' : 'web_search_20260209');
+
 async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40, onActivity, idleMs = IDLE_MS() }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
@@ -315,7 +318,7 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
         max_tokens: 32000,
         output_config: { effort },
         system: systemPrompt,
-        tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxUses }],
+        tools: [{ type: searchTool(model), name: 'web_search', max_uses: maxUses }],
         messages: conversation,
       }, signal).catch(async (err: any) => {
         await onApiError(err, 'secondary');
@@ -342,7 +345,7 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
       fallbacks: 'default',
       output_config: { effort },
       system: cached.system,
-      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: maxUses }],
+      tools: [{ type: searchTool(model), name: 'web_search', max_uses: maxUses }],
       messages: cached.messages,
     };
     if (part > 0) report(`research continues (part ${part + 1})`);
