@@ -107,9 +107,9 @@ test('the two clean rounds always come from two different models', async () => {
     const r = await verifyAndCorrect({ title: 't', meta: 'm', content: '<p>x</p>', facts: [] }, { check, correct: async (d: any) => d, startClean, maxRounds: 6 });
     return { ok: r.ok, models };
   };
-  assert.deepEqual((await run(['correct', 'correct'])).models, ['claude-opus-5-5', 'claude-sonnet-5-5']);
-  assert.deepEqual((await run(['incorrect', 'correct', 'correct'])).models, ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5']);
-  assert.deepEqual((await run(['incorrect', 'correct', 'correct'], 1)).models, ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5']);
+  assert.deepEqual((await run(['correct', 'correct'])).models, ['claude-haiku-5-5', 'claude-sonnet-5-5']);
+  assert.deepEqual((await run(['incorrect', 'correct', 'correct'])).models, ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']);
+  assert.deepEqual((await run(['incorrect', 'correct', 'correct'], 1)).models, ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-sonnet-5-5']);
 });
 
 test('a clean inline check counts as the first clean round, the other model does the second', async () => {

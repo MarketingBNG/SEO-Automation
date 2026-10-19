@@ -527,13 +527,37 @@ export function batchClaims(claims: string[], groups: number): string[][] {
   return Array.from({ length: n }, (_, i) => uniq.slice(i * size, (i + 1) * size)).filter((g) => g.length);
 }
 // The fact checker can run on a different (stronger) model than the writer. Default: the same top model.
-const FACT_CHECK_MODEL = () => process.env.FACT_CHECK_MODEL || MODEL;
+// Default: Haiku at low effort, made to follow the deep method below (FACT_CHECK_METHOD), so it
+// works the way the maximum-effort run did at a fraction of the cost. FACT_CHECK_EFFORT overrides.
+const FACT_CHECK_MODEL = () => process.env.FACT_CHECK_MODEL || 'claude-haiku-5-5';
+const FACT_CHECK_EFFORT = () => process.env.FACT_CHECK_EFFORT || 'low';
 // K6: a second, different model checks every draft too. The rounds alternate between the two, so a
 // draft only passes when both models find nothing wrong in two checks in a row.
 const SECOND_CHECK_MODEL = () => {
   const m = process.env.SECOND_CHECK_MODEL || 'claude-sonnet-5-5';
   return m === FACT_CHECK_MODEL() ? (m === 'claude-sonnet-5-5' ? 'claude-opus-5-5' : 'claude-sonnet-5-5') : m;
 };
+
+// The deep research method (skills/fact-check-method/SKILL.md), written out so a cheaper model or
+// effort level follows the same steps the maximum-effort run took on its own.
+export const FACT_CHECK_METHOD = `METHOD (follow every step, do not skip any to save time):
+1. List every checkable claim: figures, rates, thresholds, dates, deadlines, form and section numbers,
+   penalties, who must file, exceptions, and implied rules ("no penalty applies"). Split a sentence that
+   holds two facts into two claims. A 2,000 word tax article usually holds 40 to 50 claims.
+2. Check money, penalties, deadlines and thresholds first, then process steps, then background.
+3. Never answer from memory: search for every claim. Go to the law itself first (uscode.house.gov,
+   ecfr.gov, indiacode.nic.in, incometaxindia.gov.in), then official instructions, the IRM, FinCEN
+   notices, CBDT or RBI circulars, then agency pages. Firm or blog sites are never the source; use them
+   only to find the official page. If a search fails, search again with the form number, the section
+   number or the official page title.
+4. Check the source is current: this year's amounts and rates, and that the page or procedure still
+   exists. A removed page or retired procedure is itself an error in the article.
+5. For a cross-border point, check the India side rule too (EPF, FEMA, DTAA), not only the US side.
+6. Check what is missing: a condition, limit or exception an expert would add makes the claim incorrect.
+7. Use "unverifiable" only after 3 different searches found no official source.
+8. Every check needs a source_url to the official source. For "incorrect", the correction is the full
+   corrected sentence ready to paste (no em dashes) with the reason.
+9. Before answering, confirm every claim has a verdict and a source_url.`;
 
 // Re-verifies every hard claim in a draft (numbers, rates, thresholds, deadlines, sections, forms,
 // "new" rules) against primary sources with web search, independently of the writer. The claims are
@@ -562,7 +586,11 @@ verdict is "correct" only when a primary source confirms it as currently applica
 complete enough not to mislead: a claim that is true but leaves out a condition that changes what the
 reader must do (who it applies to, the trigger, a threshold or limit, "whichever is earlier", the order
 of steps, an exemption or exception the source states) is "incorrect", with the complete version as
-the correction. Otherwise "incorrect" (give the correction) or "unverifiable". Return ONLY JSON between ===JSON=== and ===END===:
+the correction. Otherwise "incorrect" (give the correction) or "unverifiable".
+
+${FACT_CHECK_METHOD}
+
+Return ONLY JSON between ===JSON=== and ===END===:
 {"checks":[{"claim":"exact sentence or phrase","verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}]}`;
   const user = (group: string[], i: number) =>
     `${article}${
@@ -583,7 +611,7 @@ the correction. Otherwise "incorrect" (give the correction) or "unverifiable". R
       groups.map((g, i) =>
         callClaude(system(i), [{ role: 'user', content: user(g, i) }], local.signal, {
           maxUses: perChecker,
-          effort: 'max',
+          effort: FACT_CHECK_EFFORT(),
           model,
           feature: 'fact-check',
           onActivity: (a) => {
