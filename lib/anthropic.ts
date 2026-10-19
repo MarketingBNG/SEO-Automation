@@ -573,6 +573,13 @@ HABITS OF A DEEP CHECKER:
 - Test absolute words (never, always, every, automatic, does not) against the law.
 - If an official site is blocked, try another official page; blocked is not unverifiable.
 - Prefer the newest, most specific official source; check the page's updated date.
+ASK OF EVERY CLAIM:
+- Does a country-specific rule (treaty, IGA, India agreement) replace the general rule stated?
+- Is the rule different for THIS reader (NRIs, US persons living abroad, Indian founders)?
+- Is an obligation stated as automatic when it only applies on triggers or above a small-amount limit?
+- Is the law settled? Split the claim into the confirmed part and the part with no official answer.
+- Does the sentence answer the question its heading raises? Check counting rules (full value vs
+  share, per account vs total).
 HARD POINT SIGNALS (dig deeper): a yearly adjusted figure, a penalty or prison term, a named program or
 procedure, an absolute word, a cross-border rule, a page that fails to load.`;
 

@@ -101,6 +101,29 @@ These are the habits that found the hard problems. Copy them.
 12. **Check its own output.** It confirmed each quoted claim appears word for word in the article
     and that every check has a source before handing back.
 
+### Five problem types only the deep checker caught (draft #2, one-claim test)
+Ask these five questions of every claim:
+1. **Is there a country-specific rule that replaces the general one?** "FFIs report directly to the
+   IRS" is the general FATCA rule, but India has a Model 1 IGA: Indian banks report to the Income Tax
+   Department, which passes it to the IRS. Check treaties, IGAs and country agreements before
+   accepting a general statement for India.
+2. **Does the rule differ for THIS reader?** "Form 8938 is due by the 1040 deadline, including any
+   extension requested and granted" is true in general, but an NRI living abroad gets an automatic
+   2-month extension to June 15 with no request. Always re-check the rule for the article's audience
+   (NRIs, US persons abroad, Indian founders).
+3. **Is an obligation stated as automatic when it has triggers or a small-amount exemption?** "NRIs
+   with Indian mutual funds face a third filing obligation" sounds automatic, but Form 8621 is needed
+   only on certain triggers, and not for a year with PFIC stock of $25,000 or less ($50,000 joint) and
+   no distribution or sale. Look for triggers, de minimis limits and exemptions.
+4. **Is the law settled, or only partly?** "PPF and EPF balances count for FBAR and Form 8938": PPF
+   is confirmed, Form 8938 for EPF is confirmed, but no official guidance says whether an EPF account
+   is an FBAR "financial account". Split a claim into the part that is confirmed and the part with no
+   official answer, and say so.
+5. **Does the sentence answer the question its heading or first half raises?** The bullet was about
+   joint accounts with a non-resident spouse, but the answer talked about signature authority. The
+   real rule: a co-owner reports the FULL account value, not half. Check that the answer matches the
+   question, and check counting rules (full value vs share, per account vs aggregate).
+
 ### Signals that mean "this is a hard point, dig deeper"
 - A figure that is adjusted every year, or a date in the current or last year.
 - A penalty, fine or prison term (look for tiers).
