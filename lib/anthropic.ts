@@ -926,7 +926,13 @@ No em dashes. Return ONLY: ===TITLE===<title>===META===<meta description>===CONT
   const user = `Flagged claims:\n${bad
     .map((c) => `- "${c.claim}" (${c.verdict})${c.correction ? ` Correct: ${c.correction}` : ''}${c.source_url ? ` Source: ${c.source_url}` : ''}`)
     .join('\n')}\n\nTitle: ${draft.title}\nMeta: ${draft.meta}\n\nHTML:\n${draft.content}`;
-  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 20, effort: 'max', model: FACT_CHECK_MODEL(), feature: 'fact-check' });
+  // Rewriting the whole article is long output: the stronger brief model at high effort does it
+  // reliably (a small model at max effort can spend its output on thinking and searches and return
+  // no article). The corrections already carry their sources, so few searches are needed.
+  let text = '';
+  for (let attempt = 1; attempt <= 2 && !text.includes('===CONTENT==='); attempt++) {
+    ({ text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 5, effort: 'high', model: FACT_CHECK_BRIEF_MODEL(), feature: 'fact-check' }));
+  }
   const get = (a, b) => {
     const i = text.indexOf(a);
     if (i < 0) return '';
