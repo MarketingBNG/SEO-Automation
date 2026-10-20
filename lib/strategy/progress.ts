@@ -10,9 +10,10 @@ import prisma from '../prisma';
 // with the Sonnet second check, plus the Sonnet brief, reviews and corrections (October 2026 estimate).
 const DEFAULTS = { strategy: 8, blogDraft: 3, factCheckPerBlog: 9, otherPerDay: 0.5, outreachLead: 0.15, technicalFix: 0.05, update: 0.1 };
 
-async function avgCost(features: string[], perUnitRows: number, since?: string) {
+async function avgCost(features: string[], perUnitRows: number, since?: string, until?: string) {
   const ago = since || new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
-  const r = await prisma.ai_usage.aggregate({ _sum: { cost_usd: true }, where: { feature: { in: features }, created_at: { gte: ago } } });
+  const created_at = until ? { gte: ago, lte: until } : { gte: ago };
+  const r = await prisma.ai_usage.aggregate({ _sum: { cost_usd: true }, where: { feature: { in: features }, created_at } });
   const total = r._sum.cost_usd || 0;
   return perUnitRows > 0 && total > 0 ? total / perUnitRows : null;
 }
@@ -56,14 +57,19 @@ export async function strategyProgress(strategyId: number) {
   const daysUsed = start ? Math.min(30, Math.max(0, Math.floor((Date.now() - start) / 86400000) + 1)) : null;
 
   // AI cost: measured averages when available. Fact checking is measured only since the checker
-  // moved to the current model, so runs on an older, dearer model do not inflate the estimate.
+  // moved to the current model, so runs on an older, dearer model do not inflate the estimate, and
+  // only up to the newest finished draft, so the checks of blogs still in progress (counted before
+  // their draft exists) do not push the average up mid-run. Until 3 drafts are done, the default.
   const factModel = process.env.FACT_CHECK_MODEL || 'claude-haiku-5-5';
   const firstOnModel = await prisma.ai_usage.findFirst({ where: { feature: 'fact-check', model: factModel }, orderBy: { created_at: 'asc' }, select: { created_at: true } });
   const factSince = firstOnModel?.created_at || null;
-  const draftsSinceFact = factSince ? await prisma.drafts.count({ where: { created_at: { gte: factSince } } }) : 0;
+  const factDrafts = factSince
+    ? await prisma.drafts.findMany({ where: { created_at: { gte: factSince } }, select: { created_at: true }, orderBy: { created_at: 'desc' } })
+    : [];
+  const MIN_MEASURED_DRAFTS = 3;
   const [perBlog, perFact, perStrategy, otherDaily, perLead, perFix] = await Promise.all([
     avgCost(['blog'], draftsWritten),
-    factSince ? avgCost(['fact-check'], draftsSinceFact, factSince) : null,
+    factDrafts.length >= MIN_MEASURED_DRAFTS ? avgCost(['fact-check'], factDrafts.length, factSince, factDrafts[0].created_at) : null,
     avgCost(['strategy'], strategiesRun),
     avgCost(['reports', 'meetings', 'assistant', 'audit', 'training', 'other'], 60).then((v) => v ?? null),
     avgCost(['outreach'], leadsPushed),
