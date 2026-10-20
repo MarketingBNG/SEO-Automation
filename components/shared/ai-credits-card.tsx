@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
 
+const inr = (n: number, fx: { rate: number } | null | undefined) => (fx ? ` (₹${Math.round(n * fx.rate).toLocaleString('en-IN')})` : '');
 const usd = (n: number | null | undefined) => (n === null || n === undefined ? 'Not set' : `$${n.toFixed(2)}`);
 const FEATURE: Record<string, string> = {
   strategy: 'Strategy research',
@@ -142,6 +143,17 @@ export function AiCreditsCard() {
           <div className="rounded-lg border p-3"><div className="text-muted-foreground">Spent, last 7 days</div><div className="text-lg font-semibold">{usd(s.spent.last7d)}</div></div>
           <div className="rounded-lg border p-3"><div className="text-muted-foreground">Spent, last 30 days</div><div className="text-lg font-semibold">{usd(s.spent.last30d)}</div></div>
         </div>
+        {s.month?.remaining && (
+          <div className="rounded-lg border border-primary/40 p-3">
+            <div className="mb-1 font-semibold">Budget to keep for the rest of this month</div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div><div className="text-muted-foreground">Days left</div><div className="text-lg font-semibold">{s.month.remaining.daysLeft}</div><div className="text-xs text-muted-foreground">{s.month.remaining.blogsLeft} blog(s) still to write and check</div></div>
+              <div><div className="text-muted-foreground">Keep in the API account</div><div className="text-lg font-semibold">{usd(s.month.budget.keep)}{inr(s.month.budget.keep, s.month.usdInr)}</div><div className="text-xs text-muted-foreground">Work left {usd(s.month.remaining.cost)} plus a 25% margin</div></div>
+              <div><div className="text-muted-foreground">Add now</div><div className="text-lg font-semibold">{usd(s.month.budget.topUp)}{inr(s.month.budget.topUp, s.month.usdInr)}</div><div className="text-xs text-muted-foreground">After the {usd(s.month.budget.creditLeft)} credit already there</div></div>
+            </div>
+            {s.month.usdInr && <div className="mt-1 text-xs text-muted-foreground">Rupees at ₹{s.month.usdInr.rate.toFixed(2)} per US$ (updated {s.month.usdInr.at.slice(0, 10)}); your card may add bank charges.</div>}
+          </div>
+        )}
         {s.month && (
           <div className="rounded-lg border p-3">
             <div className="mb-1 font-semibold">This month</div>

@@ -5,6 +5,7 @@ import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../_lib/http';
 import prisma from '@/lib/prisma';
 import { strategyProgress } from '@/lib/strategy/progress';
+import * as settings from '@/lib/settings';
 
 export const runtime = 'nodejs';
 
@@ -41,7 +42,30 @@ async function thisMonth() {
     const daily = unit('Reports, meetings');
     remaining = { blogsLeft, perBlog, daysLeft, daily, cost: blogsLeft * perBlog + daysLeft * daily };
   }
-  return { since, spent, byFeature, remaining, expectedTotal: spent + (remaining?.cost || 0) };
+  // Budget to keep in the API account for the rest of the month: the work left plus a 25% margin
+  // (correction rounds vary), less the credit already there.
+  const status: any = await creditStatus();
+  const keep = remaining ? remaining.cost * 1.25 : 0;
+  const topUp = Math.max(0, keep - (status.remaining || 0));
+  const inr = await usdInr();
+  return { since, spent, byFeature, remaining, expectedTotal: spent + (remaining?.cost || 0), budget: { keep, creditLeft: status.remaining, topUp }, usdInr: inr };
+}
+
+// US dollar to rupee rate for showing costs in rupees, refreshed every 12 hours (null if unavailable).
+async function usdInr(): Promise<{ rate: number; at: string } | null> {
+  const [rate, at] = await Promise.all([settings.get('usd_inr_rate'), settings.get('usd_inr_at')]);
+  if (rate && at && Date.now() - Date.parse(at) < 12 * 3600000) return { rate: Number(rate), at };
+  try {
+    const j: any = await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(8000) }).then((r) => r.json());
+    const r = Number(j?.rates?.INR);
+    if (!r) throw new Error('no rate');
+    const now = new Date().toISOString();
+    await settings.set('usd_inr_rate', String(r));
+    await settings.set('usd_inr_at', now);
+    return { rate: r, at: now };
+  } catch {
+    return rate && at ? { rate: Number(rate), at } : null;
+  }
 }
 
 // POST { action: 'set_balance', balance, threshold? } after a top-up (also lifts the pause),
