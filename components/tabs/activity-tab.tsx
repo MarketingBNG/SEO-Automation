@@ -13,6 +13,20 @@ const SOURCE: Record<string, string> = { dashboard: 'Dashboard', assistant: 'Ass
 const when = (s: string) =>
   s ? new Date(String(s).replace(' ', 'T') + 'Z').toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '';
 
+// Back-to-back entries that say the same thing (the same failure retried every few minutes) are
+// shown once, with how many times it happened and since when; the newest one is kept.
+function collapseRepeats(list: any[]) {
+  const out: { e: any; times: number; first: string }[] = [];
+  for (const e of list) {
+    const last = out[out.length - 1];
+    if (last && last.e.what === e.what && last.e.area === e.area && last.e.outcome === e.outcome && last.e.details === e.details) {
+      last.times++;
+      last.first = e.created_at;
+    } else out.push({ e, times: 1, first: e.created_at });
+  }
+  return out;
+}
+
 export default function ActivityTab() {
   const [rows, setRows] = useState<any[]>([]);
   const [people, setPeople] = useState<any[]>([]);
@@ -102,9 +116,12 @@ export default function ActivityTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((e) => (
+              {collapseRepeats(rows).map(({ e, times, first }) => (
                 <TableRow key={e.id}>
-                  <TableCell className="whitespace-nowrap align-top text-muted-foreground">{when(e.created_at)}</TableCell>
+                  <TableCell className="whitespace-nowrap align-top text-muted-foreground">
+                    {when(e.created_at)}
+                    {times > 1 && <div className="text-xs">{times} times since {when(first)}</div>}
+                  </TableCell>
                   <TableCell className="align-top">
                     <div className="font-medium">{e.actor}</div>
                     <div className="text-xs text-muted-foreground">
@@ -119,7 +136,10 @@ export default function ActivityTab() {
                       {e.outcome === 'failed' ? 'Failed' : e.outcome === 'started' ? 'Started' : 'Done'}
                     </span>
                   </TableCell>
-                  <TableCell className="min-w-[240px] whitespace-normal align-top text-muted-foreground">{e.details}</TableCell>
+                  <TableCell className="min-w-[240px] whitespace-normal align-top text-muted-foreground">
+                    {times > 1 && <div className="font-medium text-foreground">Tried {times} times; latest shown.</div>}
+                    {e.details}
+                  </TableCell>
                 </TableRow>
               ))}
               {!loading && rows.length === 0 && (
