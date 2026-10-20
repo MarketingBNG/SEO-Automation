@@ -269,6 +269,8 @@ export const isCreditError = (err: any) => err?.name === 'CreditPausedError' || 
 // finished AI steps are reused (lib/aiReplay.ts), so nothing done before is paid for twice.
 export async function autoResumeAi(): Promise<string | null> {
   if ((await settings.get('ai_paused')) !== '1') return null;
+  // A pause a person pressed stays until a person resumes; only a pause for credits lifts by itself.
+  if (/^Paused by /.test((await settings.get('ai_paused_reason')) || '')) return null;
   const main = await keyWorks('main');
   const second = !main && (await keyWorks('secondary'));
   if (!main && !second) return null;
