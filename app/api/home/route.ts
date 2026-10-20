@@ -26,6 +26,13 @@ export async function GET() {
     settings.get('credit_alert_80_for'),
   ]);
 
+  // A failed keyword that was tried again and is now pending, drafted or done is no longer a problem.
+  const retried = failedKeywords.length
+    ? await prisma.keywords.findMany({ where: { status: { not: 'failed' }, keyword: { in: [...new Set(failedKeywords.map((k) => k.keyword))], mode: 'insensitive' } }, select: { id: true, keyword: true } })
+    : [];
+  const stillFailed = failedKeywords.filter((k) => !retried.some((r) => r.id > k.id && r.keyword.toLowerCase() === k.keyword.toLowerCase()));
+  const failedNames = [...new Set(stillFailed.map((k) => k.keyword))];
+
   const calendarDraftIds = new Set(onCalendar.map((r) => r.draft_id));
   const loose = pendingDrafts.filter((d) => !calendarDraftIds.has(d.id)).slice(0, 20);
   const rows = strategy ? await prisma.blog_schedule.findMany({ where: { strategy_id: strategy.id }, orderBy: { publish_at: 'asc' } }) : [];
@@ -61,7 +68,7 @@ export async function GET() {
   for (const r of rows.filter((x) => x.status === 'held')) attention.push({ kind: 'held', title: `Held: ${r.title}`, detail: JSON.parse(r.hold_reasons || '[]').join(' ') || 'See Monthly Strategy.', href: r.draft_id ? `/?tab=drafts&draft=${r.draft_id}` : '/?tab=strategy' });
   for (const r of rows.filter((x) => x.status === 'failed')) attention.push({ kind: 'failed', title: `Publishing failed: ${r.title}`, detail: 'The activity log has the error. Fix the cause; the next check tries again.', href: '/?tab=strategy' });
   for (const r of approvals.filter((x) => x.overdue)) attention.push({ kind: 'overdue', title: `Review overdue: ${r.title}`, detail: 'It has waited more than 48 hours. Approve or reject it.', href: `/?tab=drafts&draft=${r.draft_id}` });
-  if (failedKeywords.length) attention.push({ kind: 'keywords', title: `${failedKeywords.length} keyword blog${failedKeywords.length === 1 ? '' : 's'} failed`, detail: `${failedKeywords.slice(0, 3).map((k) => k.keyword).join(', ')}${failedKeywords.length > 3 ? ' and more' : ''}. Open Keywords and press "Try again".`, href: '/?tab=keywords' });
+  if (failedNames.length) attention.push({ kind: 'keywords', title: `${failedNames.length} keyword blog${failedNames.length === 1 ? '' : 's'} failed`, detail: `${failedNames.slice(0, 3).join(', ')}${failedNames.length > 3 ? ' and more' : ''}. Open Keywords and press "Try again".`, href: '/?tab=keywords' });
 
   return NextResponse.json({
     strategy: strategy ? { id: strategy.id, period: strategy.period, end_date: strategy.end_date } : null,

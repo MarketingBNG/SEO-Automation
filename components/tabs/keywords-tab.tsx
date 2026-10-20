@@ -11,6 +11,20 @@ import { StatusBadge } from '@/components/shared/status-badge';
 import { DataTable, NativeSelect, TD, TD_MUTED } from '@/components/shared/content-ui';
 import { jobsChanged } from '@/components/shared/job-progress';
 
+// One row per keyword and batch: the latest attempt, with how many earlier attempts failed, so
+// retries of the same keyword do not fill the page.
+function latestAttempts(list: any[]) {
+  const groups = new Map<string, any[]>();
+  for (const k of list) {
+    const key = `${String(k.keyword).toLowerCase()}|${k.batch_name || ''}`;
+    groups.set(key, [...(groups.get(key) || []), k]);
+  }
+  return [...groups.values()].map((g) => {
+    const sorted = [...g].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || b.id - a.id);
+    return { k: sorted[0], failedBefore: sorted.slice(1).filter((x) => x.status === 'failed').length };
+  });
+}
+
 // Plain-English reason for a failed blog run.
 function friendlyError(e: string) {
   if (/credit|balance/i.test(e)) return 'AI credits ran out during the run. Top up, then try again.';
@@ -275,12 +289,17 @@ export default function KeywordsTab() {
         </CardHeader>
         <CardContent>
           <DataTable head={['Keyword', 'Batch', 'Status', 'Added']}>
-            {keywords.map((k) => (
+            {latestAttempts(keywords).map(({ k, failedBefore }) => (
               <tr key={k.id}>
                 <td className={TD}>{k.keyword}</td>
                 <td className={TD_MUTED}>{k.batch_name}</td>
                 <td className={TD}>
                   <StatusBadge status={k.status}>{k.status}</StatusBadge>
+                  {failedBefore > 0 && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {k.status === 'failed' ? `Failed ${failedBefore + 1} times.` : `Failed ${failedBefore} time${failedBefore === 1 ? '' : 's'} before; latest attempt ${k.status}.`}
+                    </div>
+                  )}
                   {k.status === 'failed' && (
                     <div className="mt-1 max-w-sm space-y-1 text-xs">
                       {k.error && <div className="text-muted-foreground">Why: {friendlyError(k.error)}</div>}
