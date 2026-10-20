@@ -175,7 +175,7 @@ export async function creditStatus() {
   const models = {
     writer: process.env.ANTHROPIC_MODEL || 'claude-opus-5-5',
     strategy: process.env.STRATEGY_MODEL || process.env.ANTHROPIC_MODEL || 'claude-opus-5-5',
-    factCheck: process.env.FACT_CHECK_MODEL || process.env.ANTHROPIC_MODEL || 'claude-opus-5-5',
+    factCheck: process.env.FACT_CHECK_MODEL || 'claude-haiku-5-5',
     secondCheck: process.env.SECOND_CHECK_MODEL || 'claude-sonnet-5-5',
     assistant: process.env.ASSISTANT_MODEL || 'claude-opus-5-5',
   };
