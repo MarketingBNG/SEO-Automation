@@ -80,6 +80,11 @@ export default function DraftsTab() {
                       {d.production_state.replace(/_/g, ' ')}
                     </StatusBadge>
                   )}
+                  {d.attention && (
+                    <div className="mt-1 max-w-xs text-xs text-muted-foreground" title={d.attention.first.join('\n\n')}>
+                      {d.attention.summary} Open the draft to see each one.
+                    </div>
+                  )}
                 </td>
                 <td className={TD}>
                   <StatusBadge status={d.status}>{d.status.replace('_', ' ')}</StatusBadge>
