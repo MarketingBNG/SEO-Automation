@@ -697,9 +697,10 @@ Return ONLY JSON between ===JSON=== and ===END===:
   }
 }
 
-async function factCheckPerClaim(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
+// `brief`: the topic brief from an earlier round of the same draft, reused so it is built once per blog.
+async function factCheckPerClaim(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false, brief: givenBrief = '' }: any = {}) {
   const today = new Date().toISOString().slice(0, 10);
-  const [listed, brief] = await Promise.all([targeted ? [] : listClaims(result, signal, { model }), buildTopicBrief(result, signal)]);
+  const [listed, brief] = await Promise.all([targeted ? [] : listClaims(result, signal, { model }), givenBrief || buildTopicBrief(result, signal)]);
   const seen = new Set<string>();
   const items = [
     ...(targeted ? [] : (result.facts || []).map((f) => ({ text: f.claim, topic: '', search: true }))),
@@ -710,7 +711,7 @@ async function factCheckPerClaim(result, signal, { mustCheck = [], model = FACT_
     .filter((c) => c.text && !seen.has(c.text) && seen.add(c.text))
     .slice(0, MAX_CLAIMS);
   // The listing failed and there is nothing else to check: never let the draft through as checked.
-  if (!items.length) return { checks: [{ claim: 'No claims could be listed for the fact check', verdict: 'unverifiable', correction: '', source_url: '' }], model, checkers: 0 };
+  if (!items.length) return { checks: [{ claim: 'No claims could be listed for the fact check', verdict: 'unverifiable', correction: '', source_url: '' }], model, checkers: 0, brief };
   // Groups of up to CLAIMS_PER_GROUP claims on one topic; claims that need no search go in their own groups.
   const byTopic = new Map<string, string[]>();
   for (const c of items) {
@@ -815,7 +816,7 @@ ${result.content}`;
   }
   // One review of the whole article with every claim result, for what single-claim checks cannot see.
   if (!targeted) checks.push(...(await reviewWholeArticle(result, brief, checks, signal)));
-  return { checks, model, checkers: groups.length };
+  return { checks, model, checkers: groups.length, brief };
 }
 
 async function factCheckGrouped(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
@@ -954,6 +955,7 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
   // FACT already counts), so two clean full checks in a row always come from two different models.
   let fullRounds = clean;
   let targets: string[] | null = null; // sentences changed by the last correction
+  let brief = ''; // the topic brief, built in the first round and reused after
   const log = [];
   for (let round = 1; round <= maxRounds; round++) {
     const all = mustCheckOf(current.content);
@@ -961,7 +963,8 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
     const mustCheck = targeted ? targets : all;
     const model = targeted ? FACT_CHECK_MODEL() : fullRounds % 2 === 0 ? FACT_CHECK_MODEL() : SECOND_CHECK_MODEL();
     onActivity?.({ round, model, note: targeted ? `re-checking ${mustCheck.length} corrected sentence(s), round ${round}` : `full check round ${round}` });
-    const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck, model, onActivity, targeted });
+    const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck, model, onActivity, targeted, brief });
+    if (result.brief) brief = result.brief;
     const bad = result.checks.filter((c) => c.verdict !== 'correct');
     // A figure sentence the checker skipped counts as unverified.
     const checked = result.checks.map((c) => String(c.claim || '').toLowerCase());
