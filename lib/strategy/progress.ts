@@ -6,8 +6,9 @@ import prisma from '../prisma';
 
 // Default per-unit estimates (USD, Claude Opus 5.5 at max effort with web search) used until the
 // dashboard has measured real averages.
-// factCheckPerBlog: the Haiku claim checks plus the Sonnet brief, review and re-check (October 2026 test).
-const DEFAULTS = { strategy: 8, blogDraft: 3, factCheckPerBlog: 3.5, otherPerDay: 0.5, outreachLead: 0.15, technicalFix: 0.05, update: 0.1 };
+// factCheckPerBlog: a typical blog needs two clean full checks in a row, alternating the Haiku checker
+// with the Sonnet second check, plus the Sonnet brief, reviews and corrections (October 2026 estimate).
+const DEFAULTS = { strategy: 8, blogDraft: 3, factCheckPerBlog: 9, otherPerDay: 0.5, outreachLead: 0.15, technicalFix: 0.05, update: 0.1 };
 
 async function avgCost(features: string[], perUnitRows: number, since?: string) {
   const ago = since || new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
