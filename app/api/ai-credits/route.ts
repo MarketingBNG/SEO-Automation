@@ -4,6 +4,7 @@ import { checkKey } from '@/lib/anthropicClient';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../_lib/http';
 import prisma from '@/lib/prisma';
+import { strategyProgress } from '@/lib/strategy/progress';
 
 export const runtime = 'nodejs';
 
@@ -17,7 +18,30 @@ export async function GET(req: NextRequest) {
     prisma.seo_strategies.findMany({ where: { status: { in: ['generating', 'paused', 'stopping'] } }, select: { id: true, status: true } }),
   ]);
   const running = { blogs: blogs.map((b) => b.keyword), strategies: strategies.map((s) => `#${s.id} ${s.status}`) };
-  return NextResponse.json({ ...(await creditStatus()), running, ...(days ? { window: await spendWindow(days) } : {}) });
+  return NextResponse.json({ ...(await creditStatus()), running, month: await thisMonth(), ...(days ? { window: await spendWindow(days) } : {}) });
+}
+
+// This calendar month: what each kind of work has spent so far, and what the work still left in the
+// approved strategy (blogs not yet written or checked, plus the daily work) should cost.
+async function thisMonth() {
+  const now = new Date();
+  const since = `${now.toISOString().slice(0, 7)}-01 00:00:00`;
+  const rows = await prisma.ai_usage.groupBy({ by: ['feature'], where: { created_at: { gte: since } }, _sum: { cost_usd: true } });
+  const byFeature = rows.map((r: any) => ({ feature: r.feature, cost: r._sum.cost_usd || 0 })).sort((a, b) => b.cost - a.cost);
+  const spent = byFeature.reduce((n, r) => n + r.cost, 0);
+  const strategy = await prisma.seo_strategies.findFirst({ where: { status: 'approved', plan_json: { not: null } }, orderBy: { id: 'desc' }, select: { id: true } });
+  const p: any = strategy ? await strategyProgress(strategy.id).catch(() => null) : null;
+  let remaining: { blogsLeft: number; perBlog: number; daysLeft: number; daily: number; cost: number } | null = null;
+  if (p) {
+    const unit = (item: string) => p.cost.lines.find((l: any) => l.item.startsWith(item))?.unitCost || 0;
+    const blogsLeft = Math.max(0, p.blogs.total - p.blogs.published - p.blogs.inReview);
+    const daysInMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getDate();
+    const daysLeft = daysInMonth - now.getUTCDate();
+    const perBlog = unit('Blog writing') + unit('Fact checking');
+    const daily = unit('Reports, meetings');
+    remaining = { blogsLeft, perBlog, daysLeft, daily, cost: blogsLeft * perBlog + daysLeft * daily };
+  }
+  return { since, spent, byFeature, remaining, expectedTotal: spent + (remaining?.cost || 0) };
 }
 
 // POST { action: 'set_balance', balance, threshold? } after a top-up (also lifts the pause),

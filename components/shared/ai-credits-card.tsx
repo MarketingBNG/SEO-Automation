@@ -142,6 +142,25 @@ export function AiCreditsCard() {
           <div className="rounded-lg border p-3"><div className="text-muted-foreground">Spent, last 7 days</div><div className="text-lg font-semibold">{usd(s.spent.last7d)}</div></div>
           <div className="rounded-lg border p-3"><div className="text-muted-foreground">Spent, last 30 days</div><div className="text-lg font-semibold">{usd(s.spent.last30d)}</div></div>
         </div>
+        {s.month && (
+          <div className="rounded-lg border p-3">
+            <div className="mb-1 font-semibold">This month</div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div><div className="text-muted-foreground">Spent so far</div><div className="text-lg font-semibold">{usd(s.month.spent)}</div></div>
+              <div>
+                <div className="text-muted-foreground">Work still left (estimate)</div>
+                <div className="text-lg font-semibold">{s.month.remaining ? usd(s.month.remaining.cost) : 'No approved strategy'}</div>
+                {s.month.remaining && <div className="text-xs text-muted-foreground">{s.month.remaining.blogsLeft} blog(s) x {usd(s.month.remaining.perBlog)}, plus {s.month.remaining.daysLeft} day(s) of daily work x {usd(s.month.remaining.daily)}</div>}
+              </div>
+              <div><div className="text-muted-foreground">Expected for the month</div><div className="text-lg font-semibold">{usd(s.month.expectedTotal)}</div><div className="text-xs text-muted-foreground">Top up at least this much, less the credit left.</div></div>
+            </div>
+            {s.month.byFeature.length > 0 && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Spent by work: {s.month.byFeature.map((f: any) => `${FEATURE[f.feature] || f.feature} ${usd(f.cost)}`).join(', ')}
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap items-end gap-2">
           <label className="grid gap-1"><span className="text-muted-foreground">Current balance (USD)</span><Input className="h-8 w-40" type="number" min="0" step="0.01" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="e.g. 100" /></label>
           <label className="grid gap-1"><span className="text-muted-foreground">Pause when below (USD)</span><Input className="h-8 w-40" type="number" min="0" step="0.5" value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder={String(s.threshold)} /></label>
