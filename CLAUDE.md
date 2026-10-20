@@ -4,7 +4,7 @@
 
 - Code changes: show the diff, and push to `main` (which deploys) only after the user confirms.
 - Ongoing work must not stop during development. A push to `main` restarts the server: before pushing,
-  check that no blog, fact check or strategy run is mid-way (`/api/ai-credits?days=1`, the Keywords tab),
+  check that no blog, fact check or strategy run is mid-way (`running` in `/api/ai-credits`, and `paused`),
   and say so if one is. If one is running, ask the user to press Pause (AI credits page) first, wait
   about 2 minutes so the AI calls in flight finish and are saved, push, then ask them to press Resume:
   the run continues from the saved steps (lib/aiReplay.ts), so no credit is spent twice. Without the

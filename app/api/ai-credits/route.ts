@@ -3,6 +3,7 @@ import { creditStatus, setBalance, resumeAi, pauseAi, autoResumeAi, spendWindow 
 import { checkKey } from '@/lib/anthropicClient';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../_lib/http';
+import prisma from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 
@@ -10,7 +11,13 @@ export const runtime = 'nodejs';
 // ?days=N adds the spend of the last N days by kind of work and model.
 export async function GET(req: NextRequest) {
   const days = Math.min(90, Math.max(0, Number(req.nextUrl.searchParams.get('days')) || 0));
-  return NextResponse.json({ ...(await creditStatus()), ...(days ? { window: await spendWindow(days) } : {}) });
+  // What is running or paused right now, so a deploy can wait for (or pause) work in progress.
+  const [blogs, strategies] = await Promise.all([
+    prisma.keywords.findMany({ where: { status: 'generating' }, select: { keyword: true } }),
+    prisma.seo_strategies.findMany({ where: { status: { in: ['generating', 'paused', 'stopping'] } }, select: { id: true, status: true } }),
+  ]);
+  const running = { blogs: blogs.map((b) => b.keyword), strategies: strategies.map((s) => `#${s.id} ${s.status}`) };
+  return NextResponse.json({ ...(await creditStatus()), running, ...(days ? { window: await spendWindow(days) } : {}) });
 }
 
 // POST { action: 'set_balance', balance, threshold? } after a top-up (also lifts the pause),
