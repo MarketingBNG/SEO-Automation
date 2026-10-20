@@ -3,6 +3,10 @@
 # Working rules for this repo
 
 - Code changes: show the diff, and push to `main` (which deploys) only after the user confirms.
+- Ongoing work must not stop during development. A push to `main` restarts the server: before pushing,
+  check that no blog, fact check or strategy run is mid-way (`/api/ai-credits?days=1`, the Keywords tab),
+  and say so if one is. A run cut off by a deploy restarts by itself (lib/blogJob.ts, lib/aiReplay.ts),
+  reusing the AI steps it already paid for, but avoid cutting runs off where possible.
 
 ## Editing a dashboard blog draft from Claude Code (no API credits)
 
