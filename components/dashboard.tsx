@@ -20,25 +20,32 @@ import { PeekingOctopus } from '@/components/shared/peeking-octopus';
 import { StatusLight } from '@/components/shared/status-light';
 import { PageJump } from '@/components/shared/page-jump';
 
-import HomeTab from '@/components/tabs/home-tab';
-import TopicsTab from '@/components/tabs/topics-tab';
-import AssistantTab from '@/components/tabs/assistant-tab';
-import KeywordsTab from '@/components/tabs/keywords-tab';
-import DraftsTab from '@/components/tabs/drafts-tab';
-import AuditTab from '@/components/tabs/audit-tab';
-import RenewalTab from '@/components/tabs/renewal-tab';
-import PerformanceTab from '@/components/tabs/performance-tab';
-import StrategyTab, { MonthRunning } from '@/components/tabs/strategy-tab';
-import TrainingTab from '@/components/tabs/training-tab';
-import AssociateTrainingTab from '@/components/tabs/associate-training-tab';
-import WebsiteContentTab from '@/components/tabs/website-content-tab';
-import MeetingsTab from '@/components/tabs/meetings-tab';
-import ActivityTab from '@/components/tabs/activity-tab';
-import SettingsTab from '@/components/tabs/settings-tab';
-import TeamTab from '@/components/tabs/team-tab';
-import GuideTab from '@/components/tabs/guide-tab';
+import dynamic from 'next/dynamic';
 import { useRole } from '@/hooks/use-role';
 import type { Role } from '@/lib/permissions';
+
+// Each page's code loads the first time the page is opened, not all at start-up, so the dashboard
+// starts fast on low-end devices. The pages work exactly as before once loaded.
+const loading = () => <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
+const HomeTab = dynamic(() => import('@/components/tabs/home-tab'), { loading });
+const TopicsTab = dynamic(() => import('@/components/tabs/topics-tab'), { loading });
+const AssistantTab = dynamic(() => import('@/components/tabs/assistant-tab'), { loading });
+const KeywordsTab = dynamic(() => import('@/components/tabs/keywords-tab'), { loading });
+const DraftsTab = dynamic(() => import('@/components/tabs/drafts-tab'), { loading });
+const AuditTab = dynamic(() => import('@/components/tabs/audit-tab'), { loading });
+const RenewalTab = dynamic(() => import('@/components/tabs/renewal-tab'), { loading });
+const PerformanceTab = dynamic(() => import('@/components/tabs/performance-tab'), { loading });
+const TrainingTab = dynamic(() => import('@/components/tabs/training-tab'), { loading });
+const AssociateTrainingTab = dynamic(() => import('@/components/tabs/associate-training-tab'), { loading });
+const WebsiteContentTab = dynamic(() => import('@/components/tabs/website-content-tab'), { loading });
+const MeetingsTab = dynamic(() => import('@/components/tabs/meetings-tab'), { loading });
+const ActivityTab = dynamic(() => import('@/components/tabs/activity-tab'), { loading });
+const SettingsTab = dynamic(() => import('@/components/tabs/settings-tab'), { loading });
+const TeamTab = dynamic(() => import('@/components/tabs/team-tab'), { loading });
+const GuideTab = dynamic(() => import('@/components/tabs/guide-tab'), { loading });
+const StrategyTab = dynamic(() => import('@/components/tabs/strategy-tab'), { loading });
+const MonthRunning = dynamic(() => import('@/components/tabs/strategy-tab').then((m) => m.MonthRunning), { loading });
+
 
 // The pages, grouped by the job they do, in the order the work happens. Keys are unchanged, so old
 // links (/?tab=drafts) still work.

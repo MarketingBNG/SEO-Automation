@@ -3,6 +3,7 @@
 // Topics: what is worth writing about today, researched every morning at 10:00 IST. From each
 // topic: have the dashboard write a blog or a LinkedIn article, or upload your own piece for an
 // audit, a comparison with the research, and a finalized version.
+import { onScreen } from '@/components/shared/on-screen';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, FileText, Loader2, Newspaper, RefreshCw, Upload } from 'lucide-react';
@@ -166,7 +167,7 @@ export default function TopicsTab() {
   const busy = Boolean(data?.topics?.some((t: any) => (t.status === 'blog' && !t.draft) || (t.status === 'article' && !t.article) || t.audit?.audit_status === 'running' || t.audit?.rewrite_status === 'generating')) || starting;
   useEffect(() => {
     if (!busy) return;
-    const t = setInterval(load, 6000);
+    const t = setInterval(() => onScreen('tab-topics') && load(), 6000);
     return () => clearInterval(t);
   }, [busy, load]);
 

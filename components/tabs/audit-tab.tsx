@@ -1,5 +1,6 @@
 'use client';
 
+import { onScreen } from '@/components/shared/on-screen';
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import { Download, FileSearch, Loader2, Wand2, X } from 'lucide-react';
 import { useRole } from '@/hooks/use-role';
@@ -313,7 +314,7 @@ export default function AuditTab() {
   const anyRunning = audits.some((a) => a.audit_status === 'running' || a.rewrite_status === 'generating');
   useEffect(() => {
     if (!anyRunning) return;
-    const t = setInterval(load, 5000);
+    const t = setInterval(() => onScreen('tab-audit') && load(), 5000);
     return () => clearInterval(t);
   }, [anyRunning, load]);
 

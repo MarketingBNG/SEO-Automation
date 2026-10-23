@@ -1,5 +1,6 @@
 'use client';
 
+import { onScreen } from '@/components/shared/on-screen';
 import { useCallback, useEffect, useState } from 'react';
 import { Download, Loader2, RefreshCcw, X } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -54,6 +55,7 @@ export default function RenewalTab() {
   useEffect(() => {
     if (!openRunning || !openAuditId) return;
     const t = setInterval(async () => {
+      if (!onScreen('tab-renewal')) return;
       const a = await loadAudit(openAuditId).catch(() => null);
       if (a && a.audit_status !== 'running' && a.rewrite_status !== 'generating') loadPosts();
     }, 5000);

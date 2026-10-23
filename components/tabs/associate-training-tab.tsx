@@ -2,6 +2,7 @@
 
 // Associate Training: today's short lesson to read, today's test on yesterday's lesson (plus the
 // questions answered wrong two days ago), results, and the level. The admin also sees everyone.
+import { onScreen } from '@/components/shared/on-screen';
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ChevronDown, GraduationCap, Loader2, RefreshCw, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -259,7 +260,7 @@ export default function AssociateTrainingTab() {
   }, [person]);
   useEffect(() => {
     const first = setTimeout(load, 0);
-    const t = setInterval(load, 60000);
+    const t = setInterval(() => onScreen('tab-associates') && load(), 60000);
     return () => {
       clearTimeout(first);
       clearInterval(t);
