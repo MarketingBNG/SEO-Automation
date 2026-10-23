@@ -1507,4 +1507,38 @@ writer follows, not a report about the research.>
   return { skillContent, researchSummary, sources, ownPerformanceNote };
 }
 
+// Re-checks the open issues of a draft that needs attention against the CURRENT article, with the
+// whole article and a topic brief as context: an issue is resolved when the article no longer makes
+// the mistake (fixed or removed), and stays open, with its correction, when it still does.
+export async function recheckIssues(draft, issues: string[], signal?) {
+  const brief = await buildTopicBrief({ title: draft.title, meta: draft.meta_description, content: draft.content_html }, signal);
+  const today = new Date().toISOString().slice(0, 10);
+  const system = `You are a senior US-India tax fact checker. Today is ${today}. A draft was held because a fact check
+left the numbered issues below open. The article may have been edited since. For EACH issue, read the
+whole current article and decide: "resolved" if the article no longer makes that mistake (the sentence
+was fixed, completed or removed), or "open" if it still does. For an open issue, check it on a primary
+source (irs.gov, ecfr.gov, uscode.house.gov, incometaxindia.gov.in, incometax.gov.in, rbi.org.in, the
+treaty text) and give the exact sentence still wrong and a short correction. An issue the source shows
+was itself wrong (the article was right) is "resolved". You have up to 10 web searches.
+
+${FACT_CHECK_METHOD}
+
+TOPIC BRIEF (latest law, current sections and forms, reader)
+${brief}
+
+Return ONLY JSON between ===JSON=== and ===END===:
+{"results":[{"n":1,"status":"resolved|open","sentence":"","correction":"","source_url":""}]}`;
+  const user = `ISSUES\n${issues.map((x, i) => `${i + 1}. ${x}`).join('\n')}\n\nCURRENT ARTICLE\nTitle: ${draft.title}\nMeta: ${draft.meta_description}\n\n${draft.content_html}`;
+  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 10, effort: 'high', model: FACT_CHECK_BRIEF_MODEL(), feature: 'fact-check' });
+  const m = text.match(/===JSON===([\s\S]*?)===END===/);
+  const parsed = JSON.parse((m ? m[1] : text).trim().replace(/^```(?:json)?/, '').replace(/```$/, ''));
+  const list = Array.isArray(parsed.results) ? parsed.results : [];
+  // An issue without a clear verdict stays open: nothing is cleared unchecked.
+  return issues.map((issue, i) => {
+    const r = list.find((x) => Number(x?.n) === i + 1);
+    if (r?.status === 'resolved') return { issue, open: false };
+    return { issue, open: true, text: r ? `Still open: "${r.sentence || ''}". ${r.correction ? `Correct version: ${r.correction}. ` : ''}${r.source_url ? `Source: ${r.source_url}` : ''}`.trim() : issue };
+  });
+}
+
 export { researchAndWriteBlog, generateDailyDigest, auditBlog, rewriteBlog, generateContentSkill, callClaude, factCheckDraft, verifyAndCorrect };

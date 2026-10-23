@@ -404,11 +404,14 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
         <GoesLive draft={draft} onChanged={() => { onChange(); loadDraft(false); }} />
 
         {draft.production_state === 'NEEDS_ATTENTION' && draft.validation_issues && (
-          <NoteList heading="Unresolved issues after auto-repair (fix manually before approving):">
-            {JSON.parse(draft.validation_issues).map((issue: string, i: number) => (
-              <li key={i}>{issue}</li>
-            ))}
-          </NoteList>
+          <>
+            <NoteList heading="Unresolved issues after auto-repair (fix manually before approving):">
+              {JSON.parse(draft.validation_issues).map((issue: string, i: number) => (
+                <li key={i}>{issue}</li>
+              ))}
+            </NoteList>
+            <RecheckIssues id={draft.id} count={JSON.parse(draft.validation_issues).length} onDone={() => { onChange(); loadDraft(false); }} />
+          </>
         )}
 
         {draft.validation_warnings && JSON.parse(draft.validation_warnings).length > 0 && (
@@ -864,6 +867,36 @@ function PublishProgress({ pub, secs }: { pub: any; secs: number }) {
           Open the post
         </a>
       )}
+    </div>
+  );
+}
+
+// Checks the open issues again against the current article (after a manual fix), with the whole blog
+// and a topic brief as context. Resolved issues are cleared; with none left the draft is ready for review.
+function RecheckIssues({ id, count, onDone }: { id: number; count: number; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  async function run() {
+    setBusy(true);
+    setMsg('Checking each issue against the whole blog. This takes 1 to 3 minutes...');
+    try {
+      const res = await fetch(`/api/drafts/${id}/recheck`, { method: 'POST' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'The check failed.');
+      setMsg(j.open ? `${j.resolved} of ${j.checked} resolved; ${j.open} still open (listed above).` : `All ${j.checked} issues are resolved. The draft is now ready for review.`);
+      onDone();
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <Button size="sm" variant="outline" disabled={busy} onClick={run}>
+        {busy && <Loader2 className="animate-spin" />}Check these {count} issue(s) again
+      </Button>
+      <span className="text-muted-foreground">{msg || 'After you fix the blog, this re-checks each issue with the full blog as context (uses a little AI credit).'}</span>
     </div>
   );
 }
