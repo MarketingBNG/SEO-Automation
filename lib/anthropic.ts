@@ -161,11 +161,13 @@ VOICE (USAIndiaCFO blog house style): ${voiceGuidelines}
 - Where the piece gives guidance, include a brief line noting it is general information, not
   individualized tax/legal advice.
 - Length: match what the pages ranking now cover. The request gives a LENGTH TARGET measured from the
-  current top results; aim for it. Without one, about ${maxWords} words. Never pad, and cut
+  current top results; aim for it. Without one, about ${maxWords} words. Never more than ${maxWords}
+  words in any case. Never pad, and cut
   background, generic definitions and repeated caveats before adding words. But completeness beats
   length: never shorten a rule by dropping its conditions, limits, timing, exceptions or the steps
-  around it (see COMPLETENESS in the playbook). If the topic cannot be covered fully near the target,
-  go over it and drop whole low-value sections instead, and say so in ===RESEARCH_NOTES===.
+  around it (see COMPLETENESS in the playbook). If the topic cannot be covered fully within the
+  limit, drop whole low-value sections (side topics, background) instead of going over, and say so
+  in ===RESEARCH_NOTES===.
 - Both sides of the border: where the topic touches both countries, cover the US side, the India side
   and how they connect (treaty relief, credits, reporting in both places).${playbookReference}${
     lessons ? `\n\nLESSONS LEARNED (from our reviewers' rejections, blogs held by checks, fact-check corrections and how published posts performed; follow them):\n${lessons}` : ''
@@ -929,9 +931,22 @@ No em dashes. Return ONLY: ===TITLE===<title>===META===<meta description>===CONT
   // Rewriting the whole article is long output: the stronger brief model at high effort does it
   // reliably (a small model at max effort can spend its output on thinking and searches and return
   // no article). The corrections already carry their sources, so few searches are needed.
+  // A correction must not grow the article: it may be at most 10% longer than before, and never
+  // past the length cap (unless the article was already longer). One retry with the count if it is.
+  const wordsOf = (html: string) => String(html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+  const cap = Math.max(parseInt(await settings.get('max_words'), 10) || 1600, Math.round(wordsOf(draft.content) * 1.1));
+  const contentOf = (x: string) => {
+    const i = x.indexOf('===CONTENT===');
+    return i < 0 ? '' : x.slice(i + 13, x.indexOf('===END===', i) < 0 ? undefined : x.indexOf('===END===', i));
+  };
   let text = '';
-  for (let attempt = 1; attempt <= 2 && !text.includes('===CONTENT==='); attempt++) {
-    ({ text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 5, effort: 'high', model: FACT_CHECK_BRIEF_MODEL(), feature: 'fact-check' }));
+  let note = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    ({ text } = await callClaude(system, [{ role: 'user', content: user + note }], signal, { maxUses: 5, effort: 'high', model: FACT_CHECK_BRIEF_MODEL(), feature: 'fact-check' }));
+    if (!text.includes('===CONTENT===')) continue;
+    const n = wordsOf(contentOf(text));
+    if (n <= cap) break;
+    note = `\n\nYOUR LAST ANSWER WAS ${n} WORDS. The corrected article must be at most ${cap} words: apply the same corrections, and cut repetition, background and low-value sections instead of adding.`;
   }
   const get = (a, b) => {
     const i = text.indexOf(a);
@@ -1026,7 +1041,10 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
   const chosen = chooseKeywords(keywordPlan, keyword);
   stage('plan', 8, `Keyword plan ready: ${chosen.secondary.length} secondary keywords, ${chosen.questions.length} questions. Measuring the pages ranking now…`, { progress: 0.3 });
 
-  const length = await topResultsLength(brief, parseInt(await settings.get('max_words'), 10) || 1600).catch(() => null);
+  const maxWordsCap = parseInt(await settings.get('max_words'), 10) || 1600;
+  const measured = await topResultsLength(brief, maxWordsCap).catch(() => null);
+  // The length target follows the pages ranking now, but never above the word cap set in Settings.
+  const length = measured ? { ...measured, max: Math.min(measured.max, maxWordsCap), median: Math.min(measured.median, maxWordsCap), min: Math.min(measured.min, Math.round(maxWordsCap * 0.8)) } : null;
   const cta = await ctaFor(keyword, '', notes);
   const known = await approvedFactsFor(keyword).catch(() => []);
   const expectedChars = (length?.median || 1800) * 8 + 4000;
