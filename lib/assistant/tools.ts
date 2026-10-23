@@ -391,7 +391,8 @@ function applyDraftEdits(html, edits) {
 
 async function saveDraftFields(draft, fields, summary) {
   const before = Object.fromEntries(Object.keys(fields).map((k) => [k, draft[k] ?? null]));
-  await prisma.drafts.update({ where: { id: draft.id }, data: { ...fields, updated_at: sqlNow() } });
+  const counted = fields.content_html != null ? { word_count: String(fields.content_html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length } : {};
+  await prisma.drafts.update({ where: { id: draft.id }, data: { ...fields, ...counted, updated_at: sqlNow() } });
   return {
     summary,
     targetType: 'draft',

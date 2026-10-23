@@ -191,7 +191,7 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   if (changed) {
     saved = await prisma.drafts.update({
       where: { id: draft.id },
-      data: { title: result.draft.title, meta_description: result.draft.meta, content_html: result.draft.content, updated_at: sqlNow() },
+      data: { title: result.draft.title, meta_description: result.draft.meta, content_html: result.draft.content, word_count: String(result.draft.content || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length, updated_at: sqlNow() },
     });
   }
   const record = { stamp: saved.updated_at, textHash: textHash(saved), ok: result.ok, rounds: result.rounds, corrected: changed, log: result.log, checkedAt: sqlNow(), inlineCounted: Boolean(startClean) };

@@ -82,7 +82,10 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   const data: any = {};
   if (title != null) data.title = title;
   if (meta_description != null) data.meta_description = meta_description;
-  if (content_html != null) data.content_html = content_html;
+  if (content_html != null) {
+    data.content_html = content_html;
+    data.word_count = String(content_html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+  }
   if (status != null) data.status = status;
   // The words are the same after an alt-text change, so updated_at (which the fact check is tied
   // to) moves only for the fields above.
