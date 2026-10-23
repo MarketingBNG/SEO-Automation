@@ -1,3 +1,4 @@
+import { markEditedAsChecked } from '@/lib/factCheckMark';
 import { NextRequest, NextResponse } from 'next/server';
 import sharp, { type Metadata } from 'sharp';
 import prisma from '@/lib/prisma';
@@ -38,6 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const next = removeNote(html, body.slot);
     if (next === html) return NextResponse.json({ error: 'That suggestion is no longer in the article.' }, { status: 409 });
     const updated = await prisma.drafts.update({ where: { id }, data: { content_html: next } });
+    await markEditedAsChecked(id, 'a person (image)').catch(() => {});
     await activity.log('draft.image_note_removed', { entityType: 'draft', entityId: id, details: `"${draft.title}": image suggestion ${body.slot + 1} removed`, actor });
     return NextResponse.json(updated);
   }
@@ -85,6 +87,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const img = await prisma.image_library.create({ data: { filename: file.name || key, path: key, mime_type: mimeFor(key), width: meta?.width ?? null, height: meta?.height ?? null, notes: alt } });
   await prisma.draft_images.create({ data: { draft_id: id, image_id: img.id } });
   const updated = await prisma.drafts.update({ where: { id }, data: { content_html: next } });
+  await markEditedAsChecked(id, 'a person (image)').catch(() => {});
   await activity.log('draft.image_placed', { entityType: 'draft', entityId: id, details: `"${draft.title}": image added (${alt.slice(0, 80)})`, actor });
   return NextResponse.json({ ...updated, imageKey: key });
 }

@@ -875,29 +875,32 @@ function PublishProgress({ pub, secs }: { pub: any; secs: number }) {
 // Checks the open issues again against the current article (after a manual fix), with the whole blog
 // and a topic brief as context. Resolved issues are cleared; with none left the draft is ready for review.
 function RecheckIssues({ id, count, onDone, compact = false }: { id: number; count: number; onDone: () => void; compact?: boolean }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'' | 'check' | 'fix'>('');
   const [msg, setMsg] = useState<string | null>(null);
-  async function run() {
-    setBusy(true);
-    setMsg('Checking each issue against the whole blog. This takes 1 to 3 minutes...');
+  async function run(fix: boolean) {
+    setBusy(fix ? 'fix' : 'check');
+    setMsg(fix ? 'Reading the whole blog, fixing each open issue in context, then checking again. This takes 2 to 5 minutes...' : 'Checking each issue against the whole blog. This takes 1 to 3 minutes...');
     try {
-      const res = await fetch(`/api/drafts/${id}/recheck`, { method: 'POST' });
+      const res = await fetch(`/api/drafts/${id}/recheck`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fix }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'The check failed.');
-      setMsg(j.open ? `${j.resolved} of ${j.checked} resolved; ${j.open} still open (listed above).` : `All ${j.checked} issues are resolved. The draft is now ready for review.`);
+      setMsg(j.open ? `${j.resolved} of ${j.checked} resolved${j.fixed ? ' (blog fixed and saved)' : ''}; ${j.open} still open.` : `All ${j.checked} issues are resolved${j.fixed ? ' and the blog is saved' : ''}. The draft is now ready for review.`);
       onDone();
     } catch (e: any) {
       setMsg(e.message);
     } finally {
-      setBusy(false);
+      setBusy('');
     }
   }
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <Button size="sm" variant="outline" disabled={busy} onClick={run}>
-        {busy && <Loader2 className="animate-spin" />}Check these {count} issue(s) again
+      <Button size="sm" disabled={Boolean(busy)} onClick={() => run(true)}>
+        {busy === 'fix' && <Loader2 className="animate-spin" />}Check and fix {count} issue(s)
       </Button>
-      {(msg || !compact) && <span className="text-muted-foreground">{msg || 'After you fix the blog, this re-checks each issue with the full blog as context (uses a little AI credit).'}</span>}
+      <Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => run(false)}>
+        {busy === 'check' && <Loader2 className="animate-spin" />}Only check
+      </Button>
+      {(msg || !compact) && <span className="text-muted-foreground">{msg || '"Check and fix" reads the whole blog, fixes each open issue where it is and keeps the rest of the blog consistent, then checks again (about $1 to $2 of AI credit). "Only check" just re-checks (about $0.50).'}</span>}
     </div>
   );
 }

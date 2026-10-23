@@ -1559,4 +1559,18 @@ Return ONLY JSON between ===JSON=== and ===END===:
   });
 }
 
+// Fixes the open issues of a draft in one pass over the whole article: each fix is made where the
+// mistake is, and anything elsewhere in the blog that the fix affects (an example, a table row, the
+// FAQ, the summary) is brought in line, so the blog stays consistent. Same rules as the automatic
+// corrections (length cap, house voice, sources).
+export async function fixIssues(draft, openIssues: string[], signal?) {
+  const bad = openIssues.map((x) => ({
+    claim: `${x}\nAlso update every other place in the article that this fix affects (examples, tables, FAQ, summary), so the whole blog agrees.`,
+    verdict: 'incorrect',
+    correction: '',
+    source_url: '',
+  }));
+  return correctClaims({ title: draft.title, meta: draft.meta_description, content: draft.content_html }, bad, signal);
+}
+
 export { researchAndWriteBlog, generateDailyDigest, auditBlog, rewriteBlog, generateContentSkill, callClaude, factCheckDraft, verifyAndCorrect };
