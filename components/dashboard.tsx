@@ -5,14 +5,14 @@ import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
   Activity, BarChart3, BookOpen, Bot, BrainCircuit, CalendarClock, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
-  LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, ShieldCheck, Sparkles, Users,
+  LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, Share2, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
   SidebarInput, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { JobProgress } from '@/components/shared/job-progress';
@@ -116,6 +116,8 @@ export default function Dashboard() {
   // A page mounts on first visit and then stays mounted (hidden), so coming back is instant and a
   // running generation keeps its progress and Stop button while you look at another page.
   const [visited, setVisited] = useState<Set<string>>(() => new Set([isTab(initial) ? initial : 'home']));
+  const [socialLink, setSocialLink] = useState<{ social: string | null; socialLabel: string } | null>(null);
+  useEffect(() => { fetch('/api/links').then((r) => r.json()).then(setSocialLink).catch(() => {}); }, []);
 
   // Links such as /?tab=drafts from inside a page switch the open page too.
   const paramTab = params.get('tab');
@@ -238,6 +240,12 @@ export default function Dashboard() {
             <RefreshCw className="size-4" />
             <span className="hidden md:inline">Refresh</span>
           </Button>
+          {socialLink?.social && (
+            <a href={socialLink.social} target="_blank" rel="noopener noreferrer" className={`${buttonVariants({ variant: 'outline', size: 'sm' })} shrink-0`} title={`Open the ${socialLink.socialLabel} dashboard`}>
+              <Share2 className="size-4" />
+              <span className="hidden md:inline">{socialLink.socialLabel}</span>
+            </a>
+          )}
           <StatusLight />
           <ThemeToggle />
         </header>
