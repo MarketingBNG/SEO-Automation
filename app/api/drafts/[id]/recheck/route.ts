@@ -38,6 +38,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       open = again.filter((r) => r.open).map((r) => String(r.text || r.issue));
     }
     await prisma.drafts.update({ where: { id }, data: { validation_issues: JSON.stringify(open), production_state: open.length ? 'NEEDS_ATTENTION' : 'READY_FOR_REVIEW' } });
+    // All resolved: the blog's old publishing-hold reasons no longer apply.
+    if (!open.length) await prisma.blog_schedule.updateMany({ where: { draft_id: id, status: 'held' }, data: { hold_reasons: '[]' } });
     await activity.log('draft.issues_rechecked', { actor: await getActor(), entityType: 'draft', entityId: id, details: `${fix ? 'Checked and fixed: ' : ''}${issues.length - open.length} of ${issues.length} issue(s) resolved; ${open.length} still open.` });
     return NextResponse.json({ checked: issues.length, resolved: issues.length - open.length, open: open.length, fixed });
   } catch (err: any) {
