@@ -12,7 +12,7 @@ import {
   SidebarInput, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Input } from '@/components/ui/input';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { JobProgress } from '@/components/shared/job-progress';
@@ -195,6 +195,16 @@ export default function Dashboard() {
           })}
         </SidebarContent>
         <SidebarFooter>
+          {socialLink?.social && (
+            <a
+              href={socialLink.social}
+              className="flex items-center gap-2 rounded-md px-2 py-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:justify-center"
+              title={`Open the ${socialLink.socialLabel} dashboard in this tab`}
+            >
+              <Share2 className="size-4 shrink-0" />
+              <span className="truncate group-data-[collapsible=icon]:hidden">{socialLink.socialLabel}</span>
+            </a>
+          )}
           <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:hidden">
             <div className="min-w-0 flex-1 text-xs">
               <div className="truncate font-medium">{session?.user?.name}</div>
@@ -240,12 +250,6 @@ export default function Dashboard() {
             <RefreshCw className="size-4" />
             <span className="hidden md:inline">Refresh</span>
           </Button>
-          {socialLink?.social && (
-            <a href={socialLink.social} target="_blank" rel="noopener noreferrer" className={`${buttonVariants({ variant: 'outline', size: 'sm' })} shrink-0`} title={`Open the ${socialLink.socialLabel} dashboard`}>
-              <Share2 className="size-4" />
-              <span className="hidden md:inline">{socialLink.socialLabel}</span>
-            </a>
-          )}
           <StatusLight />
           <ThemeToggle />
         </header>
