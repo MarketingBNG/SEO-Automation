@@ -393,6 +393,7 @@ async function saveDraftFields(draft, fields, summary) {
   const before = Object.fromEntries(Object.keys(fields).map((k) => [k, draft[k] ?? null]));
   const counted = fields.content_html != null ? { word_count: String(fields.content_html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length } : {};
   await prisma.drafts.update({ where: { id: draft.id }, data: { ...fields, ...counted, updated_at: sqlNow() } });
+  await (await import('../factCheckMark')).markEditedAsChecked(draft.id, 'the Assistant').catch(() => {});
   return {
     summary,
     targetType: 'draft',
