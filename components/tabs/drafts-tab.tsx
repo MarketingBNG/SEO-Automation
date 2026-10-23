@@ -81,8 +81,9 @@ export default function DraftsTab() {
                     </StatusBadge>
                   )}
                   {d.attention && (
-                    <div className="mt-1 max-w-xs text-xs text-muted-foreground" title={d.attention.first.join('\n\n')}>
-                      {d.attention.summary} Open the draft to see each one.
+                    <div className="mt-1 max-w-xs space-y-1 text-xs text-muted-foreground" title={d.attention.first.join('\n\n')}>
+                      <div>{d.attention.summary} Open the draft to see each one.</div>
+                      <RecheckIssues id={d.id} count={d.attention.count} onDone={load} compact />
                     </div>
                   )}
                 </td>
@@ -873,7 +874,7 @@ function PublishProgress({ pub, secs }: { pub: any; secs: number }) {
 
 // Checks the open issues again against the current article (after a manual fix), with the whole blog
 // and a topic brief as context. Resolved issues are cleared; with none left the draft is ready for review.
-function RecheckIssues({ id, count, onDone }: { id: number; count: number; onDone: () => void }) {
+function RecheckIssues({ id, count, onDone, compact = false }: { id: number; count: number; onDone: () => void; compact?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   async function run() {
@@ -896,7 +897,7 @@ function RecheckIssues({ id, count, onDone }: { id: number; count: number; onDon
       <Button size="sm" variant="outline" disabled={busy} onClick={run}>
         {busy && <Loader2 className="animate-spin" />}Check these {count} issue(s) again
       </Button>
-      <span className="text-muted-foreground">{msg || 'After you fix the blog, this re-checks each issue with the full blog as context (uses a little AI credit).'}</span>
+      {(msg || !compact) && <span className="text-muted-foreground">{msg || 'After you fix the blog, this re-checks each issue with the full blog as context (uses a little AI credit).'}</span>}
     </div>
   );
 }

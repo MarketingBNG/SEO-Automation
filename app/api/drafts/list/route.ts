@@ -48,6 +48,7 @@ export async function GET() {
               facts ? `${facts} fact-check point${facts === 1 ? '' : 's'} still open` : '',
               issues.length - facts ? `${issues.length - facts} other issue${issues.length - facts === 1 ? '' : 's'}` : '',
             ].filter(Boolean).join(', ') + ` after ${d.repair_attempts || 0} automatic repair${d.repair_attempts === 1 ? '' : 's'}.`,
+            count: issues.length,
             first: issues.slice(0, 3).map((i) => (i.length > 220 ? i.slice(0, 220) + '...' : i)),
           }
         : null;
