@@ -34,6 +34,31 @@ export async function competitorSites(): Promise<{ competitors: string[]; sites:
   return { competitors, sites };
 }
 
+// Directories that fit a US-India CFO, tax and accounting firm: business listings people check before
+// hiring, accountant directories of the software we work with, startup and company databases, and
+// US-India chambers. Offered first, before anything Claude finds.
+export const CORE_DIRECTORIES = [
+  { name: 'Google Business Profile', domain: 'business.google.com', why: 'The listing clients see in Google Search and Maps.', type: 'local listing' },
+  { name: 'Bing Places for Business', domain: 'bingplaces.com', why: 'Business listing in Bing and Microsoft search.', type: 'local listing' },
+  { name: 'Apple Business Connect', domain: 'businessconnect.apple.com', why: 'Business listing in Apple Maps.', type: 'local listing' },
+  { name: 'LinkedIn Company Page', domain: 'linkedin.com', why: 'Where founders and CFOs check a firm before hiring.', type: 'business profile' },
+  { name: 'Crunchbase', domain: 'crunchbase.com', why: 'Company database founders and investors use.', type: 'startup database' },
+  { name: 'QuickBooks Find a ProAdvisor', domain: 'quickbooks.intuit.com', why: 'Directory of accountants certified on QuickBooks, used by US small businesses.', type: 'accountant directory' },
+  { name: 'Xero Advisor Directory', domain: 'xero.com', why: 'Directory of accountants and bookkeepers certified on Xero.', type: 'accountant directory' },
+  { name: 'Zoho Books Partner Directory', domain: 'zoho.com', why: 'Partner directory for accounting firms using Zoho, common with Indian founders.', type: 'accountant directory' },
+  { name: 'Gusto Partner Directory', domain: 'gusto.com', why: 'Directory of accountants who run US payroll on Gusto.', type: 'accountant directory' },
+  { name: 'Better Business Bureau', domain: 'bbb.org', why: 'Trust listing US clients check before hiring a service firm.', type: 'review site' },
+  { name: 'Justdial', domain: 'justdial.com', why: 'India business listing for CA and tax consultants.', type: 'local listing' },
+  { name: 'Sulekha', domain: 'sulekha.com', why: 'India services directory with CA and tax categories.', type: 'local listing' },
+  { name: 'Indo-American Chamber of Commerce', domain: 'iaccindia.com', why: 'US-India business chamber with a member directory.', type: 'chamber' },
+];
+
+// Sites that do not fit us: marketing, design, SEO, software and app agency portals, job and gig sites.
+const OFF_NICHE = /\b(marketing|seo|digital agenc|advertis|design|web ?dev|app develop|software develop|it services|ui\/ux|branding|freelanc|gig|jobs?\b|job board|career|resume|upwork|fiverr|99designs|dribbble|behance|designrush|goodfirms|upcity|sortlist|agency spotter|themanifest)\b/i;
+export function offNiche(text: string) {
+  return OFF_NICHE.test(String(text || ''));
+}
+
 export async function findDirectories(count: number, exclude: string[]) {
   const { competitors, sites } = await competitorSites();
   const gap = sites.length ? sites.map((x) => `${x.domain} (links to: ${x.linksTo.join(', ')})`).join('\n') : 'none available';
@@ -42,7 +67,7 @@ export async function findDirectories(count: number, exclude: string[]) {
 Our competitors in this niche: ${competitors.join(', ') || 'not known; find firms that sell US-India tax, accounting and CFO services with a web search'}.
 Rules, all required:
 - PREFER sites where these competitors (or other US-India tax, accounting or CFO firms) are already listed or have a profile. Check with web search (for example search the site for a competitor's name) and say which competitor you found there.
-- The site must let an accounting, tax, CFO, finance or professional-services firm create its own listing or company profile. NEVER sites that only list advertising, marketing, design or software agencies, NEVER job portals or job boards, never freelancer gig sites, never news sites or blogs that sell posts.
+- The site's audience must be people who hire an accountant, tax adviser or CFO (founders, small businesses, NRIs), and it must let an accounting, tax, CFO or finance firm create its own listing. NEVER marketing, SEO, design, software or app agency portals (DesignRush, GoodFirms, UpCity, Sortlist and the like), NEVER job portals or job boards, never freelancer gig sites, never news sites or blogs that sell posts. If you are not sure a site fits, leave it out: fewer, relevant sites are better than many.
 - A real, established, live directory or listing platform with real traffic: B2B service marketplaces that include accounting/finance, accounting and tax directories, CPA/CA directories, startup databases, US and India business listings, chambers of commerce, review platforms for professional services.
 - Free or normal company profile. Never paid-link schemes, link farms, PBNs, mass-submission lists or spam directories.
 - Confirm the sign-up or "list your firm" page exists by opening it. Never invent a domain or URL.
@@ -89,8 +114,26 @@ export async function removeDuplicateDirectories(): Promise<number> {
   return removed;
 }
 
+// Open directory tasks for sites outside our niche (marketing, design, software agency portals, job
+// and gig sites) are taken off the list. Done ones stay as a record.
+export async function removeOffNicheDirectories(): Promise<number> {
+  const rows = await prisma.backlink_tasks.findMany({ where: { method: { contains: 'irectory' }, status: { in: ['manual', 'planned'] } } });
+  let removed = 0;
+  for (const r of rows) {
+    if (!offNiche(`${r.target_site} ${r.note || ''}`)) continue;
+    await prisma.backlink_tasks.update({ where: { id: r.id }, data: { status: 'skipped', note: `Removed: not relevant to a CFO, tax and accounting firm. ${r.note || ''}`.slice(0, 1000) } });
+    removed++;
+  }
+  if (removed) await activity.log('directories.offniche_removed', { details: `${removed} directory task(s) outside our niche removed` });
+  return removed;
+}
+
 // Called by the scheduler every 15 minutes; runs once a day after 10:00 IST.
 export async function directoriesTick(now = new Date(), find = findDirectories) {
+  if (!(await settings.get('directories_offniche_v1'))) {
+    await removeOffNicheDirectories().catch(() => 0);
+    await settings.set('directories_offniche_v1', new Date().toISOString());
+  }
   if (!(await settings.get('directories_dedupe_v1'))) {
     await removeDuplicateDirectories().catch(() => 0);
     await settings.set('directories_dedupe_v1', new Date().toISOString());
@@ -111,12 +154,14 @@ export async function directoriesTick(now = new Date(), find = findDirectories) 
   const usedKeys = new Set(used.flatMap((u) => directoryKeys(u.target_site)));
   // What Claude is told to avoid: every directory name and domain we already have a task for.
   const exclude = [...new Set(used.map((u) => u.target_site.replace(/\s*\((?![a-z0-9-]+\.[a-z.]+\)).*?\)\s*/gi, ' ').trim()).filter(Boolean))].slice(0, 300);
-  const found = await find(perDay + 3, exclude);
+  const core = CORE_DIRECTORIES.filter((c) => !directoryKeys(`${c.name} (${c.domain})`).some((k) => usedKeys.has(k))).map((c) => ({ ...c, signupUrl: `https://${c.domain}` }));
+  const found = [...core.slice(0, perDay), ...(core.length >= perDay ? [] : await find(perDay + 3, exclude))];
   let added = 0;
   for (const d of found) {
     if (added >= perDay) break;
     const domain = domainOf(d.domain || d.signupUrl);
     if (!domain || domain.endsWith(domainOf(SITE()))) continue;
+    if (offNiche(`${d.name} ${domain} ${d.why} ${d.type}`)) continue;
     // Same directory as one we already gave (by name or domain): never again.
     const keys = directoryKeys(`${d.name || ''} (${domain})`);
     if (keys.some((k) => usedKeys.has(k))) continue;
