@@ -74,14 +74,16 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.31 0.09 268);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* Left sidebar: dark navy with golden accents, to match the Social Media dashboard.
+     Kept the same in light and dark mode, exactly like the social dashboard's navy rail. */
+  --sidebar: #0B1430;
+  --sidebar-foreground: oklch(1 0 0 / 0.85);
+  --sidebar-primary: #E8B04B;
+  --sidebar-primary-foreground: #0B1430;
+  --sidebar-accent: oklch(1 0 0 / 0.10);
+  --sidebar-accent-foreground: oklch(1 0 0);
+  --sidebar-border: oklch(1 0 0 / 0.10);
+  --sidebar-ring: #E8B04B;
 }
 
 .dark {
@@ -108,14 +110,36 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.75 0.1 265);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Same navy + golden sidebar in dark mode. */
+  --sidebar: #0B1430;
+  --sidebar-foreground: oklch(1 0 0 / 0.85);
+  --sidebar-primary: #E8B04B;
+  --sidebar-primary-foreground: #0B1430;
+  --sidebar-accent: oklch(1 0 0 / 0.10);
+  --sidebar-accent-foreground: oklch(1 0 0);
+  --sidebar-border: oklch(1 0 0 / 0.10);
+  --sidebar-ring: #E8B04B;
+}
+
+/* The active page in the left rail is golden (like the Social Media dashboard's
+   active item). Hover stays a soft white wash; the selected page is full gold.
+   Unlayered so it wins over the component's default accent styling. */
+[data-slot="sidebar-menu-button"][data-active],
+[data-slot="sidebar-menu-button"][data-active]:hover {
+  background-color: var(--sidebar-primary);
+  color: var(--sidebar-primary-foreground);
+}
+[data-slot="sidebar-menu-button"][data-active] svg {
+  color: var(--sidebar-primary-foreground);
+}
+/* Search box blends into the navy rail instead of a bright white block. */
+[data-slot="sidebar-input"] {
+  background-color: oklch(1 0 0 / 0.08);
+  border-color: oklch(1 0 0 / 0.14);
+  color: oklch(1 0 0 / 0.9);
+}
+[data-slot="sidebar-input"]::placeholder {
+  color: oklch(1 0 0 / 0.5);
 }
 
 @layer base {

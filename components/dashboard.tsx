@@ -163,7 +163,7 @@ export default function Dashboard() {
             <img src="/logo-icon-512.png" alt="USAIndiaCFO" className="size-8 shrink-0 rounded-md" />
             <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
               <span className="truncate font-semibold">Growth Center</span>
-              <span className="truncate text-xs text-muted-foreground">SEO &amp; Content Automation</span>
+              <span className="truncate text-xs text-[#E8B04B]">SEO &amp; Content Automation</span>
             </div>
           </div>
         </SidebarHeader>
@@ -198,7 +198,7 @@ export default function Dashboard() {
           {socialLink?.social && (
             <a
               href={socialLink.social}
-              className="flex items-center gap-2 rounded-md px-2 py-2 text-xs text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:justify-center"
+              className="flex items-center gap-2 rounded-md px-2 py-2 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:justify-center"
               title={`Open the ${socialLink.socialLabel} dashboard in this tab`}
             >
               <Share2 className="size-4 shrink-0" />
@@ -208,14 +208,14 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:hidden">
             <div className="min-w-0 flex-1 text-xs">
               <div className="truncate font-medium">{session?.user?.name}</div>
-              <div className="truncate text-muted-foreground">{session?.user?.email}</div>
+              <div className="truncate text-sidebar-foreground/60">{session?.user?.email}</div>
               {process.env.NEXT_PUBLIC_BUILD_TIME && (
-                <div className="truncate text-muted-foreground" title="When this version of the dashboard was built">
+                <div className="truncate text-sidebar-foreground/60" title="When this version of the dashboard was built">
                   Version: {new Date(process.env.NEXT_PUBLIC_BUILD_TIME).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })} IST
                 </div>
               )}
             </div>
-            <Button variant="ghost" size="icon" aria-label="Sign out" onClick={() => signOut({ callbackUrl: '/login' })}>
+            <Button variant="ghost" size="icon" aria-label="Sign out" className="text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" onClick={() => signOut({ callbackUrl: '/login' })}>
               <LogOut className="size-4" />
             </Button>
           </div>
