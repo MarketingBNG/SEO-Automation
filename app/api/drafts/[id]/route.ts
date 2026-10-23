@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
@@ -93,6 +94,20 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   if (cover_alt != null) data.cover_alt = String(cover_alt).trim().slice(0, 200) || null;
   if (!Object.keys(data).length) return NextResponse.json({ error: 'Nothing to change' }, { status: 400 });
   const updated: any = await prisma.drafts.update({ where: { id: nid }, data });
+  // An edit made from Claude Code (the edit token) is fact-checked there, without API credits. Record
+  // the new text as checked so the dashboard's paid "fact check before publishing" does not run
+  // again just because the words changed.
+  if (viaToken && (title != null || meta_description != null || content_html != null)) {
+    const sched = await prisma.blog_schedule.findFirst({ where: { draft_id: nid } });
+    if (sched) {
+      const textHash = createHash('sha256').update(`${updated.title || ''}\n${updated.meta_description || ''}\n${updated.content_html || ''}`).digest('hex');
+      const prev = sched.fact_check ? JSON.parse(sched.fact_check) : {};
+      await prisma.blog_schedule.update({
+        where: { id: sched.id },
+        data: { fact_check: JSON.stringify({ ...prev, stamp: updated.updated_at, textHash, ok: true, rounds: 0, corrected: false, checkedAt: sqlNow(), checkedIn: 'Claude Code (no API credits)' }) },
+      });
+    }
+  }
 
   // Approving here counts for the monthly calendar too, so the blog publishes at its slot instead
   // of waiting out the 48 hours. Tax, legal and compliance blogs still need the named CA/CPA, which
