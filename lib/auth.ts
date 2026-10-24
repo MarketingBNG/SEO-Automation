@@ -26,7 +26,11 @@ export const authOptions: NextAuthOptions = {
     async signIn({ profile, user }) {
       const p = profile as { email?: string; email_verified?: boolean } | undefined;
       if (p && p.email_verified === false) return false;
-      return isAllowed(p?.email || user?.email);
+      const email = p?.email || user?.email;
+      if (!isAllowed(email)) return false;
+      // Only people the admin has added on the Team page (and the owner) can sign in.
+      const { isMember } = await import('./team');
+      return isMember(email!).catch(() => false);
     },
     // Role and block status travel in the session token, so every request can be checked on the
     // server without a database call. Refreshed whenever the session is read (every minute).
@@ -48,6 +52,11 @@ export const authOptions: NextAuthOptions = {
             token.access = a.access;
             token.grants = a.grants;
           }
+        } else {
+          // Not on the team list (for example an old session): no access until the admin adds them.
+          token.blocked = true;
+          token.access = null;
+          token.grants = [];
         }
       }
       return token;

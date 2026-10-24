@@ -24,7 +24,7 @@ function LoginInner() {
           <Alert variant="destructive">
             <AlertDescription>
               {error === 'AccessDenied'
-                ? 'Only @usaindiacfo.com Google accounts can sign in.'
+                ? 'This account does not have access. Ask the admin to add your @usaindiacfo.com email on the Team page.'
                 : 'Sign-in failed. Please try again.'}
             </AlertDescription>
           </Alert>
