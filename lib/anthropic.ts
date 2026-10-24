@@ -1206,7 +1206,7 @@ Return plain text in EXACTLY this format:
 // gates the writer itself is held to: SEO, AEO, GEO/AI, voice/humanize, accuracy, and CTA.
 // Distinct from researchAndWriteBlog: this reviews something that already exists, it doesn't
 // write anything new.
-async function auditBlog({ title, content, sourceUrl }) {
+async function auditBlog({ title, content, sourceUrl, signal }: any) {
   // Google's live "People also ask" questions for the post's topic, so the audit can check the FAQ
   // against what searchers actually ask.
   let peopleAlsoAsk: any[] = [];
@@ -1285,7 +1285,7 @@ If the piece has no checkable hard claims, leave this section empty.>
     ? `Audit the blog post at this URL: ${sourceUrl}\n\nHere is the raw fetched page content (it includes navigation/header/footer noise - identify and audit only the actual article body):\n\n${content.slice(0, 20000)}`
     : `Audit this blog post${title ? ` titled "${title}"` : ''}:\n\n${content.slice(0, 20000)}`;
 
-  const { text } = await callClaude(systemPrompt, [{ role: 'user', content: userPrompt }], undefined, { maxUses: 8, feature: 'audit' });
+  const { text } = await callClaude(systemPrompt, [{ role: 'user', content: userPrompt }], signal, { maxUses: 8, feature: 'audit' });
 
   const get = (start, end) => {
     const startIdx = text.indexOf(start);
@@ -1384,7 +1384,7 @@ ${content.slice(0, 20000)}`;
   let validation: any;
 
   while (attempt <= MAX_REPAIR_ATTEMPTS) {
-    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages, undefined, { feature: 'audit' });
+    const { text: rawText, assistantMessages } = await callClaude(systemPrompt, messages, signal, { feature: 'audit' });
     result = parseBlogResponse(rawText);
     validation = await validateDraft({ title: result.title, meta: result.meta, content: result.content, facts: result.facts, paaQuestions });
 

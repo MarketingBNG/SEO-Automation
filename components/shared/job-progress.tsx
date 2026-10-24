@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Square } from 'lucide-react';
 import { Countdown } from './countdown';
 
 export const JOBS_CHANGED = 'growth-center:jobs-changed';
@@ -9,6 +9,9 @@ export const JOBS_CHANGED = 'growth-center:jobs-changed';
 export function jobsChanged() {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(JOBS_CHANGED));
 }
+
+// Background jobs that have a Stop button (audits and rewrites from "Check a blog").
+const STOPPABLE = /^(audit|rewrite)-\d+$/;
 
 // Live progress bars for work running in the background (strategy generation, blog writing),
 // shown under the dashboard header on every tab. Polls /api/progress every 5 seconds while
@@ -26,6 +29,20 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
   });
   const [paused, setPaused] = useState<string | null>(null);
   const [credits80, setCredits80] = useState(false);
+  const [stopping, setStopping] = useState<string | null>(null);
+
+  async function stopJob(j: any) {
+    if (!window.confirm(`Stop "${j.label}" now? It will not finish, and you can run it again later.`)) return;
+    setStopping(j.id);
+    try {
+      const r = await fetch('/api/audit/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: j.id }) });
+      const json = await r.json().catch(() => ({}));
+      if (!r.ok) window.alert(json.error || 'Could not stop it.');
+    } finally {
+      setStopping(null);
+      jobsChanged();
+    }
+  }
 
   useEffect(() => {
     let stop = false;
@@ -105,25 +122,53 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
         </div>
       )}
       {jobs.map((j) => (
-        <button key={`${j.kind}-${j.id}`} type="button" onClick={() => onOpen?.(j.kind)} className="block w-full text-left">
+        <div
+          key={`${j.kind}-${j.id}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => onOpen?.(j.kind)}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpen?.(j.kind)}
+          className="block w-full cursor-pointer text-left"
+        >
           <div className="flex items-center gap-2 text-xs">
-            <Loader2 className={`size-3.5 shrink-0 ${j.paused ? "" : "animate-spin"}`} />
+            {/* Gold pulse while working, like the Social Media dashboard; still when paused. */}
+            <span className="relative flex size-2.5 shrink-0">
+              {!j.paused && <span className="absolute inline-flex size-full animate-ping rounded-full bg-[#E8B04B] opacity-75" />}
+              <span className="relative inline-flex size-2.5 rounded-full bg-[#E8B04B]" />
+            </span>
             <span className="truncate font-medium">{j.label}</span>
             <span className="truncate text-muted-foreground">{j.stage}</span>
             <span className="ml-auto flex shrink-0 items-center gap-2 tabular-nums">
               {!j.paused && <Countdown remaining={j.remaining} elapsed={j.elapsed} overdue={j.overdue} typical={j.typical} stageElapsed={j.stageElapsed} stageTypical={j.stageTypical} stageLabel={j.stageLabel} ifRepair={j.ifRepair} className="hidden sm:inline" />}
               {j.percent !== null && j.percent !== undefined && <span>{j.percent}%</span>}
+              {STOPPABLE.test(String(j.id)) && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void stopJob(j);
+                  }}
+                  disabled={stopping === j.id}
+                  className="flex items-center gap-1 rounded-md border border-red-500/40 px-1.5 py-0.5 font-medium text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+                  title="Stop this job now. The AI call in flight is cut off, so no more credits are spent on it."
+                >
+                  <Square className="size-3 fill-current" />
+                  {stopping === j.id ? 'Stopping…' : 'Stop'}
+                </button>
+              )}
             </span>
           </div>
           {!j.paused && <Countdown remaining={j.remaining} elapsed={j.elapsed} overdue={j.overdue} typical={j.typical} stageElapsed={j.stageElapsed} stageTypical={j.stageTypical} stageLabel={j.stageLabel} ifRepair={j.ifRepair} className="block text-[11px] sm:hidden" />}
           <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            {j.percent !== null && j.percent !== undefined ? (
-              <div className="h-full rounded-full bg-primary transition-all duration-700" style={{ width: `${Math.max(2, j.percent)}%` }} />
-            ) : (
-              <div className="h-full rounded-full bg-primary/60 transition-all duration-700" style={{ width: `${Math.min(95, Math.max(4, ((j.elapsed || 0) / Math.max(1, (j.elapsed || 0) + (j.remaining || 1))) * 100))}%` }} />
-            )}
+            {/* Navy-to-gold bar with a moving shine, the same design as the Social Media dashboard. */}
+            <div
+              className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-[#1B2A5E] via-[#E8B04B] to-[#F6D58E] shadow-[0_0_8px_rgba(232,176,75,0.6)] transition-all duration-700"
+              style={{ width: `${j.percent !== null && j.percent !== undefined ? Math.max(2, j.percent) : Math.min(95, Math.max(4, ((j.elapsed || 0) / Math.max(1, (j.elapsed || 0) + (j.remaining || 1))) * 100))}%` }}
+            >
+              {!j.paused && <span className="absolute inset-0 animate-[shine_1.2s_linear_infinite] bg-gradient-to-r from-transparent via-white/60 to-transparent" />}
+            </div>
           </div>
-        </button>
+        </div>
       ))}
     </div>
   );

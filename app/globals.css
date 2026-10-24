@@ -153,6 +153,9 @@
     @apply font-sans;
   }
 }
+/* Moving shine on progress bars (same as the Social Media dashboard). */
+@keyframes shine { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
 /* Rendered article HTML (drafts, audits, rewrites, assistant previews) */
 @layer components {
   .prose-article { font-family: var(--font-serif), Georgia, serif; line-height: 1.7; }

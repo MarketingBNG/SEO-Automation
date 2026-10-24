@@ -10,8 +10,10 @@ import * as activity from './activity';
 import { startTimer, endTimer } from './jobTimer';
 import { parseAuditRow } from './audits';
 
-const g = globalThis as unknown as { __auditJobs?: Set<number> };
+const g = globalThis as unknown as { __auditJobs?: Set<number>; __auditStops?: Map<string, AbortController> };
 const running = (g.__auditJobs ||= new Set<number>());
+// One controller per running audit or rewrite, so a person can stop it (Stop in the progress bar).
+const stops = (g.__auditStops ||= new Map<string, AbortController>());
 const STALE_MIN = 45;
 
 function titleFromHtml(html: string): string | null {
@@ -52,9 +54,11 @@ export async function startAudit({ title, contentHtml, sourceUrl, wpPostId, acto
 async function runAudit(id: number, { title, content, sourceUrl, actor }: any) {
   running.add(id);
   const key = `audit-${id}`;
+  const stop = new AbortController();
+  stops.set(key, stop);
   startTimer(key, 'audit', `Audit: ${title || sourceUrl || `#${id}`}`);
   try {
-    const result = await auditBlog({ title, content, sourceUrl });
+    const result = await auditBlog({ title, content, sourceUrl, signal: stop.signal });
     await prisma.blog_audits.update({
       where: { id },
       data: { verdict: result.verdict, summary: result.summary, issues: JSON.stringify(result.issues), suggestions: JSON.stringify(result.suggestions), facts: JSON.stringify(result.facts), people_also_ask: JSON.stringify(result.peopleAlsoAsk || []), audit_status: 'ready', audit_error: null },
@@ -62,11 +66,18 @@ async function runAudit(id: number, { title, content, sourceUrl, actor }: any) {
     await activity.log('audit.completed', { entityType: 'blog_audit', entityId: id, details: `"${title || sourceUrl}" → ${result.verdict}, ${result.issues.length} issue(s)`, actor });
     await endTimer(key, true);
   } catch (err: any) {
-    await prisma.blog_audits.update({ where: { id }, data: { audit_status: 'failed', audit_error: String(err?.message || err).slice(0, 500) } }).catch(() => {});
-    await activity.log('audit.failed', { entityType: 'blog_audit', entityId: id, details: `"${title || sourceUrl}": ${String(err?.message || err).slice(0, 200)}`, actor }).catch(() => {});
+    if (stop.signal.aborted) {
+      const by = String(stop.signal.reason || 'someone');
+      await prisma.blog_audits.update({ where: { id }, data: { audit_status: 'failed', audit_error: `Stopped by ${by}. Run the audit again when you want it.` } }).catch(() => {});
+      await activity.log('audit.stopped', { entityType: 'blog_audit', entityId: id, details: `"${title || sourceUrl}": audit stopped`, actor: by }).catch(() => {});
+    } else {
+      await prisma.blog_audits.update({ where: { id }, data: { audit_status: 'failed', audit_error: String(err?.message || err).slice(0, 500) } }).catch(() => {});
+      await activity.log('audit.failed', { entityType: 'blog_audit', entityId: id, details: `"${title || sourceUrl}": ${String(err?.message || err).slice(0, 200)}`, actor }).catch(() => {});
+    }
     await endTimer(key, false);
   } finally {
     running.delete(id);
+    stops.delete(key);
   }
 }
 
@@ -86,9 +97,11 @@ async function runRewrite(audit: any, actor?: string | null) {
   const id = audit.id;
   running.add(id);
   const key = `rewrite-${id}`;
+  const stop = new AbortController();
+  stops.set(key, stop);
   startTimer(key, 'rewrite', `Rewrite: ${audit.title || `#${id}`}`);
   try {
-    const result: any = await rewriteBlog({ title: audit.title, content: audit.content_html, issues: JSON.parse(audit.issues || '[]'), suggestions: JSON.parse(audit.suggestions || '[]') });
+    const result: any = await rewriteBlog({ title: audit.title, content: audit.content_html, issues: JSON.parse(audit.issues || '[]'), suggestions: JSON.parse(audit.suggestions || '[]'), signal: stop.signal });
     await prisma.blog_audits.update({
       where: { id },
       data: { rewrite_title: result.title, rewrite_content_html: result.content, rewrite_meta: result.meta || null, rewrite_people_also_ask: JSON.stringify(result.peopleAlsoAsk || []), rewrite_status: 'ready', rewrite_error: null },
@@ -96,12 +109,36 @@ async function runRewrite(audit: any, actor?: string | null) {
     await activity.log('audit.rewritten', { entityType: 'blog_audit', entityId: id, details: `"${result.title}", ${result.productionState}, ${result.repairAttempts} repair attempt(s)`, actor });
     await endTimer(key, true);
   } catch (err: any) {
-    await prisma.blog_audits.update({ where: { id }, data: { rewrite_status: audit.rewrite_content_html ? 'ready' : null, rewrite_error: String(err?.message || err).slice(0, 500) } }).catch(() => {});
-    await activity.log('audit.rewrite_failed', { entityType: 'blog_audit', entityId: id, details: `"${audit.title}": ${String(err?.message || err).slice(0, 200)}`, actor }).catch(() => {});
+    const stopped = stop.signal.aborted;
+    const by = String(stop.signal.reason || 'someone');
+    const message = stopped ? `Stopped by ${by}. Rewrite again when you want it.` : String(err?.message || err).slice(0, 500);
+    await prisma.blog_audits.update({ where: { id }, data: { rewrite_status: audit.rewrite_content_html ? 'ready' : null, rewrite_error: message } }).catch(() => {});
+    if (stopped) await activity.log('audit.rewrite_stopped', { entityType: 'blog_audit', entityId: id, details: `"${audit.title}": rewrite stopped`, actor: by }).catch(() => {});
+    else await activity.log('audit.rewrite_failed', { entityType: 'blog_audit', entityId: id, details: `"${audit.title}": ${String(err?.message || err).slice(0, 200)}`, actor }).catch(() => {});
     await endTimer(key, false);
   } finally {
     running.delete(id);
+    stops.delete(key);
   }
+}
+
+// Stops a running audit or rewrite (key "audit-<id>" or "rewrite-<id>"). The AI call in flight is
+// cut off, so no more credits are spent on it. A job lost to a restart is just marked stopped.
+export async function stopJob(key: string, by: string): Promise<boolean> {
+  const m = /^(audit|rewrite)-(\d+)$/.exec(key);
+  if (!m) throw Object.assign(new Error('Unknown job'), { status: 400 });
+  const ctl = stops.get(key);
+  if (ctl) {
+    ctl.abort(by);
+    return true;
+  }
+  const id = Number(m[2]);
+  const row: any = await prisma.blog_audits.findUnique({ where: { id }, select: { audit_status: true, rewrite_status: true, rewrite_content_html: true } });
+  if (!row) throw Object.assign(new Error('Audit not found'), { status: 404 });
+  if (m[1] === 'audit' && row.audit_status === 'running') await prisma.blog_audits.update({ where: { id }, data: { audit_status: 'failed', audit_error: `Stopped by ${by}.` } });
+  else if (m[1] === 'rewrite' && row.rewrite_status === 'generating') await prisma.blog_audits.update({ where: { id }, data: { rewrite_status: row.rewrite_content_html ? 'ready' : null, rewrite_error: `Stopped by ${by}.` } });
+  else return false;
+  return true;
 }
 
 // A job this server process is not running (it was lost to a restart) is marked so the page
