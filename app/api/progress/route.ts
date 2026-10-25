@@ -55,7 +55,19 @@ export async function GET() {
     take: 6,
     select: { id: true, action: true, details: true },
   });
-  const recent = done.map((d) => ({
+  // The same message twice (a blog tried again) shows once; a blog failure is dropped once that blog
+  // is published, marked done, or stopped (Home lists stopped blogs with their buttons).
+  const settled = done.some((d) => d.action === 'schedule.failed')
+    ? await prisma.blog_schedule.findMany({ where: { OR: [{ status: 'published' }, { status: 'paused' }] }, select: { title: true } })
+    : [];
+  const seen = new Set<string>();
+  const shown = done.filter((d) => {
+    const key = `${d.action}|${d.details}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return !(d.action === 'schedule.failed' && settled.some((r) => String(d.details || '').startsWith(`${r.title}:`)));
+  });
+  const recent = shown.map((d) => ({
     id: d.id,
     ok: !/failed/.test(d.action),
     kind: d.action.startsWith('audit') ? 'audit' : d.action.startsWith('draft') ? 'blog' : d.action.startsWith('strategy') ? 'strategy' : 'strategy',

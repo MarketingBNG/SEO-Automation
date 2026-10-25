@@ -12,7 +12,8 @@ export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (m
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<{ suggestions: any[]; custom: string } | null>(null);
   const me = useRole();
-  if (['published', 'failed', 'drafting', 'revising'].includes(row.status)) return null;
+  if (['published', 'drafting', 'revising'].includes(row.status)) return null;
+  const failed = row.status === 'failed';
 
   async function act(body: any, done: string) {
     setBusy(true);
@@ -43,7 +44,7 @@ export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (m
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap gap-2">
-        {row.status === 'paused' ? (
+        {failed ? null : row.status === 'paused' ? (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => act({ action: 'resume' }, `Resumed "${row.title}".`)}>
             <Play /> Resume
           </Button>
@@ -52,7 +53,7 @@ export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (m
             <Pause /> Pause
           </Button>
         )}
-        {me.can('blog.publish_now') && row.draft_id && (
+        {!failed && me.can('blog.publish_now') && row.draft_id && (
           <Button
             size="sm"
             disabled={busy}
@@ -76,9 +77,9 @@ export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (m
             <CheckCheck /> Already done
           </Button>
         )}
-        <Button size="sm" variant="outline" disabled={busy} onClick={toggleMove}>
+        {!failed && <Button size="sm" variant="outline" disabled={busy} onClick={toggleMove}>
           {busy ? <Loader2 className="animate-spin" /> : <CalendarClock />} Reschedule
-        </Button>
+        </Button>}
       </div>
       {open && (
         <div className="max-w-sm space-y-1 rounded-lg border p-2 text-xs">

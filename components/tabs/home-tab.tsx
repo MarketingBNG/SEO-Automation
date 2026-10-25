@@ -148,6 +148,11 @@ export default function HomeTab() {
                 <li key={i} className="flex flex-wrap items-baseline gap-x-2">
                   <Link className="font-medium text-primary underline" href={a.href}>{a.title}</Link>
                   <span className="text-muted-foreground">{a.detail}</span>
+                  {canReview && a.row && (
+                    <div className="w-full pt-1">
+                      <BlogMoveControls row={a.row} onDone={(m) => { setMsg(m); load(); }} />
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
