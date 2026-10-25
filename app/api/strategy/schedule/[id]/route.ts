@@ -24,7 +24,7 @@ export const runtime = 'nodejs';
 // Doing nothing for 48 hours approves it automatically.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const id = toId((await params).id);
-  const { action, feedback, reviewer, publishAt }: any = (await req.json().catch(() => ({}))) || {};
+  const { action, feedback, reviewer, publishAt, url: postUrl }: any = (await req.json().catch(() => ({}))) || {};
   const row = await prisma.blog_schedule.findUnique({ where: { id } });
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (row.status === 'published') return NextResponse.json({ error: 'Already published' }, { status: 409 });
@@ -59,6 +59,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await activity.log('schedule.rejected', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}" rejected: ${text.slice(0, 200)}`, actor });
     return NextResponse.json(updated);
   }
+  // "Already done": the blog was published outside the dashboard, so nothing should try it again.
+  // { action: 'mark_done', url? } where url is the live post, if there is one.
+  if (action === 'mark_done') {
+    const me = await getMe();
+    if (!me || !(await canDo(me, 'blog.publish_now'))) return NextResponse.json({ error: deniedMessage('blog.publish_now') }, { status: 403 });
+    if (['drafting', 'revising'].includes(row.status)) return NextResponse.json({ error: 'It is being written right now. Try again in a few minutes.' }, { status: 409 });
+    const url = String(postUrl || '').trim();
+    if (url && !/^https:\/\/\S+$/i.test(url)) return NextResponse.json({ error: 'Give the full post address starting with https://, or leave it empty.' }, { status: 400 });
+    const updated = await prisma.blog_schedule.update({ where: { id }, data: { status: 'published', wp_post_url: url || row.wp_post_url, paused_from: null, paused_by: null, hold_reasons: null, updated_at: sqlNow() } });
+    await activity.log('schedule.marked_done', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}": marked as already done${url ? ` (${url})` : ''}`, actor });
+    return NextResponse.json(updated);
+  }
+
   if (action === 'pause') {
     if (!PAUSABLE.includes(row.status)) return NextResponse.json({ error: row.status === 'paused' ? 'Already paused.' : 'It is being written right now. Pause it in a few minutes.' }, { status: 409 });
     const updated = await prisma.blog_schedule.update({ where: { id }, data: { status: 'paused', paused_from: row.status, paused_by: actor, updated_at: sqlNow() } });

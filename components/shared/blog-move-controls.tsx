@@ -1,9 +1,9 @@
 'use client';
 
-// Pause, Resume and Reschedule for one calendar blog, with suggested new times. Used on Home and
+// Pause, Resume, Reschedule and Already done for one calendar blog, with suggested new times. Used on Home and
 // in Monthly Strategy.
 import { useState } from 'react';
-import { CalendarClock, Loader2, Pause, Play, Send } from 'lucide-react';
+import { CalendarClock, CheckCheck, Loader2, Pause, Play, Send } from 'lucide-react';
 import { useRole } from '@/hooks/use-role';
 import { Button } from '@/components/ui/button';
 
@@ -60,6 +60,20 @@ export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (m
             onClick={() => window.confirm(`Publish "${row.title}" on the website now?`) && act({ action: 'publish_now' }, `Published "${row.title}" on the website.`)}
           >
             <Send /> Publish now
+          </Button>
+        )}
+        {me.can('blog.publish_now') && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            title="It was already published outside the dashboard: mark it done so nothing tries it again."
+            onClick={() => {
+              const url = window.prompt(`Mark "${row.title}" as already done? Nothing will try to write or publish it again.\n\nLive post address (optional):`, '');
+              if (url !== null) act({ action: 'mark_done', url }, `Marked "${row.title}" as done.`);
+            }}
+          >
+            <CheckCheck /> Already done
           </Button>
         )}
         <Button size="sm" variant="outline" disabled={busy} onClick={toggleMove}>

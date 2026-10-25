@@ -7,6 +7,7 @@ import prisma from '../prisma';
 import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { researchAndWriteBlog, verifyAndCorrect } from '../anthropic';
+import { CreditPausedError } from '../aiCredits';
 import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia, freeSlug } from '../wordpress';
 import { listSites, getSiteRankings, addTrackedKeyword } from '../seranking';
 import { getTermsForKeyword } from '../surfer';
@@ -425,7 +426,15 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
       }
     } catch (e: any) {
       summary.errors.push(`${row.title}: ${e.message}`);
-      await activity.log('schedule.failed', { details: `${row.title}: ${e.message}` });
+      await activity.log('schedule.failed', { entityType: 'blog_schedule', entityId: row.id, details: `${row.title}: ${e.message}` });
+      // A failed blog is stopped, not retried every 15 minutes (each retry can spend credits and
+      // repeats the same error). Paused AI credits are not a failure: that work continues by itself
+      // once the credits are back.
+      if (!(e instanceof CreditPausedError)) {
+        const reason = `Stopped after a failure, so it is not tried again on its own: ${String(e.message || e).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 300)}. Fix the cause, then press Resume or Publish now. If it is already done, press Already done.`;
+        await update(row.id, { status: 'paused', paused_from: row.status, paused_by: 'Automatic (stopped after a failure)', hold_reasons: JSON.stringify([reason]) }).catch(() => {});
+        await notify(`Blog stopped after a failure: ${row.title}`, reason).catch(() => {});
+      }
     }
   }
 

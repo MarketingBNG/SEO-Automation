@@ -34,13 +34,23 @@ export async function GET(req: NextRequest) {
     prisma.team_members.findMany({ select: { email: true, name: true, role: true } }),
   ]);
   const byEmail = new Map(team.map((t) => [t.email, t]));
+  // A blog's publishing failures are hidden once that blog is published or marked done: the
+  // problem is over and the repeats only add noise.
+  const failedTitles = rows.filter((r) => r.action === 'schedule.failed').map((r) => String(r.details || ''));
+  const done = failedTitles.length
+    ? await prisma.blog_schedule.findMany({ where: { status: 'published' }, select: { id: true, title: true } })
+    : [];
+  const resolved = (r: any) =>
+    r.action === 'schedule.failed' &&
+    done.some((d) => (r.entity_type === 'blog_schedule' && r.entity_id === d.id) || String(r.details || '').startsWith(`${d.title}:`));
+  const shown = rows.filter((r) => !resolved(r));
   // Work running right now, shown with a live light at the top of the log.
   const live = runningTimers().map((t) => ({ key: t.key, kind: t.kind, label: t.label, startedAt: new Date(t.startedAt).toISOString() }));
   const outcome = (action: string) => (/\.(failed|error|held|stopped|interrupted|rejected)$/.test(action) || /_failed$/.test(action) ? 'failed' : /\.(started|asked|queued|resumed|opened)$/.test(action) ? 'started' : 'done');
   return NextResponse.json({
     admin,
     live,
-    rows: rows.map((r) => ({
+    rows: shown.map((r) => ({
       ...r,
       area: areaOf(r.action),
       what: actionLabel(r.action),
