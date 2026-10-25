@@ -4,6 +4,7 @@ import prisma from './prisma';
 import { rethrowFriendly } from './apiErrors';
 import { anthropicClient, clientKeyKind, secondaryKeyConfigured, switchedToSecondary } from './anthropicClient';
 import { replayScope, requestHash, savedStep, saveStep } from './aiReplay';
+import { aiMode, askQueue, isAutomatic, TestingModeError } from './aiQueue';
 import { assertCredits, recordUsage, onApiError, CreditPausedError } from './aiCredits';
 import { validateDraft, markUsedQuestions } from './validation';
 import { getWriterPlaybook, getAuditGates } from './playbook';
@@ -279,15 +280,24 @@ function withCache(systemPrompt, conversation) {
 
 // Inside a resumable run (lib/aiReplay.ts) a request made before returns its saved answer, so a
 // blog or strategy started again after it stopped pays only for the steps not done yet.
+// In Testing mode (lib/aiQueue.ts) the request waits for Claude Code instead of the API, and
+// automatic work does not start.
 async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
   const ctx = replayScope();
-  if (!ctx) return callClaudeLive(systemPrompt, userMessages, signal, opts);
   const { onActivity, idleMs, ...rest } = opts;
   const hash = requestHash({ systemPrompt, userMessages, rest });
-  const saved = await savedStep(ctx.scope, hash);
-  if (saved && saved.run !== ctx.run) return { ...saved, activity: { part: 0, searches: 0, chars: 0, retries: 0, lastEventAt: Date.now(), note: 'reused from the earlier run' } };
-  const result = await callClaudeLive(systemPrompt, userMessages, signal, opts);
-  await saveStep(ctx.scope, hash, { run: ctx.run, text: result.text, assistantMessages: result.assistantMessages, stopReason: result.stopReason });
+  if (ctx) {
+    const saved = await savedStep(ctx.scope, hash);
+    if (saved && saved.run !== ctx.run) return { ...saved, activity: { part: 0, searches: 0, chars: 0, retries: 0, lastEventAt: Date.now(), note: 'reused from the earlier run' } };
+  }
+  let result;
+  if ((await aiMode()) === 'testing') {
+    if (isAutomatic()) throw new TestingModeError();
+    result = await askQueue(hash, systemPrompt, userMessages, signal, opts);
+  } else {
+    result = await callClaudeLive(systemPrompt, userMessages, signal, opts);
+  }
+  if (ctx) await saveStep(ctx.scope, hash, { run: ctx.run, text: result.text, assistantMessages: result.assistantMessages, stopReason: result.stopReason });
   return result;
 }
 

@@ -1,4 +1,5 @@
 import { assertCredits, recordUsage, onApiError } from '../aiCredits';
+import { aiMode } from '../aiQueue';
 import Anthropic from '@anthropic-ai/sdk';
 import { anthropicClient } from '../anthropicClient';
 import prisma from '@/lib/prisma';
@@ -133,6 +134,9 @@ async function runLoop(conv, emit, signal) {
   try {
     let jsonRetries = 0;
     for (let step = 0; step < MAX_STEPS; step++) {
+      // The assistant works with the dashboard's tools in a live conversation, so it runs on the API
+      // only. In Testing mode it is off; ask Claude Code instead.
+      if ((await aiMode()) === 'testing') throw new Error('Testing mode is on, so the assistant is off (it would use API credits). Ask Claude Code instead, or an admin can switch to Live mode in Settings > AI credits.');
       await assertCredits();
       const stream = client.beta.messages.stream(
         {

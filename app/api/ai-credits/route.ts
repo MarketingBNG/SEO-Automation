@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { creditStatus, setBalance, resumeAi, pauseAi, autoResumeAi, spendWindow } from '@/lib/aiCredits';
 import { checkKey } from '@/lib/anthropicClient';
-import { getActor } from '@/lib/auth';
+import { getActor, getMe } from '@/lib/auth';
+import * as activity from '@/lib/activity';
+import { sqlNow } from '@/lib/time';
+import { aiMode, setAiMode } from '@/lib/aiQueue';
 import { methodNotAllowed } from '../_lib/http';
 import prisma from '@/lib/prisma';
 import { strategyProgress } from '@/lib/strategy/progress';
@@ -19,7 +22,7 @@ export async function GET(req: NextRequest) {
     prisma.seo_strategies.findMany({ where: { status: { in: ['generating', 'paused', 'stopping'] } }, select: { id: true, status: true } }),
   ]);
   const running = { blogs: blogs.map((b) => b.keyword), strategies: strategies.map((s) => `#${s.id} ${s.status}`) };
-  return NextResponse.json({ ...(await creditStatus()), running, month: await thisMonth(), ...(days ? { window: await spendWindow(days) } : {}) });
+  return NextResponse.json({ ...(await creditStatus()), running, ...(await queueStatus()), month: await thisMonth(), ...(days ? { window: await spendWindow(days) } : {}) });
 }
 
 // This calendar month: what each kind of work has spent so far, and what the work still left in the
@@ -87,9 +90,33 @@ export async function POST(req: NextRequest) {
     await resumeAi(actor);
   } else if (body.action === 'pause') {
     await pauseAi(`Paused by ${actor}.`);
+  } else if (body.action === 'mode') {
+    // Testing mode (Claude Code subscription) or Live mode (API credits). Admin only.
+    const me = await getMe();
+    if (me?.role !== 'admin') return NextResponse.json({ error: 'Only an admin can switch between Testing and Live mode.' }, { status: 403 });
+    if (body.mode !== 'testing' && body.mode !== 'live') return NextResponse.json({ error: 'Mode must be testing or live.' }, { status: 400 });
+    await setAiMode(body.mode);
+    await activity.log('ai_queue.mode', { details: body.mode === 'testing' ? 'Testing mode on: AI work runs on the Claude Code subscription, no API credits' : 'Live mode on: AI work uses API credits again', actor });
+    // Back on Live: the automatic work that waited picks up again (unless credits are paused).
+    if (body.mode === 'live') await import('@/lib/aiReplay').then((m) => m.resumeCreditPaused()).catch(() => null);
+  } else if (body.action === 'cancel_job') {
+    const id = Number(body.id);
+    const r = await prisma.ai_jobs.updateMany({ where: { id, status: 'waiting' }, data: { status: 'cancelled', answered_at: sqlNow() } });
+    if (!r.count) return NextResponse.json({ error: 'That job is not waiting any more.' }, { status: 409 });
+    await activity.log('ai_queue.cancelled', { entityType: 'ai_job', entityId: id, details: `Job #${id} cancelled; the work that asked for it stops`, actor });
   } else {
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
   }
-  return NextResponse.json(await creditStatus());
+  return NextResponse.json({ ...(await creditStatus()), ...(await queueStatus()) });
+}
+
+// Testing mode and what waits for Claude Code.
+async function queueStatus() {
+  const [mode, waiting, jobs] = await Promise.all([
+    aiMode(),
+    prisma.ai_jobs.count({ where: { status: 'waiting' } }),
+    prisma.ai_jobs.findMany({ where: { status: 'waiting' }, orderBy: { id: 'asc' }, take: 20, select: { id: true, feature: true, label: true, created_at: true } }),
+  ]);
+  return { aiMode: mode, queue: { waiting, jobs } };
 }
 export { methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

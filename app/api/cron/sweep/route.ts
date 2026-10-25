@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { sqlNowOffset } from '@/lib/time';
+import { blogRuns } from '@/lib/blogRuns';
+import { aiMode } from '@/lib/aiQueue';
 
 export const runtime = 'nodejs';
 
@@ -13,9 +15,13 @@ export async function GET() {
 
   // keywords only have created_at: treat as stuck when created 15+ min ago and no draft for it was
   // created in the last 15 minutes (a generation that just finished would have one).
-  const stuck = await prisma.keywords.findMany({
+  // In Testing mode a run can wait hours for Claude Code, so nothing is called stuck then; a blog
+  // still running in this server is never stuck.
+  const testing = (await aiMode()) === 'testing';
+  const stuck = testing ? [] : await prisma.keywords.findMany({
     where: {
       status: 'generating',
+      id: { notIn: [...blogRuns.keys()] },
       created_at: { lt: cutoff },
       drafts: { none: { created_at: { gte: cutoff } } },
     },
@@ -39,7 +45,7 @@ export async function GET() {
 
   // A strategy still 'generating' after 3 hours was cut off by a restart: mark it failed so a new
   // one can be started.
-  const strategies = await prisma.seo_strategies.updateMany({
+  const strategies = testing ? { count: 0 } : await prisma.seo_strategies.updateMany({
     where: { status: 'generating', created_at: { lt: sqlNowOffset('-180 minutes') } },
     data: { status: 'failed', error: 'Generation was interrupted (server restart or crash). Start it again.', progress_stage: 'Failed' },
   });

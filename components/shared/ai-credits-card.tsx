@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { FlaskConical, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -64,7 +64,7 @@ export function AiCreditsCard() {
       const res = await fetch('/api/ai-credits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-      setS(j);
+      setS((prev: any) => ({ ...prev, ...j }));
       setBalance('');
     } catch (e: any) {
       setError(e.message);
@@ -84,6 +84,49 @@ export function AiCreditsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
+        {/* Testing mode (Claude Code subscription) or Live mode (API credits), like the Social Media dashboard. */}
+        <div className="rounded-lg border p-3">
+          <div className="mb-2 font-semibold">Testing mode</div>
+          {s.aiMode === 'testing' ? (
+            <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
+              <div className="flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-300"><FlaskConical className="size-4" />Testing mode is ON</div>
+              <div className="text-amber-900/80 dark:text-amber-200/80">
+                All AI work runs on the Claude Code subscription. No Anthropic API credits are used. Work you start (a blog, Check a blog, a fact check, a strategy) waits in the queue below until Claude Code answers it: open Claude Code and say &quot;run the SEO AI queue&quot;. Automatic work (the daily schedule) does not start, and the assistant chat is off.
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3">
+              <div className="font-semibold">Live mode is ON</div>
+              <div className="text-muted-foreground">All AI work uses Anthropic API credits and runs on its own, including the daily schedule.</div>
+            </div>
+          )}
+          <div className="mt-2 flex flex-wrap gap-2">
+            {s.aiMode === 'testing' ? (
+              <Button size="sm" disabled={busy} onClick={() => window.confirm('Switch to Live mode? AI work will use API credits again, and automatic work starts again.') && post({ action: 'mode', mode: 'live' })}>Switch to Live mode (use API credits)</Button>
+            ) : (
+              <Button size="sm" disabled={busy} onClick={() => post({ action: 'mode', mode: 'testing' })}><FlaskConical />Switch to Testing mode (Claude Code subscription)</Button>
+            )}
+            {!s.paused && <Button size="sm" variant="outline" disabled={busy} onClick={() => post({ action: 'pause' })}>Pause all AI work now</Button>}
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">Work is saved step by step either way, so switching modes never loses work.</div>
+          {s.aiMode === 'testing' && (
+            <div className="mt-3">
+              <div className="mb-1 font-medium">Waiting for Claude Code: {s.queue?.waiting || 0}</div>
+              {(s.queue?.jobs || []).length > 0 && (
+                <ul className="space-y-1 text-xs">
+                  {s.queue.jobs.map((j: any) => (
+                    <li key={j.id} className="flex items-start gap-2">
+                      <span className="shrink-0 tabular-nums text-muted-foreground">#{j.id}</span>
+                      <span className="shrink-0 font-medium">{FEATURE[j.feature] || j.feature}</span>
+                      <span className="min-w-0 flex-1 truncate text-muted-foreground" title={j.label}>{j.label}</span>
+                      <button type="button" className="shrink-0 text-red-600 underline dark:text-red-400" disabled={busy} onClick={() => window.confirm(`Cancel job #${j.id}? The work that asked for it stops.`) && post({ action: 'cancel_job', id: j.id })}>Cancel</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
         {s.paused && (
           <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3">
             <div className="font-semibold">AI work is paused</div>
@@ -177,7 +220,6 @@ export function AiCreditsCard() {
           <label className="grid gap-1"><span className="text-muted-foreground">Current balance (USD)</span><Input className="h-8 w-40" type="number" min="0" step="0.01" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="e.g. 100" /></label>
           <label className="grid gap-1"><span className="text-muted-foreground">Pause when below (USD)</span><Input className="h-8 w-40" type="number" min="0" step="0.5" value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder={String(s.threshold)} /></label>
           <Button size="sm" disabled={busy || balance === ''} onClick={() => post({ action: 'set_balance', balance, threshold })}>{busy && <Loader2 className="animate-spin" />}Save balance</Button>
-          {!s.paused && <Button size="sm" variant="outline" disabled={busy} onClick={() => post({ action: 'pause' })}>Pause all AI work now</Button>}
         </div>
         {error && <div className="text-destructive">{error}</div>}
         <div>

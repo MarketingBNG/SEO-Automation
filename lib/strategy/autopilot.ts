@@ -426,11 +426,11 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
       }
     } catch (e: any) {
       summary.errors.push(`${row.title}: ${e.message}`);
-      await activity.log('schedule.failed', { entityType: 'blog_schedule', entityId: row.id, details: `${row.title}: ${e.message}` });
       // A failed blog is stopped, not retried every 15 minutes (each retry can spend credits and
-      // repeats the same error). Paused AI credits are not a failure: that work continues by itself
-      // once the credits are back.
+      // repeats the same error). Paused AI credits or Testing mode are not a failure: that work
+      // continues by itself once AI work is possible again, so nothing is logged as failed.
       if (!(e instanceof CreditPausedError)) {
+        await activity.log('schedule.failed', { entityType: 'blog_schedule', entityId: row.id, details: `${row.title}: ${e.message}` });
         const reason = `Stopped after a failure, so it is not tried again on its own: ${String(e.message || e).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 300)}. Fix the cause, then press Resume or Publish now. If it is already done, press Already done.`;
         await update(row.id, { status: 'paused', paused_from: row.status, paused_by: 'Automatic (stopped after a failure)', hold_reasons: JSON.stringify([reason]) }).catch(() => {});
         await notify(`Blog stopped after a failure: ${row.title}`, reason).catch(() => {});

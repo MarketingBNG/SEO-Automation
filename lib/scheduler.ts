@@ -101,7 +101,8 @@ export function startScheduler() {
       });
     })
     .catch(() => {});
-  const run = () => tick().catch((e) => console.error('Scheduler error:', e?.message || e));
+  // Everything the scheduler starts is automatic work: in Testing mode it does not use AI (lib/aiQueue.ts).
+  const run = () => import('./aiQueue').then(({ runAutomatic }) => runAutomatic(tick)).catch((e) => console.error('Scheduler error:', e?.message || e));
   // First run a minute after start, so the server is fully up.
   setTimeout(run, 60 * 1000);
   globalThis.__seoScheduler = setInterval(run, EVERY_MS);

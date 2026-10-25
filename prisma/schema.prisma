@@ -604,3 +604,24 @@ model access_grants {
 
   @@index([email])
 }
+
+// Testing mode (lib/aiQueue.ts): an AI request waiting for Claude Code to answer it on the owner's
+// subscription (scripts/agent.ts), instead of the Anthropic API.
+model ai_jobs {
+  id          Int     @id @default(autoincrement())
+  hash        String // the request: prompt, messages and options (same request = same job)
+  feature     String // blog | fact-check | audit | strategy | ...
+  model       String? // the model the request would use on the API
+  label       String? // what the work is, for the queue list
+  web_search  Boolean @default(false) // the request may search the web
+  system      String
+  messages    String // JSON [{role, content}]
+  status      String  @default("waiting") // waiting | answered | used | cancelled
+  answer      String?
+  answered_by String?
+  created_at  String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  answered_at String?
+
+  @@index([status])
+  @@index([hash])
+}

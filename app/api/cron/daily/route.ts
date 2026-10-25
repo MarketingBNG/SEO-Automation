@@ -4,6 +4,7 @@
 // and the rank check runs once per day.
 import { NextResponse } from 'next/server';
 import { runDaily } from '@/lib/strategy/autopilot';
+import { runAutomatic } from '@/lib/aiQueue';
 import { methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
@@ -11,6 +12,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 export async function GET() {
-  return NextResponse.json(await runDaily());
+  // Automatic work: in Testing mode it does not start (lib/aiQueue.ts).
+  return NextResponse.json(await runAutomatic(() => runDaily()));
 }
 export { methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

@@ -56,3 +56,5 @@ data/
 
 # Local copies of dashboard drafts edited from Claude Code (scripts/draft.ts)
 /.drafts/
+# Testing mode AI jobs answered from Claude Code (scripts/agent.ts)
+/.agent/

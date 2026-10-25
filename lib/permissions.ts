@@ -132,7 +132,7 @@ export function actionFor(method: string, path: string): Action | null {
   if (!write) {
     if (/^\/api\/performance\/download|^\/api\/audit\/[^/]+\/download/.test(p)) return 'reports.download';
     if (/^\/api\/(performance|ga4|gsc|seranking|clarity|blog-analytics|zoho\/leads|zoho\/pipeline|zoho\/business)/.test(p)) return 'reports.view';
-    if (/^\/api\/ai-credits/.test(p)) return 'credits.view';
+    if (/^\/api\/(ai-credits|agent)/.test(p)) return 'credits.view';
     if (/^\/api\/team/.test(p)) return 'team.view';
     return null;
   }
@@ -147,7 +147,7 @@ export function actionFor(method: string, path: string): Action | null {
   if (/^\/api\/strategy\/schedule\/[^/]+$/.test(p)) return 'manual.do';
   if (/^\/api\/strategy\/[^/]+\/approve/.test(p)) return 'strategy.approve';
   if (/^\/api\/strategy/.test(p)) return 'strategy.edit';
-  if (/^\/api\/ai-credits/.test(p)) return 'credits.change';
+  if (/^\/api\/(ai-credits|agent)/.test(p)) return 'credits.change';
   if (/^\/api\/team\/access/.test(p)) return 'team.roles';
   if (/^\/api\/team/.test(p)) return 'team.view'; // finer checks (roles, who can be blocked) in the route
   if (/^\/api\/(settings|gsc|ga4|gbp|zoho|wordpress|fireflies|bing|surfer\/test|serphouse\/test|seranking\/test)/.test(p)) return 'settings.change';

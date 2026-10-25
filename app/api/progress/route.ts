@@ -73,7 +73,12 @@ export async function GET() {
     kind: d.action.startsWith('audit') ? 'audit' : d.action.startsWith('draft') ? 'blog' : d.action.startsWith('strategy') ? 'strategy' : 'strategy',
     label: `${{ 'audit.completed': 'Audit finished', 'audit.failed': 'Audit', 'audit.rewritten': 'Rewrite ready to review', 'audit.rewrite_failed': 'Rewrite', 'draft.generated': 'Blog written, waiting for review', 'draft.generation_failed': 'Blog', 'schedule.published': 'Blog published', 'schedule.failed': 'Blog', 'wordpress.published': 'Published to WordPress', 'strategy.generated': 'Strategy ready', 'strategy.failed': 'Strategy' }[d.action] || d.action}: ${String(d.details || '').slice(0, 120)}`,
   }));
+  const { aiMode } = await import('@/lib/aiQueue');
+  const testing = (await aiMode()) === 'testing';
+  const waitingForClaudeCode = testing ? await prisma.ai_jobs.count({ where: { status: 'waiting' } }) : 0;
   return NextResponse.json({
+    testing,
+    waitingForClaudeCode,
     recent,
     aiPaused,
     credits80,

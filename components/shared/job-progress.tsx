@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Square } from 'lucide-react';
+import { FlaskConical, Square } from 'lucide-react';
 import { Countdown } from './countdown';
 
 export const JOBS_CHANGED = 'growth-center:jobs-changed';
@@ -30,6 +30,7 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
   const [paused, setPaused] = useState<string | null>(null);
   const [credits80, setCredits80] = useState(false);
   const [stopping, setStopping] = useState<string | null>(null);
+  const [testing, setTesting] = useState<{ on: boolean; waiting: number }>({ on: false, waiting: 0 });
 
   async function stopJob(j: any) {
     if (!window.confirm(`Stop "${j.label}" now? It will not finish, and you can run it again later.`)) return;
@@ -62,6 +63,7 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
           setRecent(j.recent || []);
           setPaused(j.aiPaused ? j.aiPausedReason || 'AI credits are low.' : null);
           setCredits80(Boolean(j.credits80));
+          setTesting({ on: Boolean(j.testing), waiting: j.waitingForClaudeCode || 0 });
           running = (j.jobs || []).length > 0;
         }
       }
@@ -90,7 +92,7 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
   }, []);
 
   const finished = recent.filter((r) => r.id > dismissed);
-  if (!jobs.length && !paused && !credits80 && !finished.length) return null;
+  if (!jobs.length && !paused && !credits80 && !finished.length && !testing.on) return null;
   const dismiss = () => {
     const top = Math.max(0, ...recent.map((r) => r.id));
     setDismissed(top);
@@ -100,6 +102,13 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
   };
   return (
     <div className="space-y-1.5 border-b bg-background/95 px-3 py-2 shadow-sm backdrop-blur sm:px-4">
+      {testing.on && (
+        <button type="button" onClick={() => onOpen?.('settings')} className="flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-0.5 text-left text-xs font-medium text-amber-800 dark:text-amber-300">
+          <FlaskConical className="size-3.5" />
+          TESTING · runs on Claude Code subscription, no API credits
+          {testing.waiting > 0 && <span className="font-normal">· {testing.waiting} waiting for Claude Code</span>}
+        </button>
+      )}
       {paused && (
         <button type="button" onClick={() => onOpen?.('settings')} className="block w-full rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-left text-xs">
           <strong>AI work is paused:</strong> {paused} Open Settings &gt; AI credits to add the new balance.

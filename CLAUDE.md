@@ -26,3 +26,16 @@ Write in the house voice from `skills/seo-blog-playbook/SKILL.md` (no em dashes,
 never invent a figure, rate, deadline or section number: check it on an official source first.
 The token cannot approve, reject or publish; those stay in the dashboard. A blog already on the
 website (wp_post_url) is not changed by `put`.
+
+## Testing mode: answering the dashboard's AI queue (no API credits)
+
+When Testing mode is on (Settings > AI credits), work a person starts in the dashboard waits in a
+queue instead of using the Anthropic API (lib/aiQueue.ts). When the user says "run the SEO AI queue":
+
+1. `npx tsx scripts/agent.ts list`, then for each job `npx tsx scripts/agent.ts get <id>`.
+2. Read `.agent/<id>/system.md` and `request.md`, do the work (web search on official sources when the
+   job allows it), and write the reply to `.agent/<id>/answer.md` in exactly the format the request asks for.
+3. `npx tsx scripts/agent.ts put <id>`. The run carries on and may queue its next step: list again
+   until nothing is waiting.
+
+Follow the same house voice and accuracy rules as above. Never invent a figure, rate or date.
