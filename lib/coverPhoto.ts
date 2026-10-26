@@ -4,6 +4,8 @@
 // The photo comes from Pexels (free stock photos, real photography) matched to the blog's topic; when
 // no good photo is found, an AI photo is made (OpenAI, paid per image). Each photo is used once.
 // Made once per blog and saved as its cover; without keys the branded cover (lib/cover.ts) stays.
+// When the Social Media dashboard shares its design skills (lib/socialSkills.ts), a small AI step art-directs each
+// banner first: better photo searches, a better AI photo prompt, and which words of the title go gold.
 import prisma from './prisma';
 import * as settings from './settings';
 import { saveFile } from './storage';
@@ -34,11 +36,11 @@ async function usedPhotos(): Promise<string[]> {
   }
 }
 
-async function pexelsPhoto(topic: string): Promise<Buffer | null> {
+async function pexelsPhoto(topic: string, first: string[] = []): Promise<Buffer | null> {
   const key = process.env.PEXELS_API_KEY;
   if (!key) return null;
   const used = await usedPhotos();
-  for (const q of photoQueries(topic)) {
+  for (const q of [...first, ...photoQueries(topic)]) {
     const res = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&orientation=landscape&size=large&per_page=30`, { headers: { Authorization: key }, signal: AbortSignal.timeout(20000) }).catch(() => null);
     if (!res?.ok) continue;
     const photos: any[] = ((await res.json().catch(() => ({}))) as any).photos || [];
@@ -52,10 +54,12 @@ async function pexelsPhoto(topic: string): Promise<Buffer | null> {
   return null;
 }
 
-async function aiPhoto(topic: string): Promise<Buffer | null> {
+async function aiPhoto(topic: string, direction?: string): Promise<Buffer | null> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return null;
-  const prompt = `Professional editorial photograph, shot on a full-frame camera, natural window light, shallow depth of field. A premium modern office for a cross-border finance and tax firm, scene about: ${topic}. Real objects only (desk, documents, laptop, small Indian and US desk flags, city skyline through the window). The left third of the frame is calm and slightly darker so a headline can sit on it. No people's faces, no text, no letters, no logos, no watermark. Realistic, not illustrated, not 3D render.`;
+  // The art director's scene when there is one; the house rules for the photo always apply.
+  const scene = direction ? direction.slice(0, 900) : `A premium modern office for a cross-border finance and tax firm, scene about: ${topic}. Real objects only (desk, documents, laptop, small Indian and US desk flags, city skyline through the window).`;
+  const prompt = `Professional editorial photograph, shot on a full-frame camera, natural window light, shallow depth of field. ${scene} The left third of the frame is calm and slightly darker so a headline can sit on it. No people's faces, no text, no letters, no logos, no watermark. Realistic, not illustrated, not 3D render.`;
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -67,15 +71,46 @@ async function aiPhoto(topic: string): Promise<Buffer | null> {
   return b64 ? Buffer.from(b64, 'base64') : null;
 }
 
+type Direction = { queries: string[]; photo: string; gold: string };
+
+// Art direction for one banner, following the design skills learned in the Social Media dashboard. A small call on a
+// light model; skipped (the usual banner is made) when the skills are not shared, in Testing mode, or on any error.
+async function artDirection(title: string, topic: string): Promise<Direction | null> {
+  const skills = await import('./socialSkills').then((m) => m.designSkills()).catch(() => '');
+  if (!skills) return null;
+  const { aiMode } = await import('./aiQueue');
+  if ((await aiMode()) === 'testing') return null;
+  try {
+    const { callClaude } = await import('./anthropic');
+    const system = `You are the art director for the blog banners of USAIndiaCFO, a CFO, tax and compliance firm for Indian founders, NRIs and US-India businesses. The banner design is fixed: a landscape photo, darkened on the left third where the title sits in bold white, with its last words in gold. You choose only:
+1. queries: three short stock-photo searches (Pexels) for a real photograph that tells this blog's story with concrete objects and a setting (not abstract ideas, no people's faces);
+2. photo: one or two sentences describing that photo for an AI image if no stock photo fits: subject, setting, light and mood, with the left third calm and darker;
+3. gold: the last 2 to 5 words of the title, copied exactly, that carry the hook (they are set in gold).
+Follow the design skills below (composition, hierarchy, contrast, colour and light). Premium and calm, never flashy.
+
+${skills}
+
+Return only JSON: {"queries": ["...", "...", "..."], "photo": "...", "gold": "..."}`;
+    const { text } = await callClaude(system, [{ role: 'user', content: `Blog title: ${title}\nTopic: ${topic}` }], undefined, { maxUses: 0, effort: 'low', model: process.env.BANNER_MODEL || process.env.FACT_CHECK_MODEL || 'claude-haiku-5-5', feature: 'banner' });
+    const j = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+    const queries = (Array.isArray(j.queries) ? j.queries : []).map((x: unknown) => String(x).slice(0, 80)).filter(Boolean).slice(0, 3);
+    return { queries, photo: String(j.photo || '').slice(0, 900), gold: String(j.gold || '').slice(0, 80) };
+  } catch {
+    return null;
+  }
+}
+
 // Makes and saves the photo cover for a draft that has none. Returns the stored key, or null when
 // no photo source is set up or nothing worked (the branded cover is then used, as before).
 export async function ensurePhotoCover(draftId: number): Promise<string | null> {
   const d = await prisma.drafts.findUnique({ where: { id: draftId }, include: { keyword: { select: { keyword: true } } } });
   if (!d || d.featured_image_path || d.kind === 'article') return d?.featured_image_path || null;
   const topic = `${d.title || ''} ${d.keyword?.keyword || ''}`.trim();
-  const photo = (await pexelsPhoto(topic).catch(() => null)) || (await aiPhoto(topic).catch(() => null));
+  const title = d.title || d.keyword?.keyword || 'USAIndiaCFO';
+  const dir = await artDirection(title, topic);
+  const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo).catch(() => null));
   if (!photo) return null;
-  const jpg = await composeCover(photo, d.title || d.keyword?.keyword || 'USAIndiaCFO');
+  const jpg = await composeCover(photo, title, { gold: dir?.gold });
   const key = await saveFile(`draft-${draftId}-cover-${Date.now()}.jpg`, jpg);
   // Only if nobody uploaded a cover meanwhile.
   await prisma.drafts.updateMany({ where: { id: draftId, featured_image_path: null }, data: { featured_image_path: key } });

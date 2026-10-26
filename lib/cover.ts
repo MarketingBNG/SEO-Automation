@@ -15,9 +15,15 @@ const REGULAR = path.join(process.cwd(), 'assets/fonts/Montserrat-Regular.ttf');
 const LOGO_WHITE = path.join(process.cwd(), 'public/logo-mark.png');
 const GOLD = '#E8B04B';
 
-// "Main: Rest" -> white main line(s), gold second part; else the last words go gold.
-export function splitTitle(title: string): { white: string; gold: string; sub: string } {
+// "Main: Rest" -> white main line(s), gold second part; else the last words go gold. `gold` (from the banner's art
+// direction, lib/coverPhoto.ts) chooses the gold words when it is the exact ending of the title.
+export function splitTitle(title: string, gold?: string): { white: string; gold: string; sub: string } {
   const t = String(title || '').trim();
+  const g = String(gold || '').trim();
+  if (g && g.length < t.length && t.toLowerCase().endsWith(g.toLowerCase())) {
+    const white = t.slice(0, t.length - g.length).trim().replace(/[:,\u2013-]+$/, '').trim();
+    if (white.length >= 8) return { white, gold: t.slice(t.length - g.length), sub: '' };
+  }
   const colon = t.match(/^(.{8,}?):\s*(.+)$/);
   if (colon) return { white: colon[1], gold: colon[2], sub: '' };
   const amp = t.match(/^(.+?)\s+(&|and)\s+(.+)$/i);
@@ -31,7 +37,7 @@ async function fontText(markup: string, font: string, family: string, width: num
   return sharp({ text: { text: markup, font: family, fontfile: font, width, rgba: true, dpi, wrap: 'word' } }).png().toBuffer();
 }
 
-export async function composeCover(photo: Buffer, title: string, opts: { png?: boolean } = {}): Promise<Buffer> {
+export async function composeCover(photo: Buffer, title: string, opts: { png?: boolean; gold?: string } = {}): Promise<Buffer> {
   const base = await sharp(photo).resize(W, H, { fit: 'cover', position: 'attention' }).modulate({ saturation: 1.05 }).toBuffer();
   const shade = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
@@ -41,7 +47,7 @@ export async function composeCover(photo: Buffer, title: string, opts: { png?: b
       <rect width="100%" height="100%" fill="url(#g)"/>
     </svg>`
   );
-  const { white, gold } = splitTitle(title);
+  const { white, gold } = splitTitle(title, opts.gold);
   const size = title.length > 70 ? 230 : title.length > 45 ? 270 : 320;
   const head = await fontText(`<span foreground="#FFFFFF">${esc(white)}</span>${gold ? `\n<span foreground="${GOLD}">${esc(gold)}</span>` : ''}`, BOLD, 'Montserrat Bold', 640, size);
   const headMeta = await sharp(head).metadata();

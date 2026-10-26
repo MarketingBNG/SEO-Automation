@@ -18,6 +18,7 @@ const FEATURE: Record<string, string> = {
   assistant: 'Assistant',
   audit: 'Blog audit and rewrite',
   training: 'Writing skill refresh',
+  banner: 'Blog banner art direction',
   other: 'Other',
 };
 
