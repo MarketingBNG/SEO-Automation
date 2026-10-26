@@ -672,3 +672,18 @@ model creative_skills {
 
   @@index([slug, status])
 }
+
+// Brand Palette (lib/brandPalette.ts): one brief and the palette directions made for it.
+model brand_palettes {
+  id         Int     @id @default(autoincrement())
+  name       String // brand or project name
+  brief      String // JSON: business, audience, personality, keep / avoid colours, uses, notes
+  result     String? // JSON: strategy, directions (with contrast checks and scales), dropped
+  status     String  @default("generating") // generating | ready | failed
+  error      String?
+  chosen     Int? // index of the chosen direction
+  parent_id  Int? // the palette this one refines
+  created_by String?
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  updated_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}

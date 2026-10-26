@@ -19,6 +19,7 @@ const FEATURE: Record<string, string> = {
   audit: 'Blog audit and rewrite',
   training: 'Writing skill refresh',
   skills: 'Creative skills (from YouTube)',
+  brand: 'Brand palettes',
   other: 'Other',
 };
 

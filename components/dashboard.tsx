@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
   Activity, BarChart3, BookOpen, Bot, BrainCircuit, CalendarClock, CalendarRange, Clapperboard, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
-  LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, Share2, ShieldCheck, Sparkles, Users,
+  LogOut, MessageSquareQuote, Palette, RefreshCcw, RefreshCw, Search, Settings, Share2, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
@@ -39,6 +39,7 @@ const TrainingTab = dynamic(() => import('@/components/tabs/training-tab'), { lo
 const AssociateTrainingTab = dynamic(() => import('@/components/tabs/associate-training-tab'), { loading });
 const WebsiteContentTab = dynamic(() => import('@/components/tabs/website-content-tab'), { loading });
 const LearningTab = dynamic(() => import('@/components/tabs/learning-tab'), { loading });
+const BrandTab = dynamic(() => import('@/components/tabs/brand-tab'), { loading });
 const MeetingsTab = dynamic(() => import('@/components/tabs/meetings-tab'), { loading });
 const ActivityTab = dynamic(() => import('@/components/tabs/activity-tab'), { loading });
 const SettingsTab = dynamic(() => import('@/components/tabs/settings-tab'), { loading });
@@ -68,6 +69,7 @@ const TABS = [
   { key: 'sitecontent', label: 'Website Content', icon: PanelsTopLeft, group: 'Website', hint: 'Pages and blog posts of the new website' },
 
   { key: 'learning', label: 'Learn from YouTube', icon: Clapperboard, group: 'Creative', hint: 'Videos the dashboard watches and the creative skills it learns' },
+  { key: 'brand', label: 'Brand Palette', icon: Palette, group: 'Creative', hint: 'Make and check brand colour palettes' },
 
   { key: 'overall', label: 'Overall Report', icon: BarChart3, group: 'Reports', hint: 'All channels, month on month' },
   { key: 'seo', label: 'SEO', icon: Search, group: 'Reports', hint: 'Google rankings and clicks' },
@@ -89,7 +91,7 @@ const HIDDEN: Record<Role, string[]> = {
   manager: [],
   analyst: ['team'],
   tester: ['team'],
-  user: ['sitecontent', 'learning', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
+  user: ['sitecontent', 'learning', 'brand', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
 };
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -285,6 +287,7 @@ export default function Dashboard() {
               {k === 'associates' && <AssociateTrainingTab />}
               {k === 'sitecontent' && <WebsiteContentTab />}
               {k === 'learning' && <LearningTab />}
+              {k === 'brand' && <BrandTab />}
               {k === 'keywords' && <KeywordsTab />}
               {k === 'drafts' && <DraftsTab />}
               {k === 'audit' && <AuditTab />}
