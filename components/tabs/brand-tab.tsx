@@ -28,7 +28,8 @@ const DEFAULT_BRIEF = {
   uses: 'LinkedIn and Instagram posts and carousels, reels, website, blog covers, PDFs and pitch decks',
   notes: '',
 };
-const CURRENT = 'Ledger navy #0B1430 and saffron gold #E8B04B (current brand)';
+// The designer's brand kit (also in the Social Media dashboard's skills/poster-style/SKILL.md).
+const CURRENT = "The designer's brand kit: deep petrol navy #0A3550, steel blue #5B7A8F, soft teal #8FB8B6, crimson #C8283A (small accents only), off-white #F3F4F6 and mist #C5CBD4; fonts Anton (headlines) and Hanken Grotesk (body)";
 
 const FIELDS: { key: keyof typeof DEFAULT_BRIEF; label: string; rows?: number }[] = [
   { key: 'name', label: 'Brand name' },
@@ -299,7 +300,7 @@ export default function BrandTab() {
             {canWork && (
               <div className="flex flex-wrap gap-2 sm:col-span-2">
                 <Button disabled={busy || !brief.name.trim()} onClick={generate}>{busy ? <Loader2 className="animate-spin" /> : <Sparkles />}Make palettes</Button>
-                <Button variant="outline" onClick={() => setBrief({ ...brief, keep: CURRENT })}>Use current brand colours</Button>
+                <Button variant="outline" onClick={() => setBrief({ ...brief, keep: CURRENT })}>Use the brand kit colours</Button>
                 <Button variant="ghost" onClick={() => setBrief(DEFAULT_BRIEF)}>Reset</Button>
               </div>
             )}

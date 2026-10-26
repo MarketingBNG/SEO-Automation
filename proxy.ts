@@ -7,7 +7,9 @@ import { draftTokenAllows, hasDraftToken } from '@/lib/draftToken';
 // @usaindiacfo.com Google account. Vercel Cron calls carry `Authorization: Bearer CRON_SECRET`.
 
 // /api/site/v1 is the website's content API: it checks its own keys (SITE_API_KEY, SITE_IMPORT_KEY).
-const PUBLIC_PREFIXES = ['/api/auth', '/login', '/api/site/v1'];
+// /api/partner is the Social Media dashboard's door to the shared brain: it checks its own signature
+// (lib/partner.ts).
+const PUBLIC_PREFIXES = ['/api/auth', '/login', '/api/site/v1', '/api/partner'];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
