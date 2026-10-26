@@ -625,3 +625,50 @@ model ai_jobs {
   @@index([status])
   @@index([hash])
 }
+
+// Learn from YouTube (lib/learning.ts): a video the dashboard watches with Gemini (sight and sound),
+// and the notes it takes: what is taught, what is shown, and how the creator thinks.
+model learning_videos {
+  id              Int     @id @default(autoincrement())
+  video_id        String  @unique // YouTube id
+  url             String
+  title           String?
+  channel         String?
+  category        String  @default("General")
+  sort_order      Int? // watch order inside the category (from the learning library)
+  level           String? // Theory / Mindset | Beginner | Intermediate | Advanced
+  duration_sec    Int?
+  note            String?
+  priority        Int     @default(0) // lower is watched first
+  status          String  @default("queued") // queued | watching | watched | failed | skipped
+  notes           String? // markdown, one section per part for long videos
+  parts_total     Int?
+  parts_done      Int     @default(0)
+  error           String?
+  model           String? // the Gemini model that watched it
+  tokens_in       Int     @default(0)
+  tokens_out      Int     @default(0)
+  watched_seconds Int     @default(0)
+  added_by        String?
+  created_at      String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  watched_at      String?
+
+  @@index([status])
+  @@index([category])
+}
+
+// A creative skill built from the watched videos' notes (lib/creativeSkills.ts): one per category, and
+// the "creative-director" master skill. A new build keeps the old one as status "old".
+model creative_skills {
+  id         Int     @id @default(autoincrement())
+  slug       String // category slug, or creative-director
+  category   String
+  content    String // markdown skill
+  version    Int     @default(1)
+  sources    String? // JSON [{video_id, title, channel}]
+  status     String  @default("active") // active | old
+  built_by   String?
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([slug, status])
+}

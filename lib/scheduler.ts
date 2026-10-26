@@ -48,6 +48,11 @@ async function tick() {
   const { topicsTick } = await import('./topics');
   await topicsTick(now).catch((e: any) => console.error('Scheduler: topics failed:', e.message));
 
+  // Learn from YouTube: Gemini watches the next videos within the day's hour budget. Not awaited: a
+  // long video takes several minutes; the rest of the run goes on.
+  const { learningTick } = await import('./learning');
+  void learningTick().catch((e: any) => console.error('Scheduler: learning failed:', e.message));
+
   // Directory listings for the day (per-day count from the approved strategy), after 10:00 IST.
   const { directoriesTick } = await import('./strategy/directories');
   // Not awaited: it runs in batch mode (half price) and can take a while; the rest of the run goes on.
