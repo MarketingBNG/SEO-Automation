@@ -24,3 +24,19 @@ The Growth Center AI:
 - **Now:** connect the two dashboards (SEO + social media) so their assistants can
   talk and exchange reports. Do NOT build the Growth Center yet.
 - **Later:** build the Growth Center head AI that both report up to.
+
+## Agents (owner approved, 26 Oct 2026)
+
+Different agents for different work, each with its own memory, so results improve every time and an
+old mistake is never repeated. Memory comes from reviewers' feedback, fact-check corrections, the
+weekly lessons, the owner's own rules ("Teach this agent"), incidents, development changes
+(CHANGELOG.md) and the skills learned from YouTube. Agents run on Claude, with OpenAI and Grok where
+each is best.
+
+- **Phase 1 (built):** memory system (lib/agentMemory.ts), Writer and Fact-Check memory, Ops agent
+  (daily health check, no AI), Agents & memory page.
+- **Phase 2:** Creative Director and Learning agents (palettes, covers, creatives; YouTube skills),
+  SEO Strategist and Publisher memory, AI consolidation of memories into each agent's skill.
+- **Phase 3:** OpenAI and Grok as providers; Social liaison agent talking to the Social Media
+  dashboard's agents (the shared brain is the first link).
+- **Phase 4:** the Growth Center head AI over both dashboards.
