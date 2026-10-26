@@ -8,6 +8,7 @@ import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { researchAndWriteBlog, verifyAndCorrect } from '../anthropic';
 import { CreditPausedError } from '../aiCredits';
+import { connectorOn, authorSlug } from '../siteConnector';
 import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia, freeSlug } from '../wordpress';
 import { listSites, getSiteRankings, addTrackedKeyword } from '../seranking';
 import { getTermsForKeyword } from '../surfer';
@@ -274,7 +275,7 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
     if (!found?.[0]) throw new Error(`Refresh target not found: ${row.refresh_url}`);
     post = await updatePost(found[0].id, { title: checked.title, contentHtml: html, excerpt: checked.meta_description, metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, status: 'publish' });
   } else {
-    const fields = { title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId: cover?.id, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined };
+    const fields = { title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId: cover?.id, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined, authorName };
     // The planned address must be free: a copy that was never live is moved to the trash.
     const freed = await freeSlug(fields.slug, checked.wp_post_id).catch(() => null);
     if (freed?.trashed.length) await activity.log('wordpress.duplicate_trashed', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}": moved WordPress post(s) ${freed.trashed.map((x) => `#${x}`).join(', ')} (never live) to the trash to free /${fields.slug}/` });
@@ -304,7 +305,11 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
 
   if (inline.uploaded.length) log.inlineImages = { ok: true, result: `${inline.uploaded.length} image(s) in the Media Library${inline.uploaded.some((u) => u.reused) ? ' (some reused from an earlier attempt)' : ''}` };
   if (!row.refresh_url) log.cover = cover ? { ok: true, result: `Cover in the Media Library with alt text "${coverAlt(checked)}"` } : { ok: false, result: 'The cover could not be uploaded, so the post has no featured image. Upload one in Drafts & Review and republish, or set it in WordPress.' };
-  log.author = authorName ? { ok: Boolean(authorId), result: authorId ? `${authorName} (WordPress user ${authorId})` : `${authorName} is not a WordPress user yet, so the default author was used` } : undefined;
+  log.author = !authorName
+    ? undefined
+    : connectorOn()
+      ? { ok: Boolean(authorSlug(authorName)), result: authorSlug(authorName) ? `${authorName} (website author ${authorSlug(authorName)})` : `${authorName} is not an author on the website yet, so the website's default author was used` }
+      : { ok: Boolean(authorId), result: authorId ? `${authorName} (WordPress user ${authorId})` : `${authorName} is not a WordPress user yet, so the default author was used` };
   await update(row.id, { status: 'published', approval_mode: reviewed ? 'reviewed' : 'auto', wp_post_url: post.link, post_publish_log: JSON.stringify(log), hold_reasons: null, author: authorName });
   await activity.log('schedule.published', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}" ${reviewed ? `approved by a reviewer${row.expert_reviewer ? ` (${row.expert_reviewer})` : ''}` : 'auto-approved after 48 hours with no rejection'}, by ${authorName || 'the default author'}: ${post.link}` });
   return 'published';

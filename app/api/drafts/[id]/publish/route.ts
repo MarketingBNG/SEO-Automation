@@ -100,6 +100,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       title: draft.title,
       contentHtml,
       author: authorId || undefined,
+      authorName: author,
       excerpt: draft.meta_description,
       featuredMediaId: cover?.id,
       status: wpStatus,
