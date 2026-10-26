@@ -105,6 +105,8 @@ Planned topics: ${(activePlan.blogPlan?.calendar || []).map((b) => `${b.title} [
 
   const playbook = getWriterPlaybook();
   const lessons = String((await settings.get('writer_lessons')) || '').trim();
+  // The Writer agent's memory: reviewers' rejections, the team's rules, and facts it got wrong before.
+  const memory = await import('./agentMemory').then((m) => m.recall('writer', { also: ['fact-check'], limit: 25, kinds: ['mistake', 'preference', 'lesson', 'fact'] })).catch(() => '');
   const playbookReference = playbook
     ? `\n\nSEO / GEO / AEO PLAYBOOK (permanent, researched and fact-checked; follow it on every article,
 together with the house rules above; if anything here conflicts with accuracy or the house voice,
@@ -172,7 +174,7 @@ VOICE (USAIndiaCFO blog house style): ${voiceGuidelines}
 - Both sides of the border: where the topic touches both countries, cover the US side, the India side
   and how they connect (treaty relief, credits, reporting in both places).${playbookReference}${
     lessons ? `\n\nLESSONS LEARNED (from our reviewers' rejections, blogs held by checks, fact-check corrections and how published posts performed; follow them):\n${lessons}` : ''
-  }${skillReference}${clientInsightReference}${strategyReference}
+  }${memory ? `\n\n${memory}` : ''}${skillReference}${clientInsightReference}${strategyReference}
 
 CHECKED AUTOMATICALLY (a draft that fails any of these is sent back to you):
 - Title 50-60 characters (never over 65) with the target keyword early. Meta description 120-156
@@ -712,6 +714,8 @@ Return ONLY JSON between ===JSON=== and ===END===:
 // `brief`: the topic brief from an earlier round of the same draft, reused so it is built once per blog.
 async function factCheckPerClaim(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false, brief: givenBrief = '' }: any = {}) {
   const today = new Date().toISOString().slice(0, 10);
+  // The Fact-Check agent's memory: claims found wrong in earlier articles, checked with extra care.
+  const factMemory = await import('./agentMemory').then((m) => m.recall('fact-check', { kinds: ['mistake', 'preference', 'lesson'], limit: 20 })).then((t) => (t ? `\n\n${t}\nA claim like one of these needs extra care: check it against the source yourself.` : '')).catch(() => '');
   const [listed, brief] = await Promise.all([targeted ? [] : listClaims(result, signal, { model }), givenBrief || buildTopicBrief(result, signal)]);
   const seen = new Set<string>();
   const items = [
@@ -749,7 +753,7 @@ Use the TOPIC BRIEF: if it shows a law, section or form was replaced or a rule c
 old one is "incorrect". Check the full rule including the exceptions inside it, for the reader the brief
 describes. Keep a correction short: one or two sentences.
 
-${FACT_CHECK_METHOD}
+${FACT_CHECK_METHOD}${factMemory}
 
 Return ONLY JSON between ===JSON=== and ===END===, one entry per claim number:
 {"checks":[{"n":1,"verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}]}
@@ -833,6 +837,8 @@ ${result.content}`;
 
 async function factCheckGrouped(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
   const today = new Date().toISOString().slice(0, 10);
+  // The Fact-Check agent's memory: claims found wrong in earlier articles, checked with extra care.
+  const factMemory = await import('./agentMemory').then((m) => m.recall('fact-check', { kinds: ['mistake', 'preference', 'lesson'], limit: 20 })).then((t) => (t ? `\n\n${t}\nA claim like one of these needs extra care: check it against the source yourself.` : '')).catch(() => '');
   const groups = batchClaims([...(targeted ? [] : (result.facts || []).map((f) => f.claim)), ...mustCheck], FACT_CHECK_PARALLEL());
   if (!groups.length) groups.push([]);
   const perChecker = Math.ceil(FACT_CHECK_SEARCHES / groups.length) + (groups.length > 1 ? 5 : 0);
@@ -855,7 +861,7 @@ reader must do (who it applies to, the trigger, a threshold or limit, "whichever
 of steps, an exemption or exception the source states) is "incorrect", with the complete version as
 the correction. Otherwise "incorrect" (give the correction) or "unverifiable".
 
-${FACT_CHECK_METHOD}
+${FACT_CHECK_METHOD}${factMemory}
 
 Return ONLY JSON between ===JSON=== and ===END===:
 {"checks":[{"claim":"exact sentence or phrase","verdict":"correct|incorrect|unverifiable","correction":"","source_url":""}]}`;
@@ -988,6 +994,7 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
   let targets: string[] | null = null; // sentences changed by the last correction
   let brief = ''; // the topic brief, built in the first round and reused after
   const log = [];
+  const corrected: any[] = []; // claims found wrong, remembered once the corrected article passes
   for (let round = 1; round <= maxRounds; round++) {
     const all = mustCheckOf(current.content);
     const targeted = Boolean(targets && targets.length);
@@ -997,6 +1004,7 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
     const result = await check({ ...current, facts: draft.facts || [] }, signal, { mustCheck, model, onActivity, targeted, brief });
     if (result.brief) brief = result.brief;
     const bad = result.checks.filter((c) => c.verdict !== 'correct');
+    corrected.push(...bad.filter((x) => x.verdict === 'incorrect' && x.correction && x.claim));
     // A figure sentence the checker skipped counts as unverified.
     const checked = result.checks.map((c) => String(c.claim || '').toLowerCase());
     const skipped = mustCheck.filter((sent) => !checked.some((c) => c && (sent.toLowerCase().includes(c) || c.includes(sent.toLowerCase().slice(0, 60)))));
@@ -1010,6 +1018,14 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
       clean++;
       if (clean >= 2) {
         await rememberFacts(result.checks, result.model || model).catch(() => 0);
+        // The corrections held through two clean checks: the Fact-Check agent remembers each one (and
+        // the Writer is given them), so the same claim is not written wrong again.
+        await import('./agentMemory')
+          .then(async (m) => {
+            for (const c of corrected.slice(0, 15))
+              await m.remember({ agent: 'fact-check', kind: 'mistake', title: String(c.claim).slice(0, 150), body: `Was wrong: "${String(c.claim).slice(0, 300)}". Correct: ${String(c.correction).slice(0, 400)}${c.source_url ? ` (source: ${c.source_url})` : ''}`, source: 'fact-check', sourceRef: draft.title ? `blog:${String(draft.title).slice(0, 80)}` : null });
+          })
+          .catch(() => {});
         return { ok: true, rounds: round + (startClean ? 1 : 0), draft: current, log };
       }
       continue;

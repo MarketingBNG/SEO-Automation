@@ -77,15 +77,16 @@ export const PAGES: { key: string; label: string }[] = [
   { key: 'overall', label: 'Overall Report' }, { key: 'seo', label: 'SEO' }, { key: 'aeo', label: 'AEO' }, { key: 'geo', label: 'GEO' }, { key: 'meetings', label: 'Meeting insights' },
   { key: 'associates', label: 'Associate Training' }, { key: 'team', label: 'Team & Roles' }, { key: 'activity', label: 'Activity Log' },
   { key: 'guide', label: 'Guide & map' },
+  { key: 'agents', label: 'Agents & memory' },
   { key: 'settings', label: 'Settings' },
 ];
 const ALL_PAGES = PAGES.map((p) => p.key);
 const HIDDEN_PAGES: Record<Role, string[]> = {
   admin: [],
   manager: ['settings'],
-  analyst: ['team', 'settings'],
-  tester: ['team'],
-  user: ['sitecontent', 'learning', 'brand', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
+  analyst: ['team', 'settings', 'agents'],
+  tester: ['team', 'agents'],
+  user: ['sitecontent', 'learning', 'brand', 'agents', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
 };
 
 // What a person can see and do: their role's access (the admin can change it per role), plus extra

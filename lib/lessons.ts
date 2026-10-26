@@ -67,6 +67,11 @@ export async function learnLessons({ write = callClaude } = {}) {
     if (!lessons) return { skipped: 'No lessons in the reply' };
     await settings.set('writer_lessons', lessons);
     await settings.set('writer_lessons_at', new Date().toISOString().slice(0, 10));
+    // Each lesson also goes into the Writer agent's memory: a lesson that comes back week after week
+    // gets stronger and stays near the top of what the writer is given.
+    const { remember } = await import('./agentMemory');
+    for (const line of String(lessons).split('\n').map((l) => l.replace(/^\s*[-*\d.)]+\s*/, '').trim()).filter((l) => l.length > 20).slice(0, 30))
+      await remember({ agent: 'writer', kind: 'lesson', title: line.slice(0, 150), body: line, source: 'weekly' }).catch(() => {});
     await activity.log('lessons.updated', { details: `${lessons.split('\n').length} lesson(s) from ${e.rejections.length} rejection(s), ${e.holds.length} hold(s), ${e.repairs.length} repair(s) and ${e.results.length} post result(s)` });
     return { lessons };
   });

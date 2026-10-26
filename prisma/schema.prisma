@@ -687,3 +687,26 @@ model brand_palettes {
   created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
   updated_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }
+
+// Agent memory (lib/agentMemory.ts): one row per thing an agent has learned. key = the normalised
+// title, so the same lesson seen again raises strength instead of adding a copy.
+model agent_memories {
+  id           Int     @id @default(autoincrement())
+  agent        String // writer | fact-check | ops | creative | learning | publisher | seo | social
+  kind         String // mistake | lesson | preference | incident | change | fact
+  title        String
+  key          String
+  body         String
+  source       String // review | fact-check | weekly | user | ops | changelog | youtube
+  source_ref   String? // draft:81, schedule:12, activity:345, changelog:2026-10-26...
+  strength     Int     @default(1) // times seen or confirmed
+  uses         Int     @default(0) // times given to the agent in a prompt
+  status       String  @default("active") // active | retired
+  created_by   String?
+  created_at   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  last_seen_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  resolved_at  String? // incidents: when the problem was last seen fixed
+
+  @@unique([agent, key])
+  @@index([agent, status])
+}

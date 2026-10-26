@@ -57,6 +57,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
     if (row.draft_id) await prisma.drafts.update({ where: { id: row.draft_id }, data: { status: 'rejected', updated_at: sqlNow() } }).catch(() => {});
     await activity.log('schedule.rejected', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}" rejected: ${text.slice(0, 200)}`, actor });
+    // The Writer agent remembers what the reviewer did not want, for every blog after this one.
+    await import('@/lib/agentMemory').then((m) => m.remember({ agent: 'writer', kind: 'mistake', title: `Reviewer: ${text.slice(0, 140)}`, body: `A reviewer rejected "${row.title}": ${text.slice(0, 1200)}`, source: 'review', sourceRef: `schedule:${id}`, by: actor })).catch(() => {});
     return NextResponse.json(updated);
   }
   // "Already done": the blog was published outside the dashboard, so nothing should try it again.

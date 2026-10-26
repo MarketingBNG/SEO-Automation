@@ -48,6 +48,18 @@ async function tick() {
   const { topicsTick } = await import('./topics');
   await topicsTick(now).catch((e: any) => console.error('Scheduler: topics failed:', e.message));
 
+  // Ops agent: the daily health check (no AI), incidents remembered until fixed, CHANGELOG.md read.
+  if ((await settings.get('last_ops_run')) !== today) {
+    const { runOps } = await import('./opsAgent');
+    await runOps().catch((e: any) => console.error('Scheduler: ops check failed:', e.message));
+    await settings.set('last_ops_run', today);
+  }
+  // Mondays: memories seen once and never used for 180 days are retired.
+  if (now.getUTCDay() === 1 && (await settings.get('last_memory_tidy')) !== today) {
+    await (await import('./agentMemory')).tidyMemories().catch(() => 0);
+    await settings.set('last_memory_tidy', today);
+  }
+
   // Learn from YouTube: Gemini watches the next videos within the day's hour budget. Not awaited: a
   // long video takes several minutes; the rest of the run goes on.
   const { learningTick } = await import('./learning');
