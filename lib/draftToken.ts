@@ -11,11 +11,6 @@ const ALLOWED: { method: string; path: RegExp }[] = [
   { method: 'GET', path: /^\/api\/drafts\/\d+\/download$/ },
   // Read-only: AI credit spend, so Claude Code can report what costs what (cannot change anything).
   { method: 'GET', path: /^\/api\/ai-credits$/ },
-  // Read-only: Learn from YouTube progress, the notes taken and the skills built (lib/learning.ts).
-  { method: 'GET', path: /^\/api\/learning$/ },
-  { method: 'GET', path: /^\/api\/learning\/(notes|skill)$/ },
-  // Read-only: the agents, their memories and the Ops health report (lib/agentMemory.ts, lib/opsAgent.ts).
-  { method: 'GET', path: /^\/api\/agents$/ },
   // Testing mode: read the waiting AI jobs and send Claude Code's answers (lib/aiQueue.ts).
   { method: 'GET', path: /^\/api\/agent$/ },
   { method: 'POST', path: /^\/api\/agent$/ },

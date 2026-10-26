@@ -1,7 +1,7 @@
-// Agent memory: what each dashboard agent has learned, so every result is better than the last and an
-// old mistake is never made twice. Memories come from reviewers' rejections, the fact checker's
-// corrections, the weekly lessons, the team's own rules ("Teach this agent"), incidents the Ops agent
-// finds, and development changes (CHANGELOG.md).
+// Agent memory: what the writer and the fact checker have learned, so every blog is better than the
+// last and an old mistake is never made twice. Memories come from reviewers' rejections, the fact
+// checker's corrections and the weekly lessons. It has no page here: the agents, their pages, Learn
+// from YouTube and Brand Palette live in the Social Media dashboard.
 //
 // The same lesson seen again raises its strength instead of adding a copy (one row per agent + key).
 // Before an agent works, recall() gives it its strongest and newest memories, mistakes first.
@@ -56,15 +56,6 @@ export async function recall(agent: string, opts: { also?: string[]; limit?: num
   return text;
 }
 
-// After the team teaches an agent, its next run uses the new memory at once.
-export async function refreshRecall(agent: string) {
-  const rows = await prisma.settings.findMany({ where: { key: { startsWith: 'memory_snapshot:' } }, select: { key: true } }).catch(() => []);
-  for (const r of rows) {
-    const [, main, also = ''] = r.key.split(':');
-    if (main === agent || also.split(',').includes(agent)) await settings.set(r.key, '').catch(() => {});
-  }
-}
-
 async function buildRecall(agent: string, { also = [] as string[], limit = 25, kinds }: { also?: string[]; limit?: number; kinds?: MemoryKind[] } = {}) {
   const rows = await prisma.agent_memories
     .findMany({ where: { agent: { in: [agent, ...also] }, status: 'active', ...(kinds ? { kind: { in: kinds } } : {}) }, orderBy: [{ strength: 'desc' }, { last_seen_at: 'desc' }], take: 200 })
@@ -77,15 +68,8 @@ async function buildRecall(agent: string, { also = [] as string[], limit = 25, k
   return `MEMORY (what this team has learned from past work; follow it, and never repeat a past mistake):\n${picked.map(line).join('\n')}`;
 }
 
-// Incidents the Ops agent no longer sees are marked resolved (kept, so a repeat is recognised).
-export async function resolveIncidents(agent: string, stillOpen: string[]) {
-  const open = new Set(stillOpen.map(memoryKey));
-  const rows = await prisma.agent_memories.findMany({ where: { agent, kind: 'incident', status: 'active', resolved_at: null } });
-  for (const r of rows) if (!open.has(r.key)) await prisma.agent_memories.update({ where: { id: r.id }, data: { resolved_at: sqlNow() } });
-}
-
-// Weekly tidy-up: a memory seen once, never used and older than 180 days is retired (it can be
-// brought back from the Agents page).
+// Weekly tidy-up: a memory seen once, never used and older than 180 days is retired (kept in the
+// table, no longer used).
 export async function tidyMemories() {
   const before = new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
   const r = await prisma.agent_memories.updateMany({ where: { status: 'active', strength: 1, uses: 0, last_seen_at: { lt: before }, kind: { notIn: ['preference', 'change'] } }, data: { status: 'retired' } });

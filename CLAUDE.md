@@ -4,7 +4,7 @@
 
 - Code changes: show the diff, and push to `main` (which deploys) only after the user confirms.
 - With every change pushed to `main`, add a line under today's date in CHANGELOG.md, tagged with the
-  agent it affects (`- (writer) ...`). The Ops agent turns each line into a memory for that agent.
+  part it affects (`- (writer) ...`).
 - Ongoing work must not stop during development. A push to `main` restarts the server: before pushing,
   check that no blog, fact check or strategy run is mid-way (`running` in `/api/ai-credits`, and `paused`),
   and say so if one is. If one is running, ask the user to press Pause (AI credits page) first, wait

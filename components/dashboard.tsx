@@ -4,8 +4,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
-  Activity, BarChart3, BookOpen, Bot, BrainCircuit, BrainCog, CalendarClock, CalendarRange, Clapperboard, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
-  LogOut, MessageSquareQuote, Palette, RefreshCcw, RefreshCw, Search, Settings, Share2, ShieldCheck, Sparkles, Users,
+  Activity, BarChart3, BookOpen, Bot, BrainCircuit, CalendarClock, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
+  LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, Share2, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
@@ -38,9 +38,6 @@ const PerformanceTab = dynamic(() => import('@/components/tabs/performance-tab')
 const TrainingTab = dynamic(() => import('@/components/tabs/training-tab'), { loading });
 const AssociateTrainingTab = dynamic(() => import('@/components/tabs/associate-training-tab'), { loading });
 const WebsiteContentTab = dynamic(() => import('@/components/tabs/website-content-tab'), { loading });
-const LearningTab = dynamic(() => import('@/components/tabs/learning-tab'), { loading });
-const BrandTab = dynamic(() => import('@/components/tabs/brand-tab'), { loading });
-const AgentsTab = dynamic(() => import('@/components/tabs/agents-tab'), { loading });
 const MeetingsTab = dynamic(() => import('@/components/tabs/meetings-tab'), { loading });
 const ActivityTab = dynamic(() => import('@/components/tabs/activity-tab'), { loading });
 const SettingsTab = dynamic(() => import('@/components/tabs/settings-tab'), { loading });
@@ -69,9 +66,6 @@ const TABS = [
 
   { key: 'sitecontent', label: 'Website Content', icon: PanelsTopLeft, group: 'Website', hint: 'Pages and blog posts of the new website' },
 
-  { key: 'learning', label: 'Learn from YouTube', icon: Clapperboard, group: 'Creative', hint: 'Videos the dashboard watches and the creative skills it learns' },
-  { key: 'brand', label: 'Brand Palette', icon: Palette, group: 'Creative', hint: 'Make and check brand colour palettes' },
-
   { key: 'overall', label: 'Overall Report', icon: BarChart3, group: 'Reports', hint: 'All channels, month on month' },
   { key: 'seo', label: 'SEO', icon: Search, group: 'Reports', hint: 'Google rankings and clicks' },
   { key: 'aeo', label: 'AEO', icon: MessageSquareQuote, group: 'Reports', hint: 'Answer engines' },
@@ -82,7 +76,6 @@ const TABS = [
   { key: 'team', label: 'Team & Roles', icon: ShieldCheck, group: 'Team', hint: 'Who can sign in and what they can do' },
   { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Team', hint: 'Everything the dashboard did, with errors' },
 
-  { key: 'agents', label: 'Agents & memory', icon: BrainCog, group: 'Admin', hint: 'What each agent remembers, teach them rules, and the daily health check' },
   { key: 'settings', label: 'Settings', icon: Settings, group: 'Admin', hint: 'Connections, blog rules, SE Ranking, AI credits' },
 ] as const;
 
@@ -91,19 +84,18 @@ const TABS = [
 const HIDDEN: Record<Role, string[]> = {
   admin: [],
   manager: [],
-  analyst: ['team', 'agents'],
-  tester: ['team', 'agents'],
-  user: ['sitecontent', 'learning', 'brand', 'agents', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
+  analyst: ['team'],
+  tester: ['team'],
+  user: ['sitecontent', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
 };
 
 type TabKey = (typeof TABS)[number]['key'];
-const GROUPS = ['Start', 'Plan', 'Write', 'Website', 'Creative', 'Reports', 'Team', 'Admin'] as const;
+const GROUPS = ['Start', 'Plan', 'Write', 'Website', 'Reports', 'Team', 'Admin'] as const;
 const GROUP_LABEL: Record<(typeof GROUPS)[number], string> = {
   Start: 'Start',
   Plan: 'Plan & publish',
   Write: 'Write & edit',
   Website: 'Website',
-  Creative: 'Creative & learning',
   Reports: 'Reports',
   Team: 'Team & training',
   Admin: 'Admin',
@@ -288,9 +280,6 @@ export default function Dashboard() {
               {k === 'calendar' && <MonthRunning standalone />}
               {k === 'associates' && <AssociateTrainingTab />}
               {k === 'sitecontent' && <WebsiteContentTab />}
-              {k === 'learning' && <LearningTab />}
-              {k === 'brand' && <BrandTab />}
-              {k === 'agents' && <AgentsTab />}
               {k === 'keywords' && <KeywordsTab />}
               {k === 'drafts' && <DraftsTab />}
               {k === 'audit' && <AuditTab />}

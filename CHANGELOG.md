@@ -1,12 +1,11 @@
 # Changelog
 
 What changed in the dashboard, newest first. Claude Code adds a line with every change pushed to
-`main`. The Ops agent reads this file every day (lib/opsAgent.ts): each line becomes a "change"
-memory for the agent named in brackets (ops when none), so every agent knows what changed.
-Format: `- (agent) what changed and what it means for the work`. Agents: writer, fact-check, ops,
-creative, learning, seo, publisher, social.
+`main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
+affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-10-26
+- (social) Learn from YouTube, Brand Palette, the Agents & memory page, the Ops health check and the shared-brain link (/api/partner) moved to the Social Media dashboard, where they now run on their own. Their tables stay in this database, untouched. The writer and fact-check memory stays here (no page): reviewers' rejections, fact-check corrections and the weekly lessons still go into every blog.
 - (ops) Agents Phase 1: every agent keeps a memory (mistakes, lessons, team rules, incidents, changes); the Ops agent runs a daily health check with no AI and remembers each incident until it is fixed.
 - (writer) Before writing, the writer reads its memory: reviewers' rejections, the weekly lessons, the team's rules and the facts found wrong before. A past mistake must never be repeated.
 - (fact-check) Claims found wrong (and fixed through two clean checks) are remembered; a similar claim later gets extra care.

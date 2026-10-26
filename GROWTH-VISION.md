@@ -27,6 +27,10 @@ The Growth Center AI:
 
 ## Agents (owner approved, 26 Oct 2026)
 
+**Moved (26 Oct 2026, owner's decision):** the agents, their Agents & memory page, the Ops agent,
+Learn from YouTube and Brand Palette now live in the **Social Media dashboard**, not here. This
+dashboard keeps only the writer and fact-check memory (no page). The plan below is kept for history.
+
 Different agents for different work, each with its own memory, so results improve every time and an
 old mistake is never repeated. Memory comes from reviewers' feedback, fact-check corrections, the
 weekly lessons, the owner's own rules ("Teach this agent"), incidents, development changes
