@@ -71,10 +71,14 @@ async function aiPhoto(topic: string, direction?: string): Promise<Buffer | null
   return b64 ? Buffer.from(b64, 'base64') : null;
 }
 
-type Direction = { queries: string[]; photo: string; gold: string };
+type Direction = { queries: string[]; photo: string; gold: string; main: string; cutout: string };
+
+// The cut-out pictures the Social Media dashboard can put on a banner (its lib/blogBanner.tsx CUTOUTS).
+const CUTOUT_NAMES = 'us-landmarks (Statue of Liberty and the US Capitol), india-landmarks (India Gate and the Indian flag), tax-documents (tax forms, calculator, pen), money (US dollar and rupee notes, coins), travel (US and Indian passports, boarding pass), legal (scales of justice, gavel), business (modern office tower)';
 
 // Art direction for one banner, following the design skills learned in the Social Media dashboard. A small call on a
-// light model; skipped (the usual banner is made) when the skills are not shared, in Testing mode, or on any error.
+// light model; skipped (the picture is then picked by the topic's words) when the skills are not shared, in Testing mode,
+// or on any error.
 async function artDirection(title: string, topic: string): Promise<Direction | null> {
   const skills = await import('./socialSkills').then((m) => m.designSkills()).catch(() => '');
   if (!skills) return null;
@@ -82,19 +86,21 @@ async function artDirection(title: string, topic: string): Promise<Direction | n
   if ((await aiMode()) === 'testing') return null;
   try {
     const { callClaude } = await import('./anthropic');
-    const system = `You are the art director for the blog banners of USAIndiaCFO, a CFO, tax and compliance firm for Indian founders, NRIs and US-India businesses. The banner design is fixed: a landscape photo, darkened on the left third where the title sits in bold white, with its last words in gold. You choose only:
-1. queries: three short stock-photo searches (Pexels) for a real photograph that tells this blog's story with concrete objects and a setting (not abstract ideas, no people's faces);
-2. photo: one or two sentences describing that photo for an AI image if no stock photo fits: subject, setting, light and mood, with the left third calm and darker;
-3. gold: the last 2 to 5 words of the title, copied exactly, that carry the hook (they are set in gold).
-Follow the design skills below (composition, hierarchy, contrast, colour and light). Premium and calm, never flashy.
+    const system = `You are the art director for the blog banners of USAIndiaCFO, a CFO, tax and compliance firm for Indian founders, NRIs and US-India businesses. The banner design is fixed: an off-white page with the logo, a deep navy band with the blog's main title in bold, a dotted rule and the rest of the title as a subtitle, the author underneath, and a photorealistic cut-out picture on the right rising out of the band. You choose:
+1. main: the first words of the title, copied exactly, that work as the bold headline (usually the part before a colon, 2 to 5 words);
+2. cutout: the one picture that tells this blog's story best, one of: ${CUTOUT_NAMES};
+3. queries: three short stock-photo searches (Pexels) for a real photograph of this blog's story (used only by the older photo banner);
+4. photo: one or two sentences describing that photo for an AI image (older photo banner only);
+5. gold: the last 2 to 5 words of the title, copied exactly (older photo banner only).
+Follow the design skills below (hierarchy, composition, contrast, colour). Premium and calm, never flashy.
 
 ${skills}
 
-Return only JSON: {"queries": ["...", "...", "..."], "photo": "...", "gold": "..."}`;
+Return only JSON: {"main": "...", "cutout": "...", "queries": ["...", "...", "..."], "photo": "...", "gold": "..."}`;
     const { text } = await callClaude(system, [{ role: 'user', content: `Blog title: ${title}\nTopic: ${topic}` }], undefined, { maxUses: 0, effort: 'low', model: process.env.BANNER_MODEL || process.env.FACT_CHECK_MODEL || 'claude-haiku-5-5', feature: 'banner' });
     const j = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
     const queries = (Array.isArray(j.queries) ? j.queries : []).map((x: unknown) => String(x).slice(0, 80)).filter(Boolean).slice(0, 3);
-    return { queries, photo: String(j.photo || '').slice(0, 900), gold: String(j.gold || '').slice(0, 80) };
+    return { queries, photo: String(j.photo || '').slice(0, 900), gold: String(j.gold || '').slice(0, 80), main: String(j.main || '').slice(0, 120), cutout: String(j.cutout || '').slice(0, 40) };
   } catch {
     return null;
   }
@@ -108,13 +114,17 @@ export async function ensurePhotoCover(draftId: number): Promise<string | null> 
   const topic = `${d.title || ''} ${d.keyword?.keyword || ''}`.trim();
   const title = d.title || d.keyword?.keyword || 'USAIndiaCFO';
   const dir = await artDirection(title, topic);
-  const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo).catch(() => null));
-  // Made in the Social Media dashboard (lib/socialSkills.ts), which also finds a photo when there is none here; made here
-  // as before when that link is not set up or fails.
+  // The house banner, made in the Social Media dashboard (lib/socialSkills.ts) with the author's name. When that link is
+  // not set up or fails, the older photo banner is made here.
+  const row = await prisma.blog_schedule.findFirst({ where: { draft_id: draftId }, select: { author: true } }).catch(() => null);
+  const author = row?.author || d.author || null;
   const { socialBanner } = await import('./socialSkills');
-  const made = await socialBanner({ title, topic, gold: dir?.gold, queries: dir?.queries, direction: dir?.photo, photo });
-  const jpg = made || (photo ? await composeCover(photo, title, { gold: dir?.gold }) : null);
-  if (!jpg) return null;
+  let jpg = await socialBanner({ title, topic, author, main: dir?.main, cutout: dir?.cutout });
+  if (!jpg) {
+    const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo).catch(() => null));
+    if (!photo) return null;
+    jpg = await composeCover(photo, title, { gold: dir?.gold });
+  }
   const key = await saveFile(`draft-${draftId}-cover-${Date.now()}.jpg`, jpg);
   // Only if nobody uploaded a cover meanwhile.
   await prisma.drafts.updateMany({ where: { id: draftId, featured_image_path: null }, data: { featured_image_path: key } });

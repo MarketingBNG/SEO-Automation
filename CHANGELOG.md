@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-10-27
+- (social) Blog banners use the house banner design from the Social Media dashboard, with the author's name; the art direction picks the bold main title and the cut-out picture. The older photo banner is made here only when that link fails.
 - (social) Every blog not yet on the website gets its banner by itself (two per scheduler run, retried after six hours), made in the Social Media dashboard; it finds a photo there when this dashboard has none.
 - (ops) Associate Training test: each question keeps its own tick (a question with a missing or repeated id no longer takes another question's tick, which stopped the test from being finished), the chosen option is highlighted, and the page shows how many questions are answered.
 - (social) Blog banners are made in the Social Media dashboard (website look plus a straight square grid); if that link is not set up or fails, the banner is made here as before, now with the same grid.
