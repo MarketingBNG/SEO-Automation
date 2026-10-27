@@ -3,7 +3,7 @@ import prisma from '@/lib/prisma';
 import * as settings from '@/lib/settings';
 import { getMe } from '@/lib/auth';
 import { istDay } from '@/lib/topics';
-import { LEVELS, PASS_PERCENT, prepareDay, runTrainingDay, submitTest, type Question } from '@/lib/associateTraining';
+import { LEVELS, PASS_PERCENT, prepareDay, runTrainingDay, submitTest, testQuestions, type Question } from '@/lib/associateTraining';
 import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
@@ -34,7 +34,7 @@ async function personView(email: string) {
     name: profile.name,
     profile: { level: profile.level, streak: profile.streak, active: profile.active },
     lesson: lesson ? { ...lesson, sources: JSON.parse(lesson.sources || '[]'), questions: undefined } : null,
-    test: open ? { id: open.id, day: open.day, total: open.total, questions: hidden(JSON.parse(open.questions)) } : null,
+    test: open ? { id: open.id, day: open.day, total: open.total, questions: hidden(testQuestions(open)) } : null,
     results: results.map((r) => ({ ...r, percent: pct(r) })),
     pastLessons: past.map((l) => ({ ...l, sources: JSON.parse(l.sources || '[]') })).filter((l) => l.id !== lesson?.id),
     dueAgain: await prisma.training_misses.count({ where: { email, cleared: false } }),
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
     const t = await prisma.training_tests.findUnique({ where: { id: testId } });
     if (!t || (t.email !== me.email && !viewer)) return NextResponse.json({ error: 'Test not found' }, { status: 404 });
     if (t.status === 'open') return NextResponse.json({ error: 'Finish the test first' }, { status: 409 });
-    return NextResponse.json({ test: { ...t, questions: JSON.parse(t.questions), answers: JSON.parse(t.answers || '{}'), percent: pct(t) } });
+    return NextResponse.json({ test: { ...t, questions: testQuestions(t), answers: JSON.parse(t.answers || '{}'), percent: pct(t) } });
   }
   const base = { today: istDay(), passPercent: PASS_PERCENT, levels: LEVELS, viewer, canManage: me.role === 'admin' };
 

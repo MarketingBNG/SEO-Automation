@@ -130,13 +130,24 @@ async function addMiss(email: string, q: Question, today: string) {
   else await prisma.training_misses.create({ data: { email, question: JSON.stringify(clean), due_day: addDays(today, REPEAT_AFTER_DAYS) } });
 }
 
+// The questions of a stored test, each with an id of its own: a missing or repeated id (which would
+// tie two questions' ticks together) gets one made from the test and the question number.
+export function testQuestions(t: { id: number; questions: string }): Question[] {
+  const seen = new Set<string>();
+  return (JSON.parse(t.questions) as Question[]).map((q, i) => {
+    const id = q.id && !seen.has(q.id) ? q.id : `t${t.id}-${i + 1}`;
+    seen.add(id);
+    return { ...q, id };
+  });
+}
+
 // Marks a test. Returns the result with the right answers and explanations.
 export async function submitTest(email: string, testId: number, answers: Record<string, number>) {
   const t = await prisma.training_tests.findUnique({ where: { id: testId } });
   if (!t || t.email !== email) throw Object.assign(new Error('Test not found'), { status: 404 });
   if (t.status !== 'open') throw Object.assign(new Error('This test is already finished'), { status: 409 });
   const today = istDay();
-  const questions = JSON.parse(t.questions) as Question[];
+  const questions = testQuestions(t);
   let score = 0;
   for (const q of questions) {
     const right = Number(answers?.[q.id]) === q.answer && answers?.[q.id] !== undefined && answers?.[q.id] !== null;
