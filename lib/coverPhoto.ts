@@ -109,12 +109,35 @@ export async function ensurePhotoCover(draftId: number): Promise<string | null> 
   const title = d.title || d.keyword?.keyword || 'USAIndiaCFO';
   const dir = await artDirection(title, topic);
   const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo).catch(() => null));
-  if (!photo) return null;
-  // Made in the Social Media dashboard (lib/socialSkills.ts); here as before when that link is not set up or fails.
+  // Made in the Social Media dashboard (lib/socialSkills.ts), which also finds a photo when there is none here; made here
+  // as before when that link is not set up or fails.
   const { socialBanner } = await import('./socialSkills');
-  const jpg = (await socialBanner(title, dir?.gold, photo, `draft:${draftId}`)) || (await composeCover(photo, title, { gold: dir?.gold }));
+  const made = await socialBanner({ title, topic, gold: dir?.gold, queries: dir?.queries, direction: dir?.photo, photo });
+  const jpg = made || (photo ? await composeCover(photo, title, { gold: dir?.gold }) : null);
+  if (!jpg) return null;
   const key = await saveFile(`draft-${draftId}-cover-${Date.now()}.jpg`, jpg);
   // Only if nobody uploaded a cover meanwhile.
   await prisma.drafts.updateMany({ where: { id: draftId, featured_image_path: null }, data: { featured_image_path: key } });
   return key;
+}
+
+// Every blog not yet on the website gets its banner by itself: a few per scheduler run, so nobody has to press anything.
+// A blog that could not get one is tried again after six hours.
+export async function fillMissingCovers(max = 2): Promise<number> {
+  const tried: Record<string, number> = JSON.parse((await settings.get('cover_fill_tried').catch(() => null)) || '{}');
+  const now = Date.now();
+  const rows = await prisma.drafts.findMany({
+    where: { featured_image_path: null, wp_post_url: null, kind: { not: 'article' }, status: { notIn: ['in_progress', 'rejected', 'published'] } },
+    select: { id: true },
+    orderBy: { id: 'desc' },
+    take: 20,
+  });
+  let made = 0;
+  for (const r of rows.filter((x) => now - (tried[x.id] || 0) > 6 * 3600000).slice(0, max)) {
+    tried[r.id] = now;
+    if (await ensurePhotoCover(r.id).catch(() => null)) made++;
+  }
+  for (const k of Object.keys(tried)) if (now - tried[k] > 7 * 86400000) delete tried[k];
+  await settings.set('cover_fill_tried', JSON.stringify(tried)).catch(() => {});
+  return made;
 }

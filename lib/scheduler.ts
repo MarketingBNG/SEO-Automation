@@ -44,6 +44,10 @@ async function tick() {
   const { resumeInterruptedBlog } = await import('./blogJob');
   await resumeInterruptedBlog().catch((e: any) => console.error('Scheduler: blog resume failed:', e.message));
 
+  // Blogs not yet on the website get their banner by themselves (made in the Social Media dashboard).
+  const { fillMissingCovers } = await import('./coverPhoto');
+  await fillMissingCovers().catch((e: any) => console.error('Scheduler: banners failed:', e.message));
+
   // Topics: once a day after 10:00 IST.
   const { topicsTick } = await import('./topics');
   await topicsTick(now).catch((e: any) => console.error('Scheduler: topics failed:', e.message));
