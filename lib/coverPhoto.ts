@@ -110,7 +110,9 @@ export async function ensurePhotoCover(draftId: number): Promise<string | null> 
   const dir = await artDirection(title, topic);
   const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo).catch(() => null));
   if (!photo) return null;
-  const jpg = await composeCover(photo, title, { gold: dir?.gold });
+  // Made in the Social Media dashboard (lib/socialSkills.ts); here as before when that link is not set up or fails.
+  const { socialBanner } = await import('./socialSkills');
+  const jpg = (await socialBanner(title, dir?.gold, photo, `draft:${draftId}`)) || (await composeCover(photo, title, { gold: dir?.gold }));
   const key = await saveFile(`draft-${draftId}-cover-${Date.now()}.jpg`, jpg);
   // Only if nobody uploaded a cover meanwhile.
   await prisma.drafts.updateMany({ where: { id: draftId, featured_image_path: null }, data: { featured_image_path: key } });

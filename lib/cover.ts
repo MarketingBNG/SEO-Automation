@@ -47,6 +47,19 @@ export async function composeCover(photo: Buffer, title: string, opts: { png?: b
       <rect width="100%" height="100%" fill="url(#g)"/>
     </svg>`
   );
+  // The straight square grid (as the Social Media dashboard draws it), strongest behind the title, fading over the photo.
+  const cell = 45;
+  const fade = (x: number) => Math.max(0, 0.13 * (1 - x / (W * 0.8))).toFixed(3);
+  const vlines = Array.from({ length: Math.ceil(W / cell) + 1 }, (_, i) => `<rect x="${i * cell}" y="0" width="1" height="${H}" fill="#fff" fill-opacity="${fade(i * cell)}"/>`).join('');
+  const hlines = Array.from({ length: Math.ceil(H / cell) + 1 }, (_, j) => `<rect x="0" y="${j * cell}" width="${W}" height="1" fill="url(#h)"/>`).join('');
+  const grid = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
+      <defs><linearGradient id="h" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0.13"/><stop offset="0.45" stop-color="#fff" stop-opacity="0.05"/><stop offset="0.8" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+      ${vlines}${hlines}
+      <rect x="${cell * 11}" y="${cell * 11}" width="${cell + 1}" height="${cell + 1}" fill="none" stroke="${GOLD}" stroke-opacity="0.5" stroke-width="1.5"/>
+      <rect x="${cell * 12}" y="${cell * 12}" width="${cell + 1}" height="${cell + 1}" fill="${GOLD}" fill-opacity="0.14"/>
+    </svg>`
+  );
   const { white, gold } = splitTitle(title, opts.gold);
   const size = title.length > 70 ? 230 : title.length > 45 ? 270 : 320;
   const head = await fontText(`<span foreground="#FFFFFF">${esc(white)}</span>${gold ? `\n<span foreground="${GOLD}">${esc(gold)}</span>` : ''}`, BOLD, 'Montserrat Bold', 640, size);
@@ -54,6 +67,7 @@ export async function composeCover(photo: Buffer, title: string, opts: { png?: b
   const top = Math.max(150, Math.round((H - (headMeta.height || 300)) / 2) + 10);
   const layers: OverlayOptions[] = [
     { input: shade, left: 0, top: 0 },
+    { input: grid, left: 0, top: 0 },
     { input: head, left: 64, top },
     { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="88" height="5"><rect width="88" height="5" rx="2" fill="${GOLD}"/></svg>`), left: 66, top: Math.min(H - 40, top + (headMeta.height || 300) + 22) },
   ];

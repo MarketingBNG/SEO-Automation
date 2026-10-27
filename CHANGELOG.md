@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-10-27
+- (social) Blog banners are made in the Social Media dashboard (website look plus a straight square grid) and listed on its SEO banners page; if that link is not set up or fails, the banner is made here as before, now with the same grid.
 - (social) Blog banners follow the design skills learned in the Social Media dashboard (read through a signed, read-only link, SOCIAL_SKILLS_SECRET): a small AI step on a light model picks better photo searches, a better AI photo prompt and the gold words of the title. Without the link, in Testing mode, or on any error, banners are made exactly as before. Other skill sets (poster, thumbnail, motion, script) can be asked for by name when a feature needs them.
 
 ## 2026-10-26
