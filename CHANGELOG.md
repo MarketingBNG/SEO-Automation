@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-10-27
+- (ops) Associate Training test: each question keeps its own tick (a question with a missing or repeated id no longer takes another question's tick, which stopped the test from being finished), the chosen option is highlighted, and the page shows how many questions are answered.
 - (social) Blog banners follow the design skills learned in the Social Media dashboard (read through a signed, read-only link, SOCIAL_SKILLS_SECRET): a small AI step on a light model picks better photo searches, a better AI photo prompt and the gold words of the title. Without the link, in Testing mode, or on any error, banners are made exactly as before. Other skill sets (poster, thumbnail, motion, script) can be asked for by name when a feature needs them.
 
 ## 2026-10-26

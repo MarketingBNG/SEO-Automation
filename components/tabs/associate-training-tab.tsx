@@ -65,12 +65,19 @@ function Review({ test }: { test: any }) {
 }
 
 function Test({ test, onDone }: { test: any; onDone: () => void }) {
-  const [answers, setAnswers] = useState<Record<string, number>>({});
+  // Ticks are kept by question number, so a question with a missing or repeated id still keeps its own
+  // tick; they are turned into { questionId: option } only when the test is sent.
+  const [picked, setPicked] = useState<Record<number, number>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
+  const answered = Object.keys(picked).length;
   async function submit() {
-    if (Object.keys(answers).length < test.questions.length && !confirm('Some questions are not answered. Submit anyway?')) return;
+    if (answered < test.questions.length && !confirm('Some questions are not answered. Submit anyway?')) return;
+    const answers: Record<string, number> = {};
+    test.questions.forEach((q: any, i: number) => {
+      if (picked[i] !== undefined) answers[q.id] = picked[i];
+    });
     setBusy(true);
     setErr(null);
     try {
@@ -97,18 +104,21 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
   return (
     <div className="space-y-4">
       {test.questions.map((q: any, i: number) => (
-        <div key={q.id} className="space-y-2 rounded-lg border p-3">
+        <div key={i} className="space-y-2 rounded-lg border p-3">
           <div className="text-sm font-medium">
             {i + 1}. {q.q} {q.repeat && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">Asked again</span>}
           </div>
           {q.options.map((o: string, k: number) => (
-            <label key={k} className="flex cursor-pointer items-start gap-2 text-sm">
-              <input type="radio" name={q.id} className="mt-1" checked={answers[q.id] === k} onChange={() => setAnswers({ ...answers, [q.id]: k })} />
+            <label key={k} className={`flex cursor-pointer items-start gap-2 rounded-md border px-2 py-1.5 text-sm ${picked[i] === k ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}>
+              <input type="radio" name={`test-${test.id}-q${i}`} className="mt-1 size-4 accent-primary" checked={picked[i] === k} onChange={() => setPicked((p) => ({ ...p, [i]: k }))} />
               {o}
             </label>
           ))}
         </div>
       ))}
+      <div className="text-sm text-muted-foreground">
+        {answered} of {test.questions.length} answered
+      </div>
       {err && <div className="text-sm text-red-600">{err}</div>}
       <Button onClick={submit} disabled={busy}>
         {busy && <Loader2 className="size-4 animate-spin" />} Submit the test
