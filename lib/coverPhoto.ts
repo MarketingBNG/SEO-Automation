@@ -63,7 +63,7 @@ async function aiPhoto(topic: string, direction?: string): Promise<Buffer | null
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: process.env.COVER_IMAGE_MODEL || 'gpt-image-1', prompt, size: '1536x1024', n: 1 }),
+    body: JSON.stringify({ model: process.env.COVER_IMAGE_MODEL || 'gpt-image-2.5-sunburst', prompt, size: '1536x1024', n: 1 }),
     signal: AbortSignal.timeout(120000),
   }).catch(() => null);
   if (!res?.ok) return null;
