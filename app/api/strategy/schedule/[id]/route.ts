@@ -102,6 +102,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (r.result !== 'published') return NextResponse.json({ error: `Not published. ${r.hold_reasons.join(' ') || 'It was held; see its status.'}`, ...r }, { status: 409 });
       return NextResponse.json(r);
     } catch (e: any) {
+      await activity.log('schedule.publish_failed', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}": ${String(e.message || e).slice(0, 300)}`, actor }).catch(() => {});
       return NextResponse.json({ error: e.message }, { status: e.status || 500 });
     }
   }

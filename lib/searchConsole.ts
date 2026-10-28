@@ -2,6 +2,9 @@ import path from 'path';
 import fs from 'fs';
 import { google } from 'googleapis';
 
+// No googleapis call (Search Console, URL inspection) may wait longer than a minute.
+google.options({ timeout: 60000 });
+
 // The key can be the JSON itself in GOOGLE_SERVICE_ACCOUNT_KEY_JSON (hosted deployments have no
 // local files) or a path to the key file in GOOGLE_SERVICE_ACCOUNT_KEY_PATH (local).
 function googleAuth(scopes) {

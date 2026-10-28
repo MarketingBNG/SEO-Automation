@@ -95,6 +95,18 @@ async function getSiteRankings(siteId, { signal }: any = {}) {
   return rows;
 }
 
+// One row per keyword, at its best position across engines, for totals and the top-10 distribution
+// (getSiteRankings returns rows best first, so the first row of each keyword is its best).
+function oneRowPerKeyword(rows: any[]) {
+  const seen = new Set();
+  return rows.filter((r) => {
+    const k = String(r.keyword || '').toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 async function researchKeywords(type, seed, { source = 'us', limit = 30 }: any = {}) {
   return cachedCall('seranking-kw', { type, seed, source, limit }, 24, () => researchKeywordsLive(type, seed, { source, limit }));
 }
@@ -237,6 +249,6 @@ async function getAiTrackerPresence(siteId: number, llmId: number, dateFrom: str
 }
 
 export {
-  getSubscription, listSites, getSiteRankings, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword, addTrackedKeywords, listProjectKeywords,
+  getSubscription, listSites, getSiteRankings, oneRowPerKeyword, researchKeywords, getReferringDomainsCount, listReferringDomains, getBacklinkGap, addTrackedKeyword, addTrackedKeywords, listProjectKeywords,
   getAiSearchOverview, listAiTrackerEngines, getAiTrackerStatistics, getAiTrackerPresence,
 };

@@ -8,7 +8,8 @@ const SCOPES = [
   'ZohoCRM.modules.leads.READ',
   'ZohoCRM.modules.contacts.READ',
   'ZohoCRM.modules.deals.READ',
-  'ZohoCRM.settings.ALL',
+  // Only the field list is read (lead source picklists); reconnect Zoho once for this narrower scope.
+  'ZohoCRM.settings.fields.READ',
   // The connection test reads /crm/v2/org.
   'ZohoCRM.org.READ',
 ].join(',');
@@ -40,6 +41,7 @@ async function exchangeCodeForTokens(code) {
   const { clientId, clientSecret, accountsUrl, redirectUri } = getConfig();
 
   const res = await fetch(`${accountsUrl}/oauth/v2/token`, {
+    signal: AbortSignal.timeout(30000),
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -69,6 +71,7 @@ async function refreshAccessToken(tokens) {
   const { clientId, clientSecret, accountsUrl } = getConfig();
 
   const res = await fetch(`${accountsUrl}/oauth/v2/token`, {
+    signal: AbortSignal.timeout(30000),
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({

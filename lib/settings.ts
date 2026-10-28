@@ -38,14 +38,23 @@ export async function getMany(keys: string[]): Promise<Record<string, string | n
   return out;
 }
 
+// Every setting except the paid-API answer cache (apicache:*, lib/apiCache.ts), which is large and
+// not a setting: it must not be sent to the browser with the settings page.
 export async function getAll() {
-  const rows = await prisma.settings.findMany({ select: { key: true, value: true } });
+  const rows = await prisma.settings.findMany({ where: { NOT: { key: { startsWith: 'apicache:' } } }, select: { key: true, value: true } });
   const out: Record<string, any> = { ...DEFAULTS };
   for (const row of rows) out[row.key] = row.value;
   return out;
 }
 
 export async function set(key, value) {
+  // An empty value for a setting with a default (or a word limit that is not a positive number) goes
+  // back to the default, as the Writing rules page says, instead of an empty prompt line.
+  const cleared = String(value ?? '').trim() === '' || (key === 'max_words' && !/^[1-9]\d*$/.test(String(value).trim()));
+  if (DEFAULTS[key] && cleared) {
+    await prisma.settings.deleteMany({ where: { key } });
+    return;
+  }
   await prisma.settings.upsert({
     where: { key },
     create: { key, value: String(value) },

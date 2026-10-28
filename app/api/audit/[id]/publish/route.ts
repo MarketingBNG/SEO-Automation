@@ -60,6 +60,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: true, wpPostUrl: post.link }, { status: 200 });
   } catch (err: any) {
     console.error(err);
+    await activity
+      .log('audit.rewrite_publish_failed', { entityType: 'blog_audit', entityId: nid, details: `"${audit.rewrite_title || audit.title || ''}": ${String(err.message || err).slice(0, 300)}`, actor: await getActor() })
+      .catch(() => {});
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

@@ -11,7 +11,7 @@ import { cn } from 'cn';
 // performs in Google and GA4 with the keywords it ranks for (BlogAnalytics). BlogTable lists every
 // published blog with its clicks and top keywords.
 
-const fmt = (n: any) => Number(n).toLocaleString('en-US');
+const fmt = (n: any) => (n === null || n === undefined ? '-' : Number(n).toLocaleString('en-US'));
 const shortUrl = (u: any) => String(u || '').replace(/^https?:\/\/(www\.)?usaindiacfo\.com/, '') || '/';
 const STATE: Record<string, { badge: string; label: string }> = {
   used: { badge: 'approved', label: 'used' },

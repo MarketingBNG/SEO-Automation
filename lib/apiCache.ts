@@ -29,3 +29,11 @@ export async function cachedCall<T>(name: string, args: unknown, ttlHours: numbe
   inFlight.set(key, p);
   return p;
 }
+
+// Expired answers are never read again unless the same question comes back, so they are deleted
+// once they are older than the longest time limit (Surfer, 7 days). Called once a day by the scheduler.
+// The saved value starts with {"at":<ms>, so the age is read without parsing the whole answer.
+export async function pruneApiCache(now = Date.now()) {
+  const { default: prisma } = await import('./prisma');
+  return prisma.$executeRaw`DELETE FROM settings WHERE key LIKE 'apicache:%' AND substring(value from '^[{]"at":([0-9]+)')::bigint < ${now - 8 * 24 * 3600000}`;
+}

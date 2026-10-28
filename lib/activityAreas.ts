@@ -31,6 +31,11 @@ export const AREAS: Record<string, string> = {
   lessons: 'Training',
   seranking: 'Settings and connections',
   wordpress_plugin: 'Website',
+  site: 'Website',
+  ai_queue: 'AI credits',
+  topics: 'Research',
+  article: 'Blogs and drafts',
+  directories: 'Backlinks and outreach',
 };
 export const areaOf = (action: string) => AREAS[action.split('.')[0]] || 'Other';
 // "draft.generation_failed" -> "Generation failed"

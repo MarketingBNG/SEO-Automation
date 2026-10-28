@@ -8,6 +8,7 @@ import prisma from './prisma';
 import * as settings from './settings';
 import * as activity from './activity';
 import { callClaude } from './anthropic';
+import { CreditPausedError } from './aiCredits';
 import { parseJson } from './strategy/generate';
 import { getRecentTranscripts } from './fireflies';
 import { istDay, istHour } from './topics';
@@ -108,7 +109,10 @@ export async function prepareDay(email: string, day: string) {
     for (const q of JSON.parse(t.questions) as Question[]) await addMiss(email, q, day);
   }
   if (!(await prisma.training_tests.findUnique({ where: { email_day: { email, day } } }))) {
-    const lesson = p.lesson_id ? await prisma.training_lessons.findUnique({ where: { id: p.lesson_id } }) : null;
+    const last = p.lesson_id ? await prisma.training_lessons.findUnique({ where: { id: p.lesson_id } }) : null;
+    // A lesson is tested once: when a day's new lesson could not be made, the old one is not tested again.
+    const tested = last ? await prisma.training_tests.findFirst({ where: { email, lesson_id: last.id }, select: { id: true } }) : null;
+    const lesson = last && !tested ? last : null;
     const fresh: Question[] = lesson && lesson.day < day ? JSON.parse(lesson.questions) : [];
     const misses = await prisma.training_misses.findMany({ where: { email, cleared: false, due_day: { lte: day } }, orderBy: { due_day: 'asc' }, take: MAX_REPEATS_PER_TEST });
     const repeats: Question[] = misses.map((m) => ({ ...(JSON.parse(m.question) as Question), repeat: true }));
@@ -145,18 +149,26 @@ export function testQuestions(t: { id: number; questions: string }): Question[] 
 export async function submitTest(email: string, testId: number, answers: Record<string, number>) {
   const t = await prisma.training_tests.findUnique({ where: { id: testId } });
   if (!t || t.email !== email) throw Object.assign(new Error('Test not found'), { status: 404 });
-  if (t.status !== 'open') throw Object.assign(new Error('This test is already finished'), { status: 409 });
+  // Claimed in one step, so two submits at once (two tabs, a retry) cannot both mark it.
+  const claim = await prisma.training_tests.updateMany({ where: { id: t.id, email, status: 'open' }, data: { status: 'marking' } });
+  if (claim.count !== 1) throw Object.assign(new Error('This test is already finished'), { status: 409 });
   const today = istDay();
   const questions = testQuestions(t);
   let score = 0;
-  for (const q of questions) {
-    const right = Number(answers?.[q.id]) === q.answer && answers?.[q.id] !== undefined && answers?.[q.id] !== null;
-    if (right) {
-      score++;
-      await prisma.training_misses.updateMany({ where: { email, cleared: false, question: { contains: `"id":"${q.id}"` } }, data: { cleared: true } });
-    } else await addMiss(email, q, today);
+  try {
+    for (const q of questions) {
+      const right = Number(answers?.[q.id]) === q.answer && answers?.[q.id] !== undefined && answers?.[q.id] !== null;
+      if (right) {
+        score++;
+        await prisma.training_misses.updateMany({ where: { email, cleared: false, question: { contains: `"id":"${q.id}"` } }, data: { cleared: true } });
+      } else await addMiss(email, q, today);
+    }
+    await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'done', score, answers: JSON.stringify(answers || {}), submitted_at: new Date().toISOString() } });
+  } catch (e) {
+    // Not left half-marked: it can be submitted again.
+    await prisma.training_tests.updateMany({ where: { id: t.id, status: 'marking' }, data: { status: 'open' } }).catch(() => {});
+    throw e;
   }
-  await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'done', score, answers: JSON.stringify(answers || {}), submitted_at: new Date().toISOString() } });
   const percent = Math.round((score / Math.max(1, questions.length)) * 100);
   const p = await prisma.training_profiles.findUnique({ where: { email } });
   let levelUp = false;
@@ -175,14 +187,20 @@ export async function runTrainingDay(now = new Date()) {
   g.__trainingRun = true;
   const day = istDay(now);
   const errors: string[] = [];
+  let paused = false;
   try {
     // Admins and managers watch; only associates get lessons and tests.
     const watchers = (await prisma.team_members.findMany({ where: { role: { in: ['admin', 'manager'] } }, select: { email: true } })).map((r) => r.email.toLowerCase());
     const people = await prisma.training_profiles.findMany({ where: { active: true, email: { notIn: watchers } } });
-    for (const p of people) await prepareDay(p.email, day).catch((e) => errors.push(`${p.email}: ${e.message}`));
+    for (const p of people) {
+      await prepareDay(p.email, day).catch((e) => {
+        errors.push(`${p.email}: ${e.message}`);
+        if (e instanceof CreditPausedError) paused = true;
+      });
+    }
     await settings.set('training_last_run', JSON.stringify({ at: new Date().toISOString(), day, people: people.length, errors }));
     if (errors.length) await activity.log('training.failed', { details: errors.join('; ').slice(0, 300) });
-    return { day, people: people.length, errors };
+    return { day, people: people.length, errors, paused };
   } finally {
     g.__trainingRun = false;
   }
@@ -194,5 +212,7 @@ export async function trainingTick(now = new Date()) {
   const day = istDay(now);
   if ((await settings.get('training_last_day')) === day) return;
   await settings.set('training_last_day', day);
-  await runTrainingDay(now).catch((e) => console.error('Training day failed:', e.message));
+  const r: any = await runTrainingDay(now).catch((e) => console.error('Training day failed:', e.message));
+  // Testing mode or paused AI credits: no lesson was made, so a later tick tries the day again.
+  if (r?.paused) await settings.set('training_last_day', '');
 }

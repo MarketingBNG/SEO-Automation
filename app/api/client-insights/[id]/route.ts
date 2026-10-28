@@ -46,7 +46,19 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
 
 export async function DELETE(req: NextRequest, { params }: Ctx) {
   const { id } = await params;
-  await prisma.client_insights.deleteMany({ where: { id: toId(id) } });
+  const nid = toId(id);
+  const row = await prisma.client_insights.findUnique({ where: { id: nid } });
+  if (!row) return NextResponse.json({ ok: true }, { status: 200 });
+  // A Fireflies meeting is kept as 'rejected' instead of removed: the daily sync finds meetings by
+  // transcript_id, and would import, clean (paid) and maybe approve a removed one again.
+  if (row.transcript_id) await prisma.client_insights.update({ where: { id: nid }, data: { status: 'rejected', decided_at: sqlNow() } });
+  else await prisma.client_insights.deleteMany({ where: { id: nid } });
+  await activity.log('client_insight.deleted', {
+    entityType: 'client_insight',
+    entityId: nid,
+    details: `${row.title || '(untitled meeting)'}${row.transcript_id ? ' (kept as rejected so the sync does not bring it back)' : ''}`,
+    actor: await getActor(),
+  });
   return NextResponse.json({ ok: true }, { status: 200 });
 }
 export { methodNotAllowed as GET, methodNotAllowed as POST, methodNotAllowed as PUT };

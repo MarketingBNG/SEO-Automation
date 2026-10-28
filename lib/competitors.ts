@@ -36,12 +36,22 @@ async function classifyWithClaude(candidates) {
   const { text } = await callClaude(
     `You pick the business competitors of usaindiacfo.com, a firm selling cross-border CFO, accounting, tax, company formation and compliance services for US and India businesses.
 From the domains given (they rank in Google for our keywords), keep ONLY firms that sell similar professional services to clients. Drop news, government, software products, directories, forums and general publishers. Check a domain with a web search if unsure.
-Return ONLY the kept domains, comma separated, nothing else.`,
+Return ONLY ===JSON===["kept-domain.com"]===END===`,
     [{ role: 'user', content: candidates.map((c) => `${c.domain} (in top 5 for ${c.seen} of our keywords)`).join('\n') }],
     undefined,
     { maxUses: 5, effort: 'medium', feature: 'competitors' }
   );
-  return text.toLowerCase().split(/[\s,]+/).map((d) => d.replace(/^www\./, '').trim()).filter((d) => /\./.test(d));
+  return parseKept(text);
+}
+
+// Only the marked list counts: the reply also holds any narration written around the web searches
+// ("let me check a.com"), which named domains Claude then dropped.
+export function parseKept(text: string): string[] {
+  const m = String(text || '').match(/===JSON===([\s\S]*?)===END===/);
+  if (!m) throw new Error('No marked competitor list in the reply');
+  const list = JSON.parse(m[1].trim());
+  if (!Array.isArray(list)) throw new Error('The competitor list is not an array');
+  return list.map((d) => String(d || '').toLowerCase().trim().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/[\/.,;:)'"]+$/, '')).filter((d) => /\./.test(d));
 }
 
 // The list the strategy uses: the one typed in Settings wins; otherwise the detected one.

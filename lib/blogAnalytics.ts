@@ -102,7 +102,7 @@ async function blogAnalytics(inputUrl, { days = 28, keyword = '' }: any = {}) {
     const impr = sel.reduce((s, r) => s + r.impressions, 0);
     return impr ? sel.reduce((s, r) => s + r.position * r.impressions, 0) / impr : null;
   };
-  const kpi = (label, now, before, o = {}) => ({ label, now: round(now, o.digits ?? 0), before: round(before, o.digits ?? 0), changePct: pct(now, before), unit: o.unit || '', lowerIsBetter: Boolean(o.lowerIsBetter), note: o.note || '' });
+  const kpi = (label, now, before, o = {}) => ({ label, now: round(now, o.digits ?? 0), before: round(before, o.digits ?? 0), changePct: now == null || before == null ? null : pct(now, before), unit: o.unit || '', lowerIsBetter: Boolean(o.lowerIsBetter), note: o.note || '' });
 
   const c = (pick, r) => sumRange(days_, r, pick);
   const clicksN = c((r) => r.clicks, w.current);
@@ -165,7 +165,7 @@ async function blogAnalytics(inputUrl, { days = 28, keyword = '' }: any = {}) {
       kpi('Google clicks', clicksN, clicksB),
       kpi('Impressions', imprN, imprB),
       kpi('Click-through rate', imprN ? (clicksN / imprN) * 100 : 0, imprB ? (clicksB / imprB) * 100 : 0, { digits: 2, unit: '%' }),
-      kpi('Average position', posOf(w.current) ?? 0, posOf(w.previous) ?? 0, { digits: 1, lowerIsBetter: true }),
+      kpi('Average position', posOf(w.current), posOf(w.previous), { digits: 1, lowerIsBetter: true }),
       kpi('Visits (all sources, GA4)', sessN, sessB),
       kpi('Engaged visits', engN, engB, { note: sessN ? `${round((engN / sessN) * 100)}% of visits` : '' }),
       kpi('Conversions (GA4)', convN, convB),

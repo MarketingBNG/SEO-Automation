@@ -90,18 +90,23 @@ export async function topUpTrackedKeywords({ add = addTrackedKeywords, strategyO
     // week's quota is reached or the credits fall to the reserve.
     // Seeds come from the strategy first (its top keywords), then the focus services.
     const seeds = [...new Set([...strategy.keywords.slice(0, 25), ...focus])];
+    // The reserve is checked every few research calls, not once per pass of about 62 calls.
+    let calls = 0;
     outer: for (const type of ['related', 'similar', 'longtail', 'questions']) {
       for (const seed of seeds) {
         for (const source of ['us', 'in']) {
           if (picked.length >= need) break outer;
+          if (calls > 0 && calls % 8 === 0) {
+            try {
+              const left = Number((await getSubscription())?.units_left);
+              if (Number.isFinite(left) && left <= reserve) break outer;
+            } catch {}
+          }
+          calls++;
           const rows = await researchKeywords(type, seed, { source, limit: 100 }).catch(() => []);
           for (const r of rows.filter((x) => (x.volume || 0) >= 10).sort((a, b) => (b.volume || 0) - (a.volume || 0))) takeOnTopic(r.keyword);
         }
       }
-      try {
-        const left = Number((await getSubscription())?.units_left);
-        if (Number.isFinite(left) && left <= reserve) break;
-      } catch {}
     }
   }
 

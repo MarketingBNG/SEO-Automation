@@ -24,6 +24,8 @@ function parseScreamingFrogCsv(data: Buffer | Uint8Array) {
   const titleKey = findKey(['^title 1$', '^title$']);
   const metaDescKey = findKey(['^meta description 1$', '^meta description$']);
   const wordCountKey = findKey(['^word count$']);
+  const contentTypeKey = findKey(['^content type$']);
+  const indexabilityKey = findKey(['^indexability$']);
 
   const titleCounts: any = {};
   const problems: any[] = [];
@@ -32,14 +34,30 @@ function parseScreamingFrogCsv(data: Buffer | Uint8Array) {
   let missingMetaCount = 0;
   let thinContentCount = 0;
 
+  // "Internal All" also lists images, CSS, JS, PDFs and redirects, which have no title or meta
+  // description: the page checks run only on indexable HTML pages that answered 2xx.
+  const isPage = (row) => {
+    const status = statusCodeKey ? parseInt(row[statusCodeKey], 10) : NaN;
+    if (!isNaN(status) && (status < 200 || status >= 300)) return false;
+    if (contentTypeKey && !/text\/html/i.test(String(row[contentTypeKey] || ''))) return false;
+    if (indexabilityKey && /^non-indexable$/i.test(String(row[indexabilityKey] || '').trim())) return false;
+    return true;
+  };
+
   for (const row of rows) {
     const url = addressKey ? String(row[addressKey] || '').trim() : '';
     const issues: any[] = [];
 
+    // Status 0 is Screaming Frog's "no response" (timeout, refused, DNS failure).
     const statusCode = statusCodeKey ? parseInt(row[statusCodeKey], 10) : null;
-    if (statusCode && statusCode >= 400) {
+    if (statusCode !== null && !isNaN(statusCode) && (statusCode === 0 || statusCode >= 400)) {
       brokenCount++;
-      issues.push(`${statusCode} status code`);
+      issues.push(statusCode === 0 ? 'no response' : `${statusCode} status code`);
+    }
+
+    if (!isPage(row)) {
+      if (issues.length && url) problems.push({ url, issues });
+      continue;
     }
 
     const title = titleKey ? String(row[titleKey] || '').trim() : '';
@@ -72,6 +90,7 @@ function parseScreamingFrogCsv(data: Buffer | Uint8Array) {
   const duplicateTitleCount = Object.values(titleCounts).filter((c) => c > 1).length;
   // Mark duplicate-title rows too, capped list stays readable.
   for (const row of rows) {
+    if (!isPage(row)) continue;
     const url = addressKey ? String(row[addressKey] || '').trim() : '';
     const title = titleKey ? String(row[titleKey] || '').trim() : '';
     if (title && titleCounts[title] > 1) {
@@ -89,7 +108,7 @@ function parseScreamingFrogCsv(data: Buffer | Uint8Array) {
     missingMetaCount,
     thinContentCount,
     problemUrls: problems.slice(0, 200), // cap for storage/display
-    columnsFound: { addressKey, statusCodeKey, titleKey, metaDescKey, wordCountKey },
+    columnsFound: { addressKey, statusCodeKey, titleKey, metaDescKey, wordCountKey, contentTypeKey, indexabilityKey },
   };
 }
 

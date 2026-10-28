@@ -3,7 +3,7 @@ import prisma from './prisma';
 import { sqlNowOffset } from './time';
 import { querySearchAnalytics, comparisonRanges } from './searchConsole';
 import { getSummaryForRange, getOrganicLandingPages } from './ga4';
-import { listSites, getSiteRankings } from './seranking';
+import { listSites, getSiteRankings, oneRowPerKeyword } from './seranking';
 // Month-over-month numbers computed in code (not by the AI) so the monthly report's figures are
 // exact. Each block fails independently.
 
@@ -114,7 +114,7 @@ async function ga4Block(days) {
 async function rankingsBlock() {
   const sites = await listSites();
   if (!sites.length) return { note: 'No SE Ranking project' };
-  const rows = await getSiteRankings(sites[0].id);
+  const rows = oneRowPerKeyword(await getSiteRankings(sites[0].id));
   const bucket = (p) => (!p ? 'notRanked' : p <= 3 ? 'top3' : p <= 10 ? 'top4to10' : p <= 20 ? 'top11to20' : 'top21to100');
   const distribution = { top3: 0, top4to10: 0, top11to20: 0, top21to100: 0, notRanked: 0 };
   for (const r of rows) distribution[bucket(r.position)]++;

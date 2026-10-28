@@ -39,6 +39,14 @@ async function tick() {
   if ((await settings.get('ai_paused')) !== '1') await (await import('./strategy/jobs')).resumeRestarted().catch((e: any) => console.error('Scheduler: strategy restart failed:', e.message));
   if ((await settings.get('ai_paused')) !== '1') await replay.resumeCreditBlog().catch((e: any) => console.error('Scheduler: credit blog resume failed:', e.message));
   await replay.pruneReplay();
+  if ((await settings.get('last_apicache_prune')) !== today) {
+    const { pruneApiCache } = await import('./apiCache');
+    await pruneApiCache().catch((e: any) => console.error('Scheduler: API cache prune failed:', e.message));
+    // Finished Claude Code queue jobs hold the full prompt and are never read again.
+    const { sqlNowOffset } = await import('./time');
+    await prisma.ai_jobs.deleteMany({ where: { status: { in: ['used', 'cancelled'] }, created_at: { lt: sqlNowOffset('-14 days') } } }).catch((e: any) => console.error('Scheduler: queue prune failed:', e.message));
+    await settings.set('last_apicache_prune', today);
+  }
 
   // A blog cut off by a server restart (for example a deploy) is started again automatically.
   const { resumeInterruptedBlog } = await import('./blogJob');
@@ -75,13 +83,18 @@ async function tick() {
   // Weekly: keep the tracked keywords topped up, and learn from the week's reviews and results.
   if (now.getUTCDay() === 1 && (await settings.get('last_keyword_topup')) !== today) {
     const { topUpTrackedKeywords } = await import('./keywordTracking');
-    await topUpTrackedKeywords().catch((e: any) => console.error('Scheduler: keyword top-up failed:', e.message));
-    await settings.set('last_keyword_topup', today);
+    // Marked done only when it worked, so an SE Ranking outage is retried on a later tick, not next week
+    // (research answers are cached for 24 hours, so a retry does not pay for them again).
+    const ok = await topUpTrackedKeywords().then(() => true, (e: any) => (console.error('Scheduler: keyword top-up failed:', e.message), false));
+    if (ok) await settings.set('last_keyword_topup', today);
   }
   if (now.getUTCDay() === 1 && (await settings.get('last_lessons_run')) !== today) {
     const { learnLessons } = await import('./lessons');
-    await learnLessons().catch((e: any) => console.error('Scheduler: lessons failed:', e.message));
-    await settings.set('last_lessons_run', today);
+    const { CreditPausedError } = await import('./aiCredits');
+    // Paused credits or Testing mode stop it before any AI call: try again later today. Other failures
+    // may come after a paid call, so they are not retried every 15 minutes.
+    const paused = await learnLessons().then(() => false, (e: any) => (console.error('Scheduler: lessons failed:', e.message), e instanceof CreditPausedError));
+    if (!paused) await settings.set('last_lessons_run', today);
   }
 
   if ((await settings.get('last_strategy_check')) !== today) {

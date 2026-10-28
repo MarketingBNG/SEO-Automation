@@ -9,6 +9,9 @@ import { connectorOn, connectorCall, sitePost, sitePosts, slugForId, toDashId, s
 
 // Images uploaded in this process, by the numeric id handed back to the caller, so a post can use
 // the image's address as its cover.
+// A slow website must not hold the daily run for undici's 300 s default per call.
+const WP_TIMEOUT_MS = 60000;
+const WP_UPLOAD_TIMEOUT_MS = 120000;
 const uploaded = new Map<number, { url: string; alt: string | null }>();
 const coverOf = (featuredMediaId: any, featuredImageUrl?: string | null) =>
   featuredImageUrl ? { url: featuredImageUrl, alt: null } : featuredMediaId ? uploaded.get(Number(featuredMediaId)) || null : null;
@@ -46,6 +49,7 @@ async function testConnection() {
   const { siteUrl, authHeader } = getConfig();
   // context=edit adds the user's roles and capabilities (used to show whether plugins can be installed).
   const res = await fetch(`${siteUrl}/wp-json/wp/v2/users/me?context=edit`, {
+    signal: AbortSignal.timeout(WP_TIMEOUT_MS),
     headers: { Authorization: authHeader },
   });
   if (!res.ok) {
@@ -77,6 +81,7 @@ async function uploadFeaturedImage(localFilePath) {
     ] || 'application/octet-stream';
 
   const res = await fetch(`${siteUrl}/wp-json/wp/v2/media`, {
+    signal: AbortSignal.timeout(WP_UPLOAD_TIMEOUT_MS),
     method: 'POST',
     headers: {
       Authorization: authHeader,
@@ -102,6 +107,7 @@ async function uploadBuffer(buffer: Buffer, filename: string, mime: string) {
   }
   const { siteUrl, authHeader } = getConfig();
   const res = await fetch(`${siteUrl}/wp-json/wp/v2/media`, {
+    signal: AbortSignal.timeout(WP_UPLOAD_TIMEOUT_MS),
     method: 'POST',
     headers: { Authorization: authHeader, 'Content-Type': mime, 'Content-Disposition': `attachment; filename="${filename}"` },
     body: new Uint8Array(buffer),
@@ -165,6 +171,7 @@ async function publishPost({ title, contentHtml, excerpt, featuredMediaId, featu
   const { siteUrl, authHeader } = getConfig();
 
   const res = await fetch(`${siteUrl}/wp-json/wp/v2/posts`, {
+    signal: AbortSignal.timeout(WP_TIMEOUT_MS),
     method: 'POST',
     headers: {
       Authorization: authHeader,
@@ -222,6 +229,7 @@ async function updatePost(postId, { title, contentHtml, excerpt, featuredMediaId
   const { siteUrl, authHeader } = getConfig();
 
   const res = await fetch(`${siteUrl}/wp-json/wp/v2/posts/${postId}`, {
+    signal: AbortSignal.timeout(WP_TIMEOUT_MS),
     method: 'POST', // WP REST API uses POST for partial updates too
     headers: {
       Authorization: authHeader,
@@ -259,7 +267,7 @@ async function listPosts({ perPage = 50, page = 1 }: any = {}) {
   const { siteUrl, authHeader } = getConfig();
   const res = await fetch(
     `${siteUrl}/wp-json/wp/v2/posts?per_page=${perPage}&page=${page}&status=publish&_fields=id,title,link,excerpt,modified`,
-    { headers: { Authorization: authHeader } }
+    { headers: { Authorization: authHeader }, signal: AbortSignal.timeout(WP_TIMEOUT_MS) }
   );
   if (!res.ok) {
     const body = await res.text();
@@ -280,7 +288,7 @@ async function getPost(postId) {
   const { siteUrl, authHeader } = getConfig();
   const res = await fetch(
     `${siteUrl}/wp-json/wp/v2/posts/${postId}?_fields=id,title,link,content,excerpt`,
-    { headers: { Authorization: authHeader } }
+    { headers: { Authorization: authHeader }, signal: AbortSignal.timeout(WP_TIMEOUT_MS) }
   );
   if (!res.ok) {
     const body = await res.text();
@@ -302,6 +310,7 @@ async function wpRequest(method, route, { query, body }: any = {}) {
 
   const res = await fetch(url, {
     method,
+    signal: AbortSignal.timeout(WP_TIMEOUT_MS),
     headers: {
       Authorization: authHeader,
       ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -357,6 +366,7 @@ async function findPostByUrl(url) {
   const slug = slugMatch ? slugMatch[1] : url;
 
   const res = await fetch(`${siteUrl}/wp-json/wp/v2/posts?slug=${encodeURIComponent(slug)}`, {
+    signal: AbortSignal.timeout(WP_TIMEOUT_MS),
     headers: { Authorization: authHeader },
   });
   if (!res.ok) {
@@ -416,7 +426,10 @@ async function siteRequest(method: string, route: string, query: any, body: any)
       const full = await Promise.all(hits.map((h) => sitePost(h.slug)));
       return { json: full.filter(Boolean).map(wpShape), headers };
     }
-    const posts = (await sitePosts()).filter((p) => isLive(p.status)).slice(0, Number(query.per_page) || 10);
+    // Paged like WordPress, so callers that loop over pages do not get the first page again each time.
+    const per = Number(query.per_page) || 10;
+    const page = Math.max(1, Number(query.page) || 1);
+    const posts = (await sitePosts()).filter((p) => isLive(p.status)).slice((page - 1) * per, page * per);
     return { json: posts.map(wpShape), headers };
   }
   // No WordPress users any more: authors are the site's author slugs (lib/siteConnector.ts).

@@ -14,7 +14,7 @@ async function runPageSpeedCheck(url, strategy = 'mobile') {
     endpoint.searchParams.append('category', c)
   );
 
-  const res = await fetch(endpoint.toString());
+  const res = await fetch(endpoint.toString(), { signal: AbortSignal.timeout(90000) });
   const json = await res.json();
   if (!res.ok) {
     throw new Error(`PageSpeed API error: ${json.error?.message || res.status}`);

@@ -5,7 +5,7 @@ import * as questionBankMod from './questionBank';
 import { querySearchAnalytics, googleAuth } from './searchConsole';
 import { eventsAffecting } from './seoCalendar';
 import { wpRequest } from './wordpress';
-import { listSites, getSiteRankings } from './seranking';
+import { listSites, getSiteRankings, oneRowPerKeyword } from './seranking';
 // Performance of the site in three lenses, computed in code from Search Console, GA4, WordPress,
 // SE Ranking, the crawl and the latest strategy run. No AI calls, so it is free and always exact.
 //   SEO: rankings and organic traffic (classic blue links).
@@ -54,7 +54,7 @@ function sumRange(rows, range, pick) {
 }
 
 function kpi(label, now, before, opts = {}) {
-  return { label, now: round(now, opts.digits ?? 0), before: round(before, opts.digits ?? 0), changePct: pct(now, before), unit: opts.unit || '', lowerIsBetter: Boolean(opts.lowerIsBetter), note: opts.note || '' };
+  return { label, now: round(now, opts.digits ?? 0), before: round(before, opts.digits ?? 0), changePct: now == null || before == null ? null : pct(now, before), unit: opts.unit || '', lowerIsBetter: Boolean(opts.lowerIsBetter), note: opts.note || '' };
 }
 
 // traffic light from a % change (or a points change for position)
@@ -70,6 +70,7 @@ async function ga4Report(body) {
   const client = await googleAuth(['https://www.googleapis.com/auth/analytics.readonly']).getClient();
   const token = (await client.getAccessToken()).token;
   const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`, {
+    signal: AbortSignal.timeout(60000),
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -176,7 +177,7 @@ async function gatherPerformance(days = 28) {
   await safe('seRanking', async () => {
     const sites = await listSites();
     if (!sites.length) return;
-    const rows = await getSiteRankings(sites[0].id);
+    const rows = oneRowPerKeyword(await getSiteRankings(sites[0].id));
     const bucket = (p) => (!p ? 'notRanked' : p <= 3 ? 'top3' : p <= 10 ? 'top4to10' : p <= 20 ? 'top11to20' : 'top21to100');
     const distribution = { top3: 0, top4to10: 0, top11to20: 0, top21to100: 0, notRanked: 0 };
     for (const r of rows) distribution[bucket(r.position)]++;
@@ -192,7 +193,8 @@ async function gatherPerformance(days = 28) {
       kpi('Non-branded clicks', clicksNow - brandNow, clicksBefore - brandBefore, { note: 'All clicks minus searches for the brand name' }),
       kpi('Impressions', imprNow, imprBefore, { note: 'Comparable only when both periods start after 28 Apr 2026' }),
       kpi('Click-through rate', imprNow ? (clicksNow / imprNow) * 100 : 0, imprBefore ? (clicksBefore / imprBefore) * 100 : 0, { digits: 2, unit: '%' }),
-      kpi('Average position', posNow ?? 0, posBefore ?? 0, { digits: 1, lowerIsBetter: true }),
+      // No impressions means no position (null, shown as '-'), not position 0 and a '-100%' gain.
+      kpi('Average position', posNow, posBefore, { digits: 1, lowerIsBetter: true }),
       kpi('Organic visits (GA4)', orgSessNow, orgSessBefore),
       kpi('Organic conversions (GA4)', orgConvNow, orgConvBefore),
     ],

@@ -9,6 +9,7 @@ import { getPost } from './wordpress';
 import * as activity from './activity';
 import { startTimer, endTimer } from './jobTimer';
 import { parseAuditRow } from './audits';
+import { safeFetchText } from './safeFetch';
 
 const g = globalThis as unknown as { __auditJobs?: Set<number>; __auditStops?: Map<string, AbortController> };
 const running = (g.__auditJobs ||= new Set<number>());
@@ -32,9 +33,9 @@ export async function startAudit({ title, contentHtml, sourceUrl, wpPostId, acto
     resolvedTitle = resolvedTitle || post.title.rendered;
     resolvedUrl = post.link;
   } else if (sourceUrl && !content) {
-    const pageRes = await fetch(sourceUrl, { signal: AbortSignal.timeout(20000) });
+    const pageRes = await safeFetchText(sourceUrl, { timeoutMs: 20000 });
     if (!pageRes.ok) throw Object.assign(new Error(`Could not fetch that URL (HTTP ${pageRes.status})`), { status: 400 });
-    content = await pageRes.text();
+    content = pageRes.text;
   }
   if (!content || !content.trim()) throw Object.assign(new Error('Provide contentHtml, a sourceUrl, or a wpPostId'), { status: 400 });
   if (!resolvedTitle && sourceUrl) resolvedTitle = titleFromHtml(content);

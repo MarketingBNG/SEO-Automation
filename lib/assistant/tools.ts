@@ -1928,7 +1928,9 @@ async function undoChange(undo, { force = false }: { force?: boolean } = {}) {
           throw err;
         }
       }
-      await prisma.drafts.update({ where: { id: undo.id }, data: { ...undo.fields, updated_at: sqlNow() } });
+      // The word count goes back with the text, counted the same way saveDraftFields does.
+      const counted = undo.fields.content_html != null ? { word_count: String(undo.fields.content_html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length } : {};
+      await prisma.drafts.update({ where: { id: undo.id }, data: { ...undo.fields, ...counted, updated_at: sqlNow() } });
       return 'Restored the previous version of the draft.';
     }
     case 'delete_pending_keywords': {

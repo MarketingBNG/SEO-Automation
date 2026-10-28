@@ -43,7 +43,7 @@ function table(headers, rows) {
   if (!rows.length) return '<p>None this period.</p>';
   return `<table border="1" cellpadding="4" style="border-collapse:collapse;width:100%"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
-const fmt = (n, unit) => `${Number(n).toLocaleString('en-US')}${unit || ''}`;
+const fmt = (n, unit) => (n === null || n === undefined ? '-' : `${Number(n).toLocaleString('en-US')}${unit || ''}`);
 const kpiTable = (kpis) => table(['Measure', 'Now', 'Before', 'Change', 'Note'], kpis.map((k) => [k.label, fmt(k.now, k.unit), fmt(k.before, k.unit), changeText(k), k.note]));
 const bullets = (a) => (a.length ? `<ul>${a.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
 
