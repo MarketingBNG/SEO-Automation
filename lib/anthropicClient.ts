@@ -52,6 +52,8 @@ export function anthropicClient(): Anthropic {
 
   const fetchWithBackup = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const res = await fetch(url, withKey(init, key));
+    // A client that started on the secondary key (the main one resting or unset) and was refused.
+    if (secondary && key === secondary && (res.status === 401 || res.status === 403)) secondaryRejected(res.status);
     if (res.ok || res.status >= 500 || !secondary || key === secondary) return res;
     const body = await res.clone().text().catch(() => '');
     if (!OUT_OF_CREDIT.test(body)) return res;
@@ -76,7 +78,7 @@ let rejectedSaidAt = 0;
 function secondaryRejected(status: number) {
   if (Date.now() - rejectedSaidAt < TRY_MAIN_AGAIN_MS) return;
   rejectedSaidAt = Date.now();
-  const text = `The main Anthropic API key is out of credit and the secondary key (ANTHROPIC_API_KEY_SECONDARY) was refused by Anthropic (HTTP ${status}). Put a valid API key (it starts with sk-ant-api03-) from an account with credit in Coolify and redeploy.`;
+  const text = `${process.env.ANTHROPIC_API_KEY ? 'The main Anthropic API key is out of credit and the' : 'The'} secondary key (ANTHROPIC_API_KEY_SECONDARY) was refused by Anthropic (HTTP ${status}). Put a valid API key (it starts with sk-ant-api03-) from an account with credit in Coolify and redeploy.`;
   console.warn(text);
   import('./activity').then((a) => a.log('ai.secondary_key_refused', { details: text })).catch(() => {});
   import('./notify').then((n) => n.notify('AI credits: the secondary API key does not work', text, { action: 'alert.credits_secondary_refused' })).catch(() => {});

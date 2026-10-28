@@ -14,7 +14,9 @@ import * as activity from './activity';
 import { keyInUse, secondaryKeyConfigured, retryMainKey, switchedToSecondary, keyWorks } from './anthropicClient';
 
 // USD per 1M tokens (Anthropic first-party API). Cache writes are 1.25x input (5-minute cache).
-const PRICES: Record<string, { input: number; output: number; cacheRead: number }> = {
+// long: higher rates for a request whose prompt (input plus cache tokens) is over `above` tokens.
+type Rates = { input: number; output: number; cacheRead: number };
+const PRICES: Record<string, Rates & { long?: Rates & { above: number } }> = {
   'claude-fable-5-1': { input: 10, output: 50, cacheRead: 0.25 },
   'claude-fable-5': { input: 10, output: 50, cacheRead: 1 },
   'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2 },
@@ -24,7 +26,7 @@ const PRICES: Record<string, { input: number; output: number; cacheRead: number 
   'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.2 },
   'claude-sonnet-5': { input: 2, output: 10, cacheRead: 0.2 },
   'claude-sonnet-4-6': { input: 3, output: 15, cacheRead: 0.3 },
-  'claude-haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01 },
+  'claude-haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01, long: { above: 100000, input: 0.5, output: 2.5, cacheRead: 0.05 } },
   'claude-haiku-4-5': { input: 1, output: 5, cacheRead: 0.1 },
 };
 const WEB_SEARCH_PER_1000 = 10;
@@ -43,7 +45,9 @@ export function priceFor(model: string) {
 // Cost in USD of one response's usage. Batch requests are billed at half price.
 export function costOf(model: string, usage: any, { batch = false } = {}) {
   if (!usage) return 0;
-  const p = priceFor(model);
+  const base = priceFor(model);
+  const prompt = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+  const p = base.long && prompt > base.long.above ? base.long : base;
   const searches = usage.server_tool_use?.web_search_requests || 0;
   const tokens =
     ((usage.input_tokens || 0) * p.input +

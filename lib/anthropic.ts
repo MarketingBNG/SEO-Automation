@@ -3,7 +3,7 @@ import * as settings from './settings';
 import prisma from './prisma';
 import { rethrowFriendly } from './apiErrors';
 import { anthropicClient, clientKeyKind, secondaryKeyConfigured, switchedToSecondary } from './anthropicClient';
-import { replayScope, requestHash, savedStep, saveStep } from './aiReplay';
+import { replayScope, requestHash, savedStep, saveStep, frozenInput, runToday } from './aiReplay';
 import { aiMode, askQueue, isAutomatic, TestingModeError } from './aiQueue';
 import { assertCredits, recordUsage, onApiError, CreditPausedError } from './aiCredits';
 import { validateDraft, markUsedQuestions } from './validation';
@@ -324,8 +324,10 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
   let lastStop = '';
   for (let part = 0; part < maxParts; part++) {
     activity.part = part;
-    // Refuses to start when AI work is paused for low credits (see lib/aiCredits.ts).
-    await assertCredits();
+    // Refuses to start when AI work is paused for low credits (see lib/aiCredits.ts). Only before the
+    // first part: a call already under way finishes its continuations, so its paid parts are saved
+    // (a pause mid-call would drop them and the whole call would be paid again on resume).
+    if (part === 0) await assertCredits();
     if (batch) {
       const response = await runBatchTurn(client, {
         model,
@@ -411,13 +413,17 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
         response = await stream.finalMessage();
         break;
       } catch (err: any) {
+        // The failed attempt is billed for what it used so far: record it, so the credit estimate
+        // and the automatic pause keep up with real spend.
+        const partial = (stream as any).currentMessage?.usage;
+        if (partial) await recordUsage({ model: (stream as any).currentMessage?.model || model, usage: partial, feature }).catch(() => {});
         if (signal?.aborted) throw err; // stopped by the user
         if (!stalled && (err?.name === 'AbortError' || err?.name === 'APIUserAbortError')) throw err;
         await onApiError(err, clientKeyKind(client));
         if (attempt >= 4 && stalled) {
           throw Object.assign(new Error(`The AI sent nothing for ${Math.round(idleMs / 60000)} minutes, ${attempt + 1} times in a row. Try again, or raise CLAUDE_IDLE_TIMEOUT_MS.`), { cause: err });
         }
-        if (attempt >= 4 || !(stalled || isTransient(err))) return rethrowFriendly(err, signal);
+        if (attempt >= 4 || !(stalled || isTransient(err))) return rethrowFriendly(err, signal, clientKeyKind(client));
         activity.retries++;
         const why = stalled ? `no reply from the AI for ${Math.round(idleMs / 60000)} minutes` : `connection problem (${err?.status || err?.name || 'error'})`;
         console.warn(`Claude call: ${why}; ${String(err?.message).slice(0, 120)}; retry ${attempt + 1} of 4`);
@@ -450,21 +456,37 @@ const BATCH_POLL_MS = 30_000;
 const BATCH_MAX_WAIT_MS = 25 * 60 * 60 * 1000; // batches expire after 24h
 
 // Submits one request as a single-item batch, waits for it to end and returns its message.
+// The batch id is kept in settings until its result is read: after a restart the same request picks
+// up the batch already sent (and paid for) instead of sending a new one.
 async function runBatchTurn(client, params, signal) {
-  const created = await client.messages.batches
-    .create({ requests: [{ custom_id: 'turn', params }] })
-    .catch((err: any) => rethrowFriendly(err, signal));
+  const pendingKey = `batch_pending:${requestHash(params)}`;
+  const forget = () => prisma.settings.deleteMany({ where: { key: pendingKey } }).catch(() => {});
+  const savedId = await settings.get(pendingKey).catch(() => null);
+  let created: any = savedId ? await client.messages.batches.retrieve(savedId).catch(() => null) : null;
+  // Only a batch from the last week that was not cancelled (its results are kept 29 days).
+  if (created && (created.cancel_initiated_at || Date.now() - Date.parse(created.created_at) > 7 * 86400000)) created = null;
+  if (!created) {
+    created = await client.messages.batches
+      .create({ requests: [{ custom_id: 'turn', params }] })
+      .catch((err: any) => rethrowFriendly(err, signal, clientKeyKind(client)));
+    await settings.set(pendingKey, created.id).catch(() => {});
+  }
   const started = Date.now();
   let status = created.processing_status;
   while (status !== 'ended') {
     if (signal?.aborted) {
       await client.messages.batches.cancel(created.id).catch(() => {});
+      await forget();
       throw Object.assign(new Error('Request was aborted.'), { name: 'AbortError' });
     }
-    if (Date.now() - started > BATCH_MAX_WAIT_MS) throw new Error(`Batch ${created.id} did not finish in time.`);
+    if (Date.now() - started > BATCH_MAX_WAIT_MS) {
+      await forget();
+      throw new Error(`Batch ${created.id} did not finish in time.`);
+    }
     await new Promise((r) => setTimeout(r, BATCH_POLL_MS));
     status = (await client.messages.batches.retrieve(created.id)).processing_status;
   }
+  await forget();
 
   for await (const item of await client.messages.batches.results(created.id)) {
     if (item.custom_id !== 'turn') continue;
@@ -660,7 +682,7 @@ const FACT_CHECK_BRIEF_MODEL = () => process.env.FACT_CHECK_BRIEF_MODEL || 'clau
 // today, the full rules with their exceptions (NRI ones especially), and who the reader is. Every
 // one-claim check gets it, so a checker that sees one sentence still knows the whole law changed.
 export async function buildTopicBrief(result, signal, { model = FACT_CHECK_BRIEF_MODEL() }: any = {}): Promise<string> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await runToday();
   const system = `You prepare a short research brief for fact checkers of a US-India tax article. Today is ${today}.
 Think about the whole topic first, then research it on official sources (incometaxindia.gov.in,
 incometax.gov.in, indiacode.nic.in, rbi.org.in, irs.gov, ecfr.gov, uscode.house.gov, the treaty text):
@@ -713,9 +735,9 @@ Return ONLY JSON between ===JSON=== and ===END===:
 
 // `brief`: the topic brief from an earlier round of the same draft, reused so it is built once per blog.
 async function factCheckPerClaim(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false, brief: givenBrief = '' }: any = {}) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await runToday();
   // The Fact-Check agent's memory: claims found wrong in earlier articles, checked with extra care.
-  const factMemory = await import('./agentMemory').then((m) => m.recall('fact-check', { kinds: ['mistake', 'preference', 'lesson'], limit: 20 })).then((t) => (t ? `\n\n${t}\nA claim like one of these needs extra care: check it against the source yourself.` : '')).catch(() => '');
+  const factMemory = await frozenInput('fact-memory', () => import('./agentMemory').then((m) => m.recall('fact-check', { kinds: ['mistake', 'preference', 'lesson'], limit: 20 })).then((t) => (t ? `\n\n${t}\nA claim like one of these needs extra care: check it against the source yourself.` : '')).catch(() => ''), { each: true });
   const [listed, brief] = await Promise.all([targeted ? [] : listClaims(result, signal, { model }), givenBrief || buildTopicBrief(result, signal)]);
   const seen = new Set<string>();
   const items = [
@@ -777,8 +799,11 @@ ${result.content}`;
   signal?.addEventListener('abort', onAbort);
   const checks: any[] = [];
   let next = 0;
+  // AI work paused (a person pressed Pause, or credits ran low): no new group starts, but the checks
+  // already running finish and are saved, so a resume does not pay for them again.
+  let paused: any = null;
   const worker = async () => {
-    while (next < groups.length) {
+    while (next < groups.length && !paused) {
       const i = next++;
       const group = groups[i];
       const failed = (note: string) => group.claims.map((claim) => ({ claim, verdict: 'unverifiable', correction: note, source_url: '' }));
@@ -806,8 +831,13 @@ ${result.content}`;
           checks.push({ claim, verdict, correction: String(r.correction || ''), source_url: String(r.source_url || '') });
         });
       } catch (err: any) {
-        // Stopped, or out of credit: stop every checker. Anything else marks only this group unchecked.
-        if (local.signal.aborted || err instanceof CreditPausedError) throw err;
+        // Stopped: stop every checker. Paused: let the others finish (above). Anything else marks
+        // only this group unchecked.
+        if (local.signal.aborted) throw err;
+        if (err instanceof CreditPausedError) {
+          paused = paused || err;
+          return;
+        }
         checks.push(...failed('The check for this claim failed; check it again.'));
       }
       done += group.claims.length;
@@ -822,6 +852,7 @@ ${result.content}`;
   } finally {
     signal?.removeEventListener('abort', onAbort);
   }
+  if (paused) throw paused;
   // K4: a rule backed only by a blog or news site is not confirmed. Arithmetic and assumptions need no link.
   const noSearch = new Set(groups.filter((g) => !g.search).flatMap((g) => g.claims));
   for (const c of checks) {
@@ -836,9 +867,9 @@ ${result.content}`;
 }
 
 async function factCheckGrouped(result, signal, { mustCheck = [], model = FACT_CHECK_MODEL(), onActivity, targeted = false }: any = {}) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await runToday();
   // The Fact-Check agent's memory: claims found wrong in earlier articles, checked with extra care.
-  const factMemory = await import('./agentMemory').then((m) => m.recall('fact-check', { kinds: ['mistake', 'preference', 'lesson'], limit: 20 })).then((t) => (t ? `\n\n${t}\nA claim like one of these needs extra care: check it against the source yourself.` : '')).catch(() => '');
+  const factMemory = await frozenInput('fact-memory', () => import('./agentMemory').then((m) => m.recall('fact-check', { kinds: ['mistake', 'preference', 'lesson'], limit: 20 })).then((t) => (t ? `\n\n${t}\nA claim like one of these needs extra care: check it against the source yourself.` : '')).catch(() => ''), { each: true });
   const groups = batchClaims([...(targeted ? [] : (result.facts || []).map((f) => f.claim)), ...mustCheck], FACT_CHECK_PARALLEL());
   if (!groups.length) groups.push([]);
   const perChecker = Math.ceil(FACT_CHECK_SEARCHES / groups.length) + (groups.length > 1 ? 5 : 0);
@@ -878,9 +909,12 @@ Return ONLY JSON between ===JSON=== and ===END===:
   const local = new AbortController();
   const onAbort = () => local.abort();
   signal?.addEventListener('abort', onAbort);
+  // A pause (CreditPausedError) does not stop the others: the checkers already running finish and
+  // are saved, so a resume does not pay for them again. The first error is the one reported.
   let outputs;
+  let firstErr: any = null;
   try {
-    outputs = await Promise.all(
+    const settled = await Promise.allSettled(
       groups.map((g, i) =>
         callClaude(system(i), [{ role: 'user', content: user(g, i) }], local.signal, {
           maxUses: perChecker,
@@ -891,9 +925,15 @@ Return ONLY JSON between ===JSON=== and ===END===:
             totals[i] = { searches: a.searches, chars: a.chars };
             report(a.note);
           },
+        }).catch((err) => {
+          firstErr = firstErr || err;
+          if (!(err instanceof CreditPausedError)) local.abort();
+          throw err;
         })
       )
     );
+    if (firstErr) throw firstErr;
+    outputs = settled.map((r: any) => r.value);
   } catch (err) {
     local.abort();
     throw err;
@@ -1048,8 +1088,11 @@ async function verifyAndCorrect(draft, { signal, mustCheckOf = (_html) => [], ch
 
 // Runs the full "select+research -> draft+optimize -> validate+package" pipeline for one
 // keyword, auto-repairing up to MAX_REPAIR_ATTEMPTS times, per the Frozen Playbook.
+// The live inputs of the writer's prompt (memory, brief, ranking pages, facts) are frozen for the run
+// (frozenInput): a run started again after a pause or restart sends the same request, so the saved
+// answer of the expensive research step is reused instead of paid again.
 async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any = {}) {
-  const systemPrompt = await buildSystemPrompt();
+  const systemPrompt = await frozenInput('writer-system', () => buildSystemPrompt());
   // Progress: (text, percent, { key, round, progress 0..1, lastActivityAt }). The percent scale is
   // weighted by how long each step usually takes: brief 3-9, write 10-50, validate 52, check 54-92,
   // save 96. A repair round starts the scale again and says so in the text.
@@ -1058,7 +1101,7 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
   const words = (chars) => Math.round(chars / 6.5).toLocaleString('en-US');
 
   stage('brief', 3, 'Gathering data from SE Ranking, Google, Search Console, WordPress and Surfer…', { progress: 0 });
-  const brief = await gatherBrief(keyword, { includeSurfer: true });
+  const brief = await frozenInput('writer-brief', () => gatherBrief(keyword, { includeSurfer: true }));
   if (signal?.aborted) throw Object.assign(new Error('Request was aborted.'), { name: 'AbortError' });
 
   // Keyword research comes first: decide the plan (which keywords, which questions, and where each
@@ -1068,11 +1111,11 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
   stage('plan', 8, `Keyword plan ready: ${chosen.secondary.length} secondary keywords, ${chosen.questions.length} questions. Measuring the pages ranking now…`, { progress: 0.3 });
 
   const maxWordsCap = parseInt(await settings.get('max_words'), 10) || 1600;
-  const measured = await topResultsLength(brief, maxWordsCap).catch(() => null);
+  const measured = await frozenInput('writer-length', () => topResultsLength(brief, maxWordsCap).catch(() => null));
   // The length target follows the pages ranking now, but never above the word cap set in Settings.
   const length = measured ? { ...measured, max: Math.min(measured.max, maxWordsCap), median: Math.min(measured.median, maxWordsCap), min: Math.min(measured.min, Math.round(maxWordsCap * 0.8)) } : null;
   const cta = await ctaFor(keyword, '', notes);
-  const known = await approvedFactsFor(keyword).catch(() => []);
+  const known = await frozenInput('writer-facts', () => approvedFactsFor(keyword).catch(() => []));
   const expectedChars = (length?.median || 1800) * 8 + 4000;
 
   const userPrompt = [
@@ -1556,7 +1599,7 @@ writer follows, not a report about the research.>
 // the mistake (fixed or removed), and stays open, with its correction, when it still does.
 export async function recheckIssues(draft, issues: string[], signal?) {
   const brief = await buildTopicBrief({ title: draft.title, meta: draft.meta_description, content: draft.content_html }, signal);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await runToday();
   const system = `You are a senior US-India tax fact checker. Today is ${today}. A draft was held because a fact check
 left the numbered issues below open. The article may have been edited since. For EACH issue, read the
 whole current article and decide: "resolved" if the article no longer makes that mistake (the sentence

@@ -9,10 +9,11 @@ import prisma from './prisma';
 
 // run: this attempt. Only answers saved by an earlier attempt are reused, so a retry inside the same
 // attempt (for example after a malformed answer) still asks the AI again.
-const store = new AsyncLocalStorage<{ scope: string; run: string }>();
+// counts: how many times each frozen input was asked for in this attempt (see frozenInput).
+const store = new AsyncLocalStorage<{ scope: string; run: string; counts?: Record<string, number> }>();
 
 export function withReplay<T>(scope: string, fn: () => Promise<T>): Promise<T> {
-  return store.run({ scope, run: `${Date.now()}-${Math.random()}` }, fn);
+  return store.run({ scope, run: `${Date.now()}-${Math.random()}`, counts: {} }, fn);
 }
 
 export const replayScope = () => store.getStore() || null;
@@ -34,14 +35,45 @@ export async function saveStep(scope: string, hash: string, result: any) {
   await prisma.ai_replay.upsert({ where: { scope_hash: { scope, hash } }, create: { scope, hash, result: data }, update: { result: data } }).catch((e) => console.error('ai_replay save failed:', e.message));
 }
 
+// The live inputs of a run's prompts (a research brief, today's date, the strategy data), saved on
+// the first attempt and read back on later ones. Rebuilt from live data, they would differ a little
+// (a ranking moved, a source timed out, a new day) and every later step would miss its saved answer.
+// Outside a resumable run it simply builds the value. each: an input read again later in the run that
+// may have changed meanwhile (the fact-check memory between rounds) is saved once per read, in order.
+export async function frozenInput<T>(name: string, build: () => Promise<T>, { each = false } = {}): Promise<T> {
+  const ctx = replayScope();
+  if (!ctx) return build();
+  let hash = `input:${name}`;
+  if (each && ctx.counts) {
+    ctx.counts[name] = (ctx.counts[name] || 0) + 1;
+    hash += `#${ctx.counts[name]}`;
+  }
+  const saved = await savedStep(ctx.scope, hash);
+  if (saved && 'value' in saved) return saved.value;
+  const value = await build();
+  if (value !== undefined) await saveStep(ctx.scope, hash, { run: ctx.run, value });
+  return value;
+}
+
+// Today's date (UTC) as the run first saw it, so a run resumed after midnight asks the same questions.
+export const runToday = () => frozenInput('today', async () => new Date().toISOString().slice(0, 10));
+
 export async function clearReplay(scope: string) {
   await prisma.ai_replay.deleteMany({ where: { scope } }).catch(() => {});
 }
 
-// Steps of runs nobody started again within 14 days.
+// Steps of runs nobody started again within 14 days. A run still waiting to resume (a blog left
+// pending, a strategy paused or generating) keeps its steps however long the wait.
 export async function pruneReplay() {
   const before = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
-  await prisma.ai_replay.deleteMany({ where: { created_at: { lt: before } } }).catch(() => {});
+  try {
+    const [blogs, strategies] = await Promise.all([
+      prisma.keywords.findMany({ where: { status: { in: ['pending', 'generating'] } }, select: { id: true } }),
+      prisma.seo_strategies.findMany({ where: { status: { in: ['paused', 'generating'] } }, select: { id: true } }),
+    ]);
+    const live = [...blogs.map((k) => `blog-${k.id}`), ...strategies.map((s) => `strategy-${s.id}`)];
+    await prisma.ai_replay.deleteMany({ where: { created_at: { lt: before }, scope: { notIn: live } } });
+  } catch {}
 }
 
 // After credits are back: restarts the strategies paused for credits and the blogs that stopped for

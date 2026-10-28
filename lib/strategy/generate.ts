@@ -322,27 +322,36 @@ export async function generateStrategy({ window = strategyWindow(), actor = 'Mon
   await checkpoint();
   onProgress?.('Deep research and writing the strategy (the longest step, several minutes)', 45);
   const { snapshot, rankings, ...rest } = inputs;
-  const payload = {
-    period,
-    today: new Date().toISOString().slice(0, 10),
-    ...rest,
-    trackedKeywords: (rankings || []).slice(0, 150),
-    seRankingTracking: { trackedNow: new Set((rankings || []).map((r: any) => keywordKey(r.keyword))).size, maxTracked: 4500, note: 'Plan limit 5,000 tracked keywords with 500 kept free. Every keyword in this plan is tracked automatically.' },
-    analysis: snapshot?.analysis ? {
-      scoreboard: snapshot.analysis.scoreboard,
-      strikingDistance: snapshot.analysis.strikingDistance,
-      decay: snapshot.analysis.decay,
-      cannibalization: snapshot.analysis.cannibalization,
-      regulatoryRefresh: snapshot.analysis.regulatoryRefresh,
-      aiVisibility: snapshot.analysis.aiVisibility,
-      searchCompetitors: snapshot.analysis.searchCompetitors,
-      candidates: snapshot.analysis.candidates,
-    } : 'DATA MISSING: site analysis',
-  };
-  const messages = [{ role: 'user', content: `Build the strategy for the 30 days from ${window.start} to ${window.end} (${period}). Targets are for these 30 days. Data (JSON):\n${JSON.stringify(payload).slice(0, 180000)}` }];
+  // The request is frozen for the run (lib/aiReplay.ts frozenInput): a strategy resumed after a pause,
+  // a restart or on another day sends the same request, so its saved research answer is reused.
+  const { frozenInput } = await import('../aiReplay');
+  const request = await frozenInput('strategy-request', async () => {
+    const payload = {
+      period,
+      today: new Date().toISOString().slice(0, 10),
+      ...rest,
+      trackedKeywords: (rankings || []).slice(0, 150),
+      seRankingTracking: { trackedNow: new Set((rankings || []).map((r: any) => keywordKey(r.keyword))).size, maxTracked: 4500, note: 'Plan limit 5,000 tracked keywords with 500 kept free. Every keyword in this plan is tracked automatically.' },
+      analysis: snapshot?.analysis ? {
+        scoreboard: snapshot.analysis.scoreboard,
+        strikingDistance: snapshot.analysis.strikingDistance,
+        decay: snapshot.analysis.decay,
+        cannibalization: snapshot.analysis.cannibalization,
+        regulatoryRefresh: snapshot.analysis.regulatoryRefresh,
+        aiVisibility: snapshot.analysis.aiVisibility,
+        searchCompetitors: snapshot.analysis.searchCompetitors,
+        candidates: snapshot.analysis.candidates,
+      } : 'DATA MISSING: site analysis',
+    };
+    const { lessonsBlock } = await import('../lessons');
+    return {
+      system: systemPrompt(siteUrl) + (await lessonsBlock()),
+      messages: [{ role: 'user', content: `Build the strategy for the 30 days from ${window.start} to ${window.end} (${period}). Targets are for these 30 days. Data (JSON):\n${JSON.stringify(payload).slice(0, 180000)}` }],
+    };
+  });
+  const messages = request.messages;
   const opts = { maxUses: STRATEGY_SEARCHES(), effort: 'max', model: STRATEGY_MODEL(), feature: 'strategy' };
-  const { lessonsBlock } = await import('../lessons');
-  const { text } = await callClaude(systemPrompt(siteUrl) + (await lessonsBlock()), messages, signal, opts);
+  const { text } = await callClaude(request.system, messages, signal, opts);
   let ai;
   try {
     ai = parseJson(text);
