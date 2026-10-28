@@ -36,8 +36,12 @@ export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (m
   async function toggleMove() {
     if (open) return setOpen(null);
     setBusy(true);
-    const j = await fetch(`/api/strategy/schedule/${row.id}`).then((r) => r.json()).catch(() => ({}));
+    setErr(null);
+    const res = await fetch(`/api/strategy/schedule/${row.id}`).catch(() => null);
+    const j = res ? await res.json().catch(() => ({})) : {};
     setBusy(false);
+    // A failed request is not "no free day": say what went wrong instead of an empty list.
+    if (!res || !res.ok) return setErr(j.error || (res ? `Could not load free days (HTTP ${res.status}).` : 'Could not reach the server.'));
     setOpen({ suggestions: j.suggestions || [], custom: '' });
   }
 

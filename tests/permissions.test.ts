@@ -62,3 +62,11 @@ test('tester: everything except managing the team', () => {
   assert.equal(canBlock('admin', 'tester', 't@usaindiacfo.com'), true);
   assert.equal(canBlock('manager', 'tester', 't@usaindiacfo.com'), false);
 });
+
+test('only settings.change connects Zoho or Google Business Profile', () => {
+  for (const path of ['/api/zoho/auth-url', '/api/zoho/oauth-callback', '/api/gbp/auth-url', '/api/gbp/oauth-callback']) {
+    assert.equal(actionFor('GET', path), 'settings.change', path);
+    for (const r of ['manager', 'analyst', 'user'] as Role[]) assert.equal(allowed(r, 'GET', path), false, `${r} ${path}`);
+    assert.equal(allowed('admin', 'GET', path), true);
+  }
+});

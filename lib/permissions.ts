@@ -134,6 +134,8 @@ export function actionFor(method: string, path: string): Action | null {
     if (/^\/api\/(performance|ga4|gsc|seranking|clarity|blog-analytics|zoho\/leads|zoho\/pipeline|zoho\/business)/.test(p)) return 'reports.view';
     if (/^\/api\/(ai-credits|agent)/.test(p)) return 'credits.view';
     if (/^\/api\/team/.test(p)) return 'team.view';
+    // Connecting Zoho or Google Business Profile replaces the company's stored tokens.
+    if (/^\/api\/(zoho|gbp)\/(auth-url|oauth-callback)/.test(p)) return 'settings.change';
     return null;
   }
 

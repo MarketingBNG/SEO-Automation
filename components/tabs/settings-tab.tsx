@@ -698,9 +698,11 @@ export default function SettingsTab() {
           }
         >
           <Actions>
-            <Button nativeButton={false} render={<a href="/api/gbp/auth-url" target="_blank" rel="noreferrer" />}>
-              <ExternalLink /> Connect Google Business Profile
-            </Button>
+            {canChange && (
+              <Button nativeButton={false} render={<a href="/api/gbp/auth-url" target="_blank" rel="noreferrer" />}>
+                <ExternalLink /> Connect Google Business Profile
+              </Button>
+            )}
             <Button variant="outline" onClick={testGbp}>Test connection</Button>
           </Actions>
           {gbpStatus && <Status>{gbpStatus}</Status>}
@@ -721,9 +723,11 @@ export default function SettingsTab() {
           }
         >
           <Actions>
-            <Button nativeButton={false} render={<a href="/api/zoho/auth-url" target="_blank" rel="noreferrer" />}>
-              <ExternalLink /> Connect Zoho CRM
-            </Button>
+            {canChange && (
+              <Button nativeButton={false} render={<a href="/api/zoho/auth-url" target="_blank" rel="noreferrer" />}>
+                <ExternalLink /> Connect Zoho CRM
+              </Button>
+            )}
             <Button variant="outline" onClick={testZoho}>Test connection</Button>
             <Button variant="outline" onClick={loadZohoPipeline} disabled={loadingZoho}>
               <Spin on={loadingZoho} />

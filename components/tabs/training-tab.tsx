@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { renderMarkdown } from '@/components/shared/article';
+import { useRole } from '@/hooks/use-role';
 
 const GUIDELINE_KEYS = ['max_words', 'voice_guidelines', 'byline_author', 'byline_reviewer', 'cta_text', 'cta_url'];
 
@@ -36,6 +37,8 @@ export default function TrainingTab() {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [message, setMessage] = useState('');
+  // Saving the guidelines is a settings change (admin by default); others see them read-only.
+  const canChange = useRole().can('settings.change');
 
   const [skillStatus, setSkillStatus] = useState<any>(null);
   const [skillHistory, setSkillHistory] = useState<any[]>([]);
@@ -161,6 +164,8 @@ export default function TrainingTab() {
               </AlertDescription>
             </Alert>
           )}
+          {!canChange && <p className="text-muted-foreground text-sm">Read only: only someone who can change settings (the admin) can save these guidelines.</p>}
+          <fieldset disabled={!canChange} className="grid gap-4">
           <Field label="Maximum words per blog">
             <Input
               type="text"
@@ -206,8 +211,9 @@ export default function TrainingTab() {
           <Field label="Call to action link (must start with http:// or https://)">
             <Input type="text" value={settings.cta_url || ''} onChange={(e) => setSettings({ ...settings, cta_url: e.target.value })} />
           </Field>
+          </fieldset>
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={saveSettings} disabled={savingSettings || !settingsLoaded}>
+            <Button onClick={saveSettings} disabled={savingSettings || !settingsLoaded || !canChange}>
               {savingSettings ? <Loader2 className="animate-spin" /> : <Save />}
               {settingsLoaded || settingsError ? 'Save guidelines' : 'Loading…'}
             </Button>

@@ -10,6 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { BlogAnalytics } from '@/components/shared/blog-insights';
 import { NativeSelect, PeopleAlsoAskList, SectionLabel, StatusBadge } from '@/components/shared/ui-bits';
 import { IssuesTable, WhyTheseChanges } from '@/components/tabs/audit-tab';
+import { SafeHtml } from '@/components/shared/article';
+import { useRole } from '@/hooks/use-role';
 
 export default function RenewalTab() {
   const [posts, setPosts] = useState<any[]>([]);
@@ -20,6 +22,7 @@ export default function RenewalTab() {
   const [audits, setAudits] = useState<Record<string, any>>({}); // audit id -> full audit row (with facts/issues parsed)
   const [publishWpStatus, setPublishWpStatus] = useState('publish');
   const [message, setMessage] = useState<string | null>(null);
+  const canDownload = useRole().can('reports.download');
 
   const loadPosts = useCallback(async () => {
     setLoadingPosts(true);
@@ -109,7 +112,8 @@ export default function RenewalTab() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setMessage(`Replaced live post: ${json.wpPostUrl}`);
+      // 'draft' makes a separate draft post on the server; the live post is not touched.
+      setMessage(json.draft ? `Saved as a separate draft. The live post has not changed: ${json.draft.link}` : `Replaced live post: ${json.wpPostUrl}`);
       await loadAudit(auditId);
       loadPosts();
     } catch (err: any) {
@@ -272,31 +276,29 @@ export default function RenewalTab() {
                 <SectionLabel className="mt-2">Rewritten title</SectionLabel>
                 <div className="rounded-lg border bg-muted/30 p-3 text-sm font-medium">{activeAudit.rewrite_title}</div>
                 <SectionLabel className="mt-2">Rewritten content preview</SectionLabel>
-                {/* PORT NOTE: rendered unsanitized exactly as the old Blog Renewal tab did. */}
-                <div
-                  className="prose-article max-h-[420px] overflow-y-auto rounded-lg border bg-background p-4 text-sm"
-                  dangerouslySetInnerHTML={{ __html: activeAudit.rewrite_content_html }}
-                />
+                <SafeHtml className="prose-article max-h-[420px] overflow-y-auto rounded-lg border bg-background p-4 text-sm" html={activeAudit.rewrite_content_html} />
                 <PeopleAlsoAskList
                   items={activeAudit.rewrite_people_also_ask}
                   label={'Google "People also ask" questions (✓ = used in the rewritten FAQ)'}
                 />
-                <div className="mt-2.5">
-                  <a href={`/api/audit/${activeAudit.id}/download`} className={buttonVariants({ variant: 'outline' })}>
-                    <Download /> Download Word
-                  </a>
-                </div>
+                {canDownload && (
+                  <div className="mt-2.5">
+                    <a href={`/api/audit/${activeAudit.id}/download`} className={buttonVariants({ variant: 'outline' })}>
+                      <Download /> Download Word
+                    </a>
+                  </div>
+                )}
                 {activeAudit.rewrite_status !== 'published' ? (
                   <div className="mt-2.5 flex flex-wrap items-center gap-2">
                     <Button variant="outline" onClick={() => rewriteAudit(activeAudit.id)} disabled={busyActive}>
                       Rewrite again
                     </Button>
                     <NativeSelect value={publishWpStatus} onChange={(e) => setPublishWpStatus(e.target.value)}>
-                      <option value="draft">Replace as Draft (review on WP first)</option>
+                      <option value="draft">Save as a separate draft (live post unchanged)</option>
                       <option value="publish">Replace live now</option>
                     </NativeSelect>
                     <Button onClick={() => publishAudit(activeAudit.id)} disabled={busyActive}>
-                      {busyActive ? 'Working…' : 'Approve – replace the live post'}
+                      {busyActive ? 'Working…' : publishWpStatus === 'draft' ? 'Approve – save as a draft' : 'Approve – replace the live post'}
                     </Button>
                   </div>
                 ) : (

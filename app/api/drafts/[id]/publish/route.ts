@@ -3,7 +3,9 @@ import prisma from '@/lib/prisma';
 import { ensurePhotoCover } from '@/lib/coverPhoto';
 import { uploadMedia, publishPost, updatePost, seoSlug, freeSlug } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
-import { getActor } from '@/lib/auth';
+import { getActor, getMe } from '@/lib/auth';
+import { canDo } from '@/lib/access';
+import { deniedMessage } from '@/lib/permissions';
 import { sqlNow } from '@/lib/time';
 import { methodNotAllowed, toId } from '../../../_lib/http';
 import { aiLeftovers, needsExpertReview, faqSchema, faqAccordion } from '@/lib/strategy/core';
@@ -69,6 +71,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body: any = await req.json().catch(() => ({}));
   const wpStatus = wpLive === 'publish' ? 'publish' : (body && body.wpStatus) || 'publish'; // 'publish' (live) or 'draft'
   const reviewer = String(body?.reviewer || '').trim();
+  // A calendar blog going live before its slot is a "Publish now", the same as on the calendar.
+  if (wpStatus === 'publish' && wpLive !== 'publish' && (await prisma.blog_schedule.count({ where: { draft_id: nid, status: { not: 'published' } } }))) {
+    const me = await getMe();
+    if (!me || !(await canDo(me, 'blog.publish_now'))) return NextResponse.json({ error: deniedMessage('blog.publish_now') }, { status: 403 });
+  }
   const kw = (await prisma.keywords.findUnique({ where: { id: draft.keyword_id }, select: { keyword: true } }))?.keyword;
   if (wpStatus === 'publish' && (await requireExpert()) && needsExpertReview(kw, draft.title)) {
     const known = await expertReviewers();

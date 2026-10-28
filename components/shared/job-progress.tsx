@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { FlaskConical, Square } from 'lucide-react';
 import { Countdown } from './countdown';
+import { useRole } from '@/hooks/use-role';
 
 export const JOBS_CHANGED = 'growth-center:jobs-changed';
 // Call after starting background work so the header bar picks it up without waiting for the next poll.
@@ -18,6 +19,8 @@ const STOPPABLE = /^(audit|rewrite)-\d+$/;
 // something runs, every 20 seconds when nothing does, and not at all while the browser tab is
 // hidden (the countdown between polls ticks locally).
 export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
+  // Stopping an audit or rewrite needs content.work (POST /api/audit/stop).
+  const canStop = useRole().can('content.work');
   const [jobs, setJobs] = useState<any[]>([]);
   const [recent, setRecent] = useState<any[]>([]);
   const [dismissed, setDismissed] = useState<number>(() => {
@@ -150,7 +153,7 @@ export function JobProgress({ onOpen }: { onOpen?: (kind: string) => void }) {
             <span className="ml-auto flex shrink-0 items-center gap-2 tabular-nums">
               {!j.paused && <Countdown remaining={j.remaining} elapsed={j.elapsed} overdue={j.overdue} typical={j.typical} stageElapsed={j.stageElapsed} stageTypical={j.stageTypical} stageLabel={j.stageLabel} ifRepair={j.ifRepair} className="hidden sm:inline" />}
               {j.percent !== null && j.percent !== undefined && <span>{j.percent}%</span>}
-              {STOPPABLE.test(String(j.id)) && (
+              {canStop && STOPPABLE.test(String(j.id)) && (
                 <button
                   type="button"
                   onClick={(e) => {

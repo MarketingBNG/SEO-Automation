@@ -156,8 +156,13 @@ export default function TopicsTab() {
   const [starting, setStarting] = useState(false);
   const who = useRole();
   const canWork = who.can('content.work');
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  // A failed load keeps what is on screen (a poll keeps trying) instead of spinning for ever.
   const load = useCallback(async () => {
-    setData(await fetch('/api/topics').then((r) => (r.ok ? r.json() : null)).catch(() => null));
+    const res = await fetch('/api/topics').catch(() => null);
+    const j = res?.ok ? await res.json().catch(() => null) : null;
+    if (j) setData(j);
+    setLoadErr(j ? null : res ? `Could not load the topics (HTTP ${res.status}).` : 'Could not reach the server.');
   }, []);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -181,6 +186,7 @@ export default function TopicsTab() {
     }, 90000);
   }
 
+  if (!data && loadErr) return <div className="flex items-center gap-2 text-sm text-destructive">{loadErr}<Button size="sm" variant="outline" onClick={() => load()}>Retry</Button></div>;
   if (!data) return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Loading topics…</div>;
   const todays = (data.topics || []).filter((t: any) => t.day === data.today);
   const news = todays.filter((t: any) => t.kind !== 'evergreen');

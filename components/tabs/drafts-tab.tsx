@@ -19,6 +19,7 @@ import { PeopleAlsoAskList } from '@/components/shared/people-also-ask';
 import { DataTable, FieldLabel, NativeSelect, TD, TD_MUTED } from '@/components/shared/content-ui';
 import { jobsChanged } from '@/components/shared/job-progress';
 import { OriginLabel } from '@/components/shared/origin-details';
+import { useRole } from '@/hooks/use-role';
 
 export { PeopleAlsoAskList };
 
@@ -34,6 +35,8 @@ export default function DraftsTab() {
   const [openId, setOpenId] = useState<any>(wanted);
   const [analyticsPost, setAnalyticsPost] = useState<any>(null);
   const [showPerf, setShowPerf] = useState(false);
+  // Bumped when a list-row "Check and fix" finishes, so the open editor reads the fixed article.
+  const [editorReload, setEditorReload] = useState(0);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (wanted) setOpenId(wanted);
@@ -83,7 +86,7 @@ export default function DraftsTab() {
                   {d.attention && (
                     <div className="mt-1 max-w-xs space-y-1 text-xs text-muted-foreground" title={d.attention.first.join('\n\n')}>
                       <div>{d.attention.summary} Open the draft to see each one.</div>
-                      <RecheckIssues id={d.id} count={d.attention.count} onDone={load} compact />
+                      <RecheckIssues id={d.id} count={d.attention.count} onDone={() => { load(); if (d.id === openId) setEditorReload((n) => n + 1); }} compact />
                     </div>
                   )}
                 </td>
@@ -123,6 +126,7 @@ export default function DraftsTab() {
             if (wanted) router.replace('/?tab=drafts', { scroll: false });
           }}
           onChange={load}
+          reloadKey={editorReload}
         />
       )}
 
@@ -159,11 +163,20 @@ function NoteList({ heading, children }: { heading: string; children: ReactNode 
   );
 }
 
-function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: () => void; onChange: () => void }) {
+function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: any; onClose: () => void; onChange: () => void; reloadKey?: number }) {
   const [draft, setDraft] = useState<any>(null);
+  const [loadError, setLoadError] = useState('');
   const [title, setTitle] = useState('');
   const [meta, setMeta] = useState('');
   const [content, setContent] = useState('');
+  const canPublishNow = useRole().can('blog.publish_now');
+  // The saved version the Title / Meta / Content boxes started from. Save sends its updated_at, so a
+  // save never writes old text over a newer one (the issue fixer, Claude Code, another reviewer).
+  const baseRef = useRef<{ updated_at: any; title: string; meta: string; content: string } | null>(null);
+  const boxesRef = useRef({ title, meta, content });
+  useEffect(() => {
+    boxesRef.current = { title, meta, content };
+  }, [title, meta, content]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -186,20 +199,32 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
 
   // resetFields=false refreshes the draft's status, facts and image but keeps whatever is typed in
   // the Title / Meta / Content boxes, so marking a fact or uploading a creative never drops edits.
+  // Boxes with nothing typed in them always take the saved text.
   const loadDraft = useCallback(async (resetFields = true) => {
-    const res = await fetch(`/api/drafts/${draftId}`);
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok || json.error) {
-      setMessage(json.error || 'Draft not found');
+    const res = await fetch(`/api/drafts/${draftId}`).catch(() => null);
+    const json = res ? await res.json().catch(() => ({})) : {};
+    if (!res || !res.ok || json.error) {
+      const why = json.error || (res ? (res.status === 404 ? 'Draft not found' : `Could not load the draft (HTTP ${res.status}).`) : 'Could not reach the server.');
+      setMessage(why);
+      setLoadError(why);
       return null;
     }
+    setLoadError('');
     setDraft(json);
-    if (resetFields) {
-      setTitle(json.title || '');
-      setMeta(json.meta_description || '');
-      setContent(json.content_html || '');
-      setCoverAlt(json.cover_alt || '');
+    const saved = { updated_at: json.updated_at, title: json.title || '', meta: json.meta_description || '', content: json.content_html || '' };
+    const base = baseRef.current;
+    const boxes = boxesRef.current;
+    const untouched = base && boxes.title === base.title && boxes.meta === base.meta && boxes.content === base.content;
+    if (resetFields || untouched) {
+      setTitle(saved.title);
+      setMeta(saved.meta);
+      setContent(saved.content);
+      baseRef.current = saved;
+    } else if (base && saved.title === base.title && saved.meta === base.meta && saved.content === base.content) {
+      // Only something other than the words changed (cover, status): the boxes are still current.
+      baseRef.current = saved;
     }
+    if (resetFields) setCoverAlt(json.cover_alt || '');
     return json;
   }, [draftId]);
 
@@ -211,14 +236,39 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
     topRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }, [loadDraft]);
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the draft again after a list-row fix
+    if (reloadKey) loadDraft(false);
+  }, [reloadKey, loadDraft]);
+
   async function verifyFact(factId: any, status: string) {
-    await fetch(`/api/facts/${factId}`, {
+    setMessage('');
+    const res = await fetch(`/api/facts/${factId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       // Reviewer is recorded server-side as the signed-in user (was hardcoded to one name).
       body: JSON.stringify({ status }),
-    });
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      const j = res ? await res.json().catch(() => ({})) : {};
+      setMessage(`Could not mark the fact: ${j.error || (res ? `HTTP ${res.status}` : 'the server could not be reached')}`);
+    }
     loadDraft(false);
+  }
+
+  if (!draft && loadError) {
+    return (
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-destructive">{loadError}</span>
+          <Button variant="outline" size="sm" onClick={() => loadDraft()}>Try again</Button>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            <X />
+            Close
+          </Button>
+        </CardContent>
+      </Card>
+    );
   }
 
   if (!draft) {
@@ -235,19 +285,32 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
   // Publishing sends the saved copy, so it waits until the boxes match what is saved.
   const dirty =
     title !== (draft.title || '') || meta !== (draft.meta_description || '') || content !== (draft.content_html || '');
+  // Live before its calendar slot needs "Publish now" access, the same as on the calendar.
+  const scheduledEarly = wpStatus === 'publish' && Boolean(draft.schedule) && draft.schedule.status !== 'published' && !draft.wp_post_url;
 
   async function save(status: string | null) {
     setSaving(true);
     setMessage('');
     setWordNote('');
     try {
+      const sent = { title, meta, content };
       const res = await fetch(`/api/drafts/${draft.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, meta_description: meta, content_html: content, status }),
+        body: JSON.stringify({ title, meta_description: meta, content_html: content, status, if_updated_at: baseRef.current?.updated_at }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
+      if (res.status === 409) {
+        if (window.confirm('This draft was changed after you opened it (by the issue fixer, Claude Code or another reviewer), so your copy was not saved.\n\nLoad the saved version into the boxes? Anything you typed here is replaced.')) {
+          await loadDraft(true);
+          setMessage('Loaded the saved version. Check it, then save or approve again.');
+        } else {
+          setMessage('Not saved: the draft was changed after you opened it. Copy what you typed, then reload the draft.');
+        }
+        return;
+      }
       if (!res.ok) throw new Error(json.error);
+      baseRef.current = { updated_at: json.updated_at, ...sent };
       onChange();
       // The server now holds what was sent, so keep the boxes (anything typed meanwhile stays).
       const fresh = await loadDraft(false);
@@ -316,7 +379,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
 
   async function deleteDraft() {
     const live = draft.wp_post_url ? '\n\nThis draft was already sent to WordPress. The WordPress post will NOT be deleted; remove it in WordPress if you want it gone.' : '';
-    if (!window.confirm(`Delete this draft?\n\n"${draft.title || 'Untitled'}"\n\nThe draft, its facts and image links are removed for good. The keyword "${draft.keyword || ''}" goes back to the pending queue so it can be written again.${live}`)) return;
+    if (!window.confirm(`Delete this draft?\n\n"${draft.title || 'Untitled'}"\n\nThe draft, its facts and image links are removed for good. ${draft.schedule ? 'The monthly calendar writes this blog again on its own.' : draft.kind === 'article' || draft.wp_post_url ? 'The keyword is not queued again.' : `The keyword "${draft.keyword || ''}" goes back to the pending queue so it can be written again (a blog started from Topics & News is started again there instead).`}${live}`)) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/drafts/${draftId}`, { method: 'DELETE' });
@@ -411,7 +474,16 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
                 <li key={i}>{issue}</li>
               ))}
             </NoteList>
-            <RecheckIssues id={draft.id} count={JSON.parse(draft.validation_issues).length} onDone={() => { onChange(); loadDraft(false); }} />
+            <RecheckIssues
+              id={draft.id}
+              count={JSON.parse(draft.validation_issues).length}
+              fixBlocked={dirty ? 'Save your changes first: the fix rewrites the saved article.' : ''}
+              onDone={(fixed) => {
+                onChange();
+                // The fixed article is saved on the server: show it, unless the reviewer keeps what they typed.
+                loadDraft(fixed && dirty ? window.confirm('The fixed article was saved. Load it into the boxes? Your unsaved changes are replaced.') : false);
+              }}
+            />
           </>
         )}
 
@@ -622,7 +694,7 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
             <option value="publish">Publish live on the website now</option>
             <option value="draft">Send to WordPress as a draft (NOT live)</option>
           </NativeSelect>
-          <Button onClick={publish} disabled={saving || !(draft.status === 'approved' || (draft.status === 'published' && draft.wp_post_id)) || dirty}>
+          <Button onClick={publish} disabled={saving || !(draft.status === 'approved' || (draft.status === 'published' && draft.wp_post_id)) || dirty || (scheduledEarly && !canPublishNow)}>
             <Send />
             {draft.wp_post_id ? `Update the live post (WordPress #${draft.wp_post_id})` : draft.schedule ? 'Publish now (skips the scheduled slot)' : 'Publish to WordPress'}
           </Button>
@@ -636,6 +708,8 @@ function DraftEditor({ draftId, onClose, onChange }: { draftId: any; onClose: ()
             <span className="text-sm text-muted-foreground">Approve the draft first before publishing.</span>
           ) : dirty ? (
             <span className="text-sm text-muted-foreground">You have unsaved changes. Save them first, then publish.</span>
+          ) : scheduledEarly && !canPublishNow ? (
+            <span className="text-sm text-muted-foreground">This blog publishes at its calendar slot. Only an admin or a manager can publish it straight away.</span>
           ) : null}
         </div>
         )}
@@ -874,7 +948,7 @@ function PublishProgress({ pub, secs }: { pub: any; secs: number }) {
 
 // Checks the open issues again against the current article (after a manual fix), with the whole blog
 // and a topic brief as context. Resolved issues are cleared; with none left the draft is ready for review.
-function RecheckIssues({ id, count, onDone, compact = false }: { id: number; count: number; onDone: () => void; compact?: boolean }) {
+function RecheckIssues({ id, count, onDone, compact = false, fixBlocked = '' }: { id: number; count: number; onDone: (fixed: boolean) => void; compact?: boolean; fixBlocked?: string }) {
   const [busy, setBusy] = useState<'' | 'check' | 'fix'>('');
   const [msg, setMsg] = useState<string | null>(null);
   async function run(fix: boolean) {
@@ -885,7 +959,7 @@ function RecheckIssues({ id, count, onDone, compact = false }: { id: number; cou
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'The check failed.');
       setMsg(j.open ? `${j.resolved} of ${j.checked} resolved${j.fixed ? ' (blog fixed and saved)' : ''}; ${j.open} still open.` : `All ${j.checked} issues are resolved${j.fixed ? ' and the blog is saved' : ''}. The draft is now ready for review.`);
-      onDone();
+      onDone(Boolean(j.fixed));
     } catch (e: any) {
       setMsg(e.message);
     } finally {
@@ -894,7 +968,7 @@ function RecheckIssues({ id, count, onDone, compact = false }: { id: number; cou
   }
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      <Button size="sm" disabled={Boolean(busy)} onClick={() => run(true)}>
+      <Button size="sm" disabled={Boolean(busy) || Boolean(fixBlocked)} title={fixBlocked || undefined} onClick={() => run(true)}>
         {busy === 'fix' && <Loader2 className="animate-spin" />}Check and fix {count} issue(s)
       </Button>
       <Button size="sm" variant="outline" disabled={Boolean(busy)} onClick={() => run(false)}>

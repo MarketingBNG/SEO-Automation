@@ -33,10 +33,8 @@ export function useManualTasks(strategyId: number, enabled: boolean) {
     const json = res && res.ok ? await res.json() : { tasks: [] };
     setTasks(json.tasks || []);
     setLoaded(true);
-    if (canAssign) {
-      const t = await fetch('/api/team').catch(() => null);
-      if (t?.ok) setTeam(await t.json());
-    }
+    // The people to assign come with the tasks: a tester may assign without seeing the team page.
+    if (canAssign && Array.isArray(json.team)) setTeam(json.team);
   }, [strategyId, enabled, canAssign]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

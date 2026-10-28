@@ -10,6 +10,10 @@ import { methodNotAllowed, toId } from '../../../_lib/http';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
+// Drafts with a check running in this process, so two presses (the list row and the open editor)
+// never start two paid runs on the same draft.
+const running = new Set<number>();
+
 // POST: check the open issues of a draft that needs attention again, against the current article.
 // When none is left, the draft becomes ready for review; otherwise only the open ones are kept.
 // With { fix: true }: the issues still open are fixed in the whole blog (in context, keeping the rest
@@ -24,6 +28,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     issues = JSON.parse(d.validation_issues || '[]');
   } catch {}
   if (!issues.length) return NextResponse.json({ error: 'This draft has no open issues to check.' }, { status: 400 });
+  if (running.has(id)) return NextResponse.json({ error: 'A check of this draft is already running. Wait for it to finish.' }, { status: 409 });
+  running.add(id);
   try {
     const results = await recheckIssues(d, issues);
     let open = results.filter((r) => r.open).map((r) => String(r.text || r.issue));
@@ -45,6 +51,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } catch (err: any) {
     console.error('Issue re-check failed', err);
     return NextResponse.json({ error: `The check could not finish: ${String(err?.message || err).slice(0, 200)}` }, { status: 500 });
+  } finally {
+    running.delete(id);
   }
 }
 export { methodNotAllowed as GET, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

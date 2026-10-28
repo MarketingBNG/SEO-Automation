@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ChevronDown, GraduationCap, Loader2, RefreshCw, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { SafeHtml, safeHref } from '@/components/shared/article';
 
 const fmtDay = (d?: string | null) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { dateStyle: 'medium', timeZone: 'UTC' }) : '');
 
@@ -22,12 +23,12 @@ function Lesson({ l, open: startOpen }: { l: any; open?: boolean }) {
       </button>
       {open && (
         <div className="border-t p-3">
-          <div className="prose prose-sm max-w-none dark:prose-invert" dangerouslySetInnerHTML={{ __html: l.content_html }} />
+          <SafeHtml className="prose prose-sm max-w-none dark:prose-invert" html={l.content_html} />
           {l.sources?.length > 0 && (
             <div className="mt-3 text-xs text-muted-foreground">
               Sources:{' '}
               {l.sources.map((s: any, i: number) => (
-                <a key={i} href={s.url} target="_blank" rel="noreferrer" className="mr-2 underline">
+                <a key={i} href={safeHref(s.url)} target="_blank" rel="noreferrer" className="mr-2 underline">
                   {s.title}
                 </a>
               ))}

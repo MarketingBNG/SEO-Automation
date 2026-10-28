@@ -11,6 +11,7 @@ import { seoSlug } from '@/lib/wordpress';
 import { coverAlt } from '@/lib/cover';
 import { DRAFT_TOKEN_ACTOR, hasDraftToken } from '@/lib/draftToken';
 import { authorNames, pickAuthor } from '@/lib/authors';
+import { requeueAfterDelete } from '@/lib/draftDelete';
 
 export const runtime = 'nodejs';
 
@@ -133,14 +134,17 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   return NextResponse.json({ ...updated, calendar }, { status: 200 });
 }
 
-// Deletes a draft that will not be published. Its facts and image links go with it. The keyword
-// returns to the pending queue so it can be written again later. A WordPress post that was
-// already created from this draft is NOT touched.
+// Deletes a draft that will not be published. Its facts and image links go with it. A plain blog's
+// keyword returns to the pending queue so it can be written again later; a calendar blog is written
+// again by the schedule, a topic's blog or article from Topics, and a live blog's keyword stays as it
+// is (see requeueAfterDelete). A WordPress post that was already created from this draft is NOT touched.
 export async function DELETE(req: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const nid = toId(id);
   const existing: any = await prisma.drafts.findUnique({ where: { id: nid } });
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const kw = await prisma.keywords.findUnique({ where: { id: existing.keyword_id }, select: { batch_name: true } });
+  const requeue = requeueAfterDelete(existing, kw?.batch_name);
   await prisma.$transaction(async (tx: any) => {
     await tx.facts.deleteMany({ where: { draft_id: nid } });
     await tx.draft_images.deleteMany({ where: { draft_id: nid } });
@@ -148,10 +152,17 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
     // A strategy blog whose draft is deleted goes back to planned, so the autopilot writes it again.
     await tx.blog_schedule.updateMany({ where: { draft_id: nid, status: { in: ['drafting', 'in_review'] } }, data: { status: 'planned', review_started: null, reviewed_at: null, fact_check: null } });
     await tx.blog_schedule.updateMany({ where: { draft_id: nid }, data: { draft_id: null } });
-    await tx.keywords.updateMany({
-      where: { id: existing.keyword_id, status: { in: ['drafted', 'failed'] } },
-      data: { status: 'pending', error: null },
-    });
+    if (requeue) {
+      await tx.keywords.updateMany({
+        where: { id: existing.keyword_id, status: { in: ['drafted', 'failed'] } },
+        data: { status: 'pending', error: null },
+      });
+    }
+    // A topic whose blog or article is deleted can be written again from Topics & News.
+    await tx.topics.updateMany({ where: { draft_id: nid, status: 'blog' }, data: { status: 'new' } });
+    await tx.topics.updateMany({ where: { draft_id: nid }, data: { draft_id: null } });
+    await tx.topics.updateMany({ where: { article_draft_id: nid, status: 'article' }, data: { status: 'new' } });
+    await tx.topics.updateMany({ where: { article_draft_id: nid }, data: { article_draft_id: null } });
   });
   await activity.log('draft.deleted', {
     entityType: 'draft',
@@ -159,6 +170,6 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
     details: `"${existing.title || '(untitled)'}" deleted${existing.wp_post_url ? ' (the WordPress post was not touched)' : ''}`,
     actor: await getActor(),
   });
-  return NextResponse.json({ deleted: true, keywordId: existing.keyword_id }, { status: 200 });
+  return NextResponse.json({ deleted: true, keywordId: existing.keyword_id, requeued: requeue }, { status: 200 });
 }
 export { methodNotAllowed as POST, methodNotAllowed as PUT };

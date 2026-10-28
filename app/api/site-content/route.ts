@@ -26,13 +26,21 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// POST { action: 'save', type, item } | { action: 'delete', slug }. Each change tells the website.
+// POST { action: 'save', type, item, create? } | { action: 'delete', slug }. Each change tells the website.
 export async function POST(req: NextRequest) {
   const me = await getMe();
   const body: any = (await req.json().catch(() => ({}))) || {};
   try {
     if (body.action === 'save') {
       const type = body.type === 'post' ? 'post' : 'page';
+      // A new item from the editor (create: true) never overwrites an existing page or post.
+      if (body.create) {
+        if (!String(body.item?.slug || '').trim()) return NextResponse.json({ error: 'Enter the URL path of the new item.' }, { status: 400 });
+        const slug = normalizeSlug(body.item.slug);
+        if (await prisma.site_content.findUnique({ where: { slug }, select: { slug: true } })) {
+          return NextResponse.json({ error: `${slug} already exists. Open it from the list to edit it, or pick another URL path.` }, { status: 409 });
+        }
+      }
       const { row, created } = await upsertContent(type, body.item || {}, me?.email);
       const event = type === 'page' ? 'page.updated' : row.status === 'published' ? (created ? 'post.published' : 'post.updated') : 'post.unpublished';
       const hook = await notifyWebsite(event, type, row.slug);
