@@ -165,6 +165,27 @@ async function surferScore(keyword, html) {
   }
 }
 
+// After a blog goes live (calendar slot, or Publish in Drafts & Review): indexing, SE Ranking
+// tracking and internal links. Each step is independent; the log of results goes on the calendar row.
+export async function afterPublish(link: string, title: string, keyword: string | null | undefined) {
+  const log: any = {};
+  const step = async (name, fn) => {
+    try {
+      log[name] = { ok: true, result: await fn() };
+    } catch (e: any) {
+      log[name] = { ok: false, error: e.message };
+    }
+  };
+  await step('indexNow', () => submitIndexNow([link]));
+  await step('searchConsoleSitemap', () => resubmitSitemap());
+  if (process.env.BING_WEBMASTER_API_KEY) await step('bingWebmaster', () => submitToBing([link]));
+  if (keyword) {
+    await step('seRankingTracking', () => addTrackedKeyword(keyword));
+    await step('internalLinks', () => addInternalLinks(link, title, keyword));
+  }
+  return log;
+}
+
 // Adds a link to the new post from 2 to 3 older related posts.
 async function addInternalLinks(newUrl, title, keyword) {
   const words = keyword.split(/\s+/).filter((w) => w.length > 3).slice(0, 3).join(' ');
@@ -340,19 +361,7 @@ async function publishRowOnce(row, now, verify) {
   });
 
   // After publish: each step is independent and its result is logged.
-  const log: any = {};
-  const step = async (name, fn) => {
-    try {
-      log[name] = { ok: true, result: await fn() };
-    } catch (e: any) {
-      log[name] = { ok: false, error: e.message };
-    }
-  };
-  await step('indexNow', () => submitIndexNow([post.link]));
-  await step('searchConsoleSitemap', () => resubmitSitemap());
-  if (process.env.BING_WEBMASTER_API_KEY) await step('bingWebmaster', () => submitToBing([post.link]));
-  await step('seRankingTracking', () => addTrackedKeyword(row.main_keyword));
-  await step('internalLinks', () => addInternalLinks(post.link, checked.title, row.main_keyword));
+  const log: any = await afterPublish(post.link, checked.title, row.main_keyword);
 
   if (inline.uploaded.length) log.inlineImages = { ok: true, result: `${inline.uploaded.length} image(s) in the Media Library${inline.uploaded.some((u) => u.reused) ? ' (some reused from an earlier attempt)' : ''}` };
   if (!row.refresh_url) log.cover = cover ? { ok: true, result: `Cover in the Media Library with alt text "${coverAlt(checked)}"` } : { ok: false, result: 'The cover could not be uploaded, so the post has no featured image. Upload one in Drafts & Review and republish, or set it in WordPress.' };

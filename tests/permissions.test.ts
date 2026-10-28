@@ -62,3 +62,40 @@ test('tester: everything except managing the team', () => {
   assert.equal(canBlock('admin', 'tester', 't@usaindiacfo.com'), true);
   assert.equal(canBlock('manager', 'tester', 't@usaindiacfo.com'), false);
 });
+
+test('settings route: only user-editable keys, never role access or Testing/Live mode', async () => {
+  const { isEditableSetting } = await import('../lib/permissions');
+  for (const k of ['voice_guidelines', 'max_words', 'service_ctas', 'tracked_keyword_target', 'byline_author']) assert.equal(isEditableSetting(k), true, k);
+  for (const k of ['role_access', 'ai_mode', 'ai_paused', 'credit_balance_usd', 'apicache:x:y', 'scheduler_last_run', 'writer_lessons']) assert.equal(isEditableSetting(k), false, k);
+});
+
+test('reads that are not open to every role: meeting notes, OAuth connections, paid lookups', () => {
+  assert.equal(allowed('user', 'GET', '/api/client-insights'), false);
+  assert.equal(allowed('analyst', 'GET', '/api/client-insights'), true);
+  assert.equal(allowed('user', 'GET', '/api/fireflies/transcripts'), false);
+  assert.equal(allowed('analyst', 'GET', '/api/fireflies/test'), true, 'meetings page connection check');
+  for (const p of ['/api/gbp/auth-url', '/api/gbp/oauth-callback', '/api/zoho/auth-url', '/api/zoho/oauth-callback', '/api/serphouse/check', '/api/pagespeed/check']) {
+    assert.equal(allowed('manager', 'GET', p), false, p);
+    assert.equal(allowed('admin', 'GET', p), true, p);
+  }
+  assert.equal(allowed('manager', 'GET', '/api/zoho/leads'), true);
+});
+
+test('the cron secret opens only the scheduled job routes, on GET', async () => {
+  const { cronAllows, hasCronSecret } = await import('../lib/cronSecret');
+  for (const p of ['/api/cron/daily', '/api/cron/sweep', '/api/skill/auto-check', '/api/strategy/auto-check/']) assert.equal(cronAllows('GET', p), true, p);
+  assert.equal(cronAllows('POST', '/api/cron/daily'), false);
+  for (const p of ['/api/settings', '/api/team', '/api/drafts/5/publish', '/api/cron/daily/x']) assert.equal(cronAllows('GET', p), false, p);
+  const prev = process.env.CRON_SECRET;
+  process.env.CRON_SECRET = 'abc123';
+  try {
+    assert.equal(hasCronSecret(new Request('http://x/api/cron/daily', { headers: { authorization: 'Bearer abc123' } })), true);
+    assert.equal(hasCronSecret(new Request('http://x/api/cron/daily', { headers: { authorization: 'Bearer abc124' } })), false);
+    assert.equal(hasCronSecret(new Request('http://x/api/cron/daily')), false);
+    process.env.CRON_SECRET = '';
+    assert.equal(hasCronSecret(new Request('http://x/api/cron/daily', { headers: { authorization: 'Bearer ' } })), false);
+  } finally {
+    if (prev === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = prev;
+  }
+});

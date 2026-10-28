@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { hasCronSecret } from '@/lib/cronSecret';
 
 // The old pages/api handlers answered unsupported methods with this exact JSON body. Route files
 // export it for every method they don't support so the 405 response stays identical.
@@ -26,6 +27,5 @@ export function escapeHtml(str: unknown): string {
 // scheduled action used to be a POST run it on GET only for these requests; every other GET keeps
 // its old behaviour.
 export function isCronRequest(req: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  return !!secret && req.headers.get('authorization') === `Bearer ${secret}`;
+  return hasCronSecret(req);
 }

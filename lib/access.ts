@@ -44,3 +44,24 @@ export async function canDo(me: { email: string; role: Role; blocked?: boolean }
   const { access, grants } = await accessFor(me.email, me.role);
   return allows(access, grants, action);
 }
+
+// The person's current role, block and access from the database, for proxy.ts. The session token
+// is only rewritten when the browser reads the session, so a kept old cookie would otherwise carry
+// a role, an unblock or a grant the admin has since taken away (or a tester role past 48 hours).
+// Cached for 30 seconds per person so polling pages do not cost a query each.
+export type LiveAccess = { role: Role; blocked: boolean; access: Access | null; grants: Grant[] };
+const LIVE_MS = 30_000;
+const liveCache = new Map<string, { at: number; value: LiveAccess }>();
+
+export async function liveAccessFor(email: string): Promise<LiveAccess> {
+  const e = email.toLowerCase();
+  const hit = liveCache.get(e);
+  if (hit && Date.now() - hit.at < LIVE_MS) return hit.value;
+  const { memberFor } = await import('./team');
+  const m = await memberFor(e);
+  // Not on the team list: no access until the admin adds them (same as the session callback).
+  const value: LiveAccess = m ? { role: m.role, blocked: m.blocked, ...(await accessFor(m.email, m.role)) } : { role: 'user', blocked: true, access: null, grants: [] };
+  liveCache.set(e, { at: Date.now(), value });
+  if (liveCache.size > 500) liveCache.delete(liveCache.keys().next().value!);
+  return value;
+}
