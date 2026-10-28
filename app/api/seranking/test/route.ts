@@ -5,6 +5,8 @@ export const runtime = 'nodejs';
 
 // Old handler accepted any method.
 async function handler() {
+  // Not set up is not a failure: 200 with connected:false, so Settings shows 'Not connected'.
+  if (!process.env.SERANKING_API_KEY) return NextResponse.json({ ok: false, connected: false, error: 'SERANKING_API_KEY is not set.' });
   try {
     const [subscription, sites]: any[] = await Promise.all([getSubscription(), listSites()]);
     return NextResponse.json(

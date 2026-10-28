@@ -711,7 +711,10 @@ export function MonthRunning({ standalone = false }: { standalone?: boolean } = 
   const [busy, setBusy] = useState<number | null>(null);
   const [reviewer, setReviewer] = useState<Record<number, string>>({});
   // Managers and associates review too: approve, reject, pause and reschedule.
-  const canReview = useRole().can('manual.do');
+  const role = useRole();
+  const canReview = role.can('manual.do');
+  // Drafts & Review is not open to every reviewer (the 'user' role): they read the blog in Word.
+  const seesDrafts = role.sees('drafts');
   const load = useCallback(async () => {
     setData(await fetch('/api/strategy/schedule').then((r) => r.json()).catch(() => null));
   }, []);
@@ -777,8 +780,8 @@ export function MonthRunning({ standalone = false }: { standalone?: boolean } = 
                     {r.cta && <div className="text-xs text-muted-foreground">Call to action: {r.cta.service}</div>}
                     {r.draft_id && (
                       <div className="flex flex-wrap gap-x-3 text-xs">
-                        <Link className="text-primary underline" href={`/?tab=drafts&draft=${r.draft_id}`}>Open the draft</Link>
-                        <a className="text-primary underline" href={`/api/drafts/${r.draft_id}/download`} download>Download Word</a>
+                        {seesDrafts && <Link className="text-primary underline" href={`/?tab=drafts&draft=${r.draft_id}`}>Open the draft</Link>}
+                        <a className="text-primary underline" href={`/api/drafts/${r.draft_id}/download`} download>{seesDrafts ? 'Download Word' : 'Read it in Word (Drafts & Review is not open to your role)'}</a>
                       </div>
                     )}
                   </div>

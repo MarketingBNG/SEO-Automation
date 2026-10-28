@@ -17,7 +17,8 @@ export async function GET(req: Request) {
   if ((await settings.get('last_weekly_run')) === today) return NextResponse.json({ skipped: 'Already ran today.' });
   // Automatic work: in Testing mode it does not start (lib/aiQueue.ts).
   const r: any = await runAutomatic(() => runWeekly());
-  if (!r?.error) await settings.set('last_weekly_run', today);
+  // A skipped run (no approved strategy yet) did not happen: a strategy approved later today still gets its check.
+  if (!r?.error && !r?.skipped) await settings.set('last_weekly_run', today);
   return NextResponse.json(r);
 }
 export { methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

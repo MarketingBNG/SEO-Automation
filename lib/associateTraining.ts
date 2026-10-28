@@ -13,6 +13,7 @@ import { parseJson } from './strategy/generate';
 import { getRecentTranscripts } from './fireflies';
 import { istDay, istHour } from './topics';
 import { onceADay, waitsForAi, AnotherRunGoing } from './onceADay';
+import { sqlNow } from './time';
 
 export const TRAINING_HOUR_IST = 9;
 export const PASS_PERCENT = 80;
@@ -165,7 +166,7 @@ export async function submitTest(email: string, testId: number, answers: Record<
         await prisma.training_misses.updateMany({ where: { email, cleared: false, question: { contains: `"id":"${q.id}"` } }, data: { cleared: true } });
       } else await addMiss(email, q, today);
     }
-    await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'done', score, answers: JSON.stringify(answers || {}), submitted_at: new Date().toISOString() } });
+    await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'done', score, answers: JSON.stringify(answers || {}), submitted_at: sqlNow() } });
   } catch (e) {
     // Not left half-marked: it can be submitted again.
     await prisma.training_tests.updateMany({ where: { id: t.id, status: 'marking' }, data: { status: 'open' } }).catch(() => {});

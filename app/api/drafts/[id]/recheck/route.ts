@@ -37,10 +37,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 async function recheck(d: any, id: number, issues: string[], fix: boolean) {
+  // Set as soon as the paid fix is saved, so a failure after that still tells the page to reload it.
+  let fixed = false;
   try {
     const results = await recheckIssues(d, issues);
     let open = results.filter((r) => r.open).map((r) => String(r.text || r.issue));
-    let fixed = false;
     // Only the words count: a new cover or a status change meanwhile does not throw the fix away.
     const sameWords = { id, title: d.title, meta_description: d.meta_description, content_html: d.content_html };
     // The words the result below was judged on (the fixed version after a fix).
@@ -54,9 +55,9 @@ async function recheck(d: any, id: number, issues: string[], fix: boolean) {
       // Saved only when nobody changed the words while the fix ran: a person's save is never overwritten.
       const { count } = await prisma.drafts.updateMany({ where: sameWords, data: { title: out.title, meta_description: out.meta, content_html: out.content, word_count: words, updated_at: sqlNow() } });
       if (!count) return NextResponse.json(savedMeanwhile, { status: 409 });
+      fixed = true;
       const saved = (await prisma.drafts.findUnique({ where: { id } }))!;
       await markEditedAsChecked(id, 'the issue fixer', { byPerson: false });
-      fixed = true;
       checked = { id, title: saved.title, meta_description: saved.meta_description, content_html: saved.content_html };
       const again = await recheckIssues(saved, open);
       open = again.filter((r) => r.open).map((r) => String(r.text || r.issue));
@@ -73,7 +74,11 @@ async function recheck(d: any, id: number, issues: string[], fix: boolean) {
     return NextResponse.json({ checked: issues.length, resolved: issues.length - open.length, open: open.length, fixed });
   } catch (err: any) {
     console.error('Issue re-check failed', err);
-    return NextResponse.json({ error: `The check could not finish: ${String(err?.message || err).slice(0, 200)}` }, { status: 500 });
+    const why = String(err?.message || err).slice(0, 200);
+    // The fix was saved (and paid for) but the check after it did not finish: recorded, and the page
+    // reloads the fixed article (fixed: true) instead of showing the old text.
+    if (fixed) await activity.log('draft.issues_fixed', { actor: await getActor().catch(() => 'system'), entityType: 'draft', entityId: id, details: `Checked and fixed: the fix was saved, but the check after it did not finish (${why}). Press Check issues again to see what is still open.` }).catch(() => {});
+    return NextResponse.json({ error: `The check could not finish: ${why}${fixed ? ' The fix itself was saved.' : ''}`, fixed }, { status: 500 });
   }
 }
 export { methodNotAllowed as GET, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

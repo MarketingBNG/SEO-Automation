@@ -3,6 +3,8 @@ import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../_lib/http';
+import { skillRunning } from '@/lib/skillRun';
+import { skillBatchWaiting } from '@/lib/anthropic';
 
 export const runtime = 'nodejs';
 
@@ -21,6 +23,11 @@ export async function POST(req: NextRequest) {
   const { skill_content, research_summary }: any = (await req.json().catch(() => ({}))) || {};
   if (typeof skill_content !== 'string' || !skill_content.trim()) {
     return NextResponse.json({ error: 'The skill cannot be empty.' }, { status: 400 });
+  }
+  // The automatic refresh's batch is built on the current version: an edit saved while it waits would
+  // be replaced by that result when it is collected (and, before the fix, lost the paid batch).
+  if (skillRunning() === 'auto' || (await skillBatchWaiting())) {
+    return NextResponse.json({ error: 'The automatic skill refresh is waiting for its batch (already paid for), which builds on the current version. Edit the skill after it finishes, so your edit is not replaced.' }, { status: 409 });
   }
   const actor = await getActor();
   const previous = await prisma.writing_skills.findFirst({ where: { status: 'active' }, orderBy: { id: 'desc' } });

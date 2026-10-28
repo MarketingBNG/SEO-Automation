@@ -147,6 +147,33 @@ const STOPPED_DAY = 'outreach_stopped_day';
 // The first day of the current run of stopped days, so a person is told once it lasts two days.
 const STOPPED_SINCE = 'outreach_stopped_since';
 
+// Link check on its own: a sent lead whose site now appears among our referring domains (SE Ranking)
+// is done. error: SE Ranking could not be read, so nothing was checked (without an SE Ranking key
+// there is nothing to check, which is not an error). tasks: the open tasks already loaded, if any.
+export async function checkOutreachLinks(now = new Date(), tasks?: any[]): Promise<{ verified: number; error?: string }> {
+  if (!tasks) {
+    const strategies = await prisma.seo_strategies.findMany({ where: { status: 'approved' }, select: { id: true } });
+    tasks = await prisma.backlink_tasks.findMany({ where: { strategy_id: { in: strategies.map((s) => s.id) }, status: 'sent' }, orderBy: { id: 'asc' } });
+  }
+  const sent = tasks.filter((t) => t.status === 'sent');
+  if (!sent.length || !process.env.SERANKING_API_KEY) return { verified: 0 };
+  let refs: Set<string>;
+  try {
+    refs = new Set(await listReferringDomains(HOST(), 1000));
+  } catch (e: any) {
+    return { verified: 0, error: `SE Ranking link check failed: ${e.message}` };
+  }
+  let verified = 0;
+  for (const t of sent) {
+    if (refs.has(domainOf(t.target_site))) {
+      await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'done', verified_at: sqlNow(now) } });
+      await activity.log('backlink.live', { entityType: 'backlink_task', entityId: t.id, details: `Link from ${t.target_site} found in SE Ranking` });
+      verified++;
+    }
+  }
+  return { verified };
+}
+
 // `push: false` (a repeat pass on the same day, while it waits for AI) leaves out the leads whose
 // opening line is already saved: they were pushed, or refused, on the first pass of the day.
 export async function runOutreach(now = new Date(), { checkLinks = true, push = true, line: writeLine = openingLine, find = findSites }: any = {}) {
@@ -171,16 +198,11 @@ export async function runOutreach(now = new Date(), { checkLinks = true, push = 
   }
 
   // Link check: a target that now appears among our referring domains is done.
-  const sent = tasks.filter((t) => t.status === 'sent');
-  if (checkLinks && sent.length) {
-    const refs = new Set(await listReferringDomains(HOST(), 1000).catch(() => []));
-    for (const t of sent) {
-      if (refs.has(domainOf(t.target_site))) {
-        await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'done', verified_at: sqlNow(now) } });
-        await activity.log('backlink.live', { entityType: 'backlink_task', entityId: t.id, details: `Link from ${t.target_site} found in SE Ranking` });
-        out.verified++;
-      }
-    }
+  if (checkLinks) {
+    const links = await checkOutreachLinks(now, tasks);
+    out.verified = links.verified;
+    // SE Ranking could not be read: the caller keeps today's link check open and tries again.
+    if (links.error) (out as any).linkCheckError = links.error;
   }
 
   // Work that needs Claude (a described target to resolve, or a due task with no opening line yet)

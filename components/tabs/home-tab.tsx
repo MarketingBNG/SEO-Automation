@@ -20,6 +20,8 @@ function factCheck(fc: any) {
 
 // One blog waiting for a decision: the cover, when it publishes, and Approve / Reject.
 function ApprovalCard({ row, reviewers, canReview, onDone }: { row: any; reviewers: string[]; canReview: boolean; onDone: (msg: string) => void }) {
+  // Drafts & Review is not open to every reviewer (the 'user' role): they read the blog in Word.
+  const seesDrafts = useRole().sees('drafts');
   const [rejecting, setRejecting] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [reviewer, setReviewer] = useState('');
@@ -58,14 +60,17 @@ function ApprovalCard({ row, reviewers, canReview, onDone }: { row: any; reviewe
         {row.overdue && <div className="text-xs font-semibold text-red-600 dark:text-red-400">Review overdue: it has waited more than 48 hours.</div>}
         {row.hold_reasons?.length > 0 && <ul className="ml-4 list-disc text-xs text-muted-foreground">{row.hold_reasons.map((h: string, i: number) => <li key={i}>{h}</li>)}</ul>}
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href={`/?tab=drafts&draft=${row.draft_id}`}>
-            <FileText />
-            Open the draft
-          </Link>
+          {seesDrafts && (
+            <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href={`/?tab=drafts&draft=${row.draft_id}`}>
+              <FileText />
+              Open the draft
+            </Link>
+          )}
           <a className={buttonVariants({ variant: 'outline', size: 'sm' })} href={`/api/drafts/${row.draft_id}/download`} download>
             <Download />
-            Download Word
+            {seesDrafts ? 'Download Word' : 'Read it in Word'}
           </a>
+          {!seesDrafts && <span className="text-xs text-muted-foreground">Drafts &amp; Review is not open to your role, so read the blog in Word.</span>}
           {canReview && row.needs_expert && (
             <select className="h-8 w-52 rounded-md border bg-background px-1 text-xs" value={reviewer} onChange={(e) => setReviewer(e.target.value)} aria-label="CA/CPA reviewer">
               <option value="">Reviewed by (CA/CPA)...</option>

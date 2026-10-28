@@ -1,6 +1,7 @@
 // Idempotent, cron-safe: only actually regenerates the skill if it's missing or 15+ days old.
-// Wire a daily cron (Cloudways cron job or any scheduler) to POST here once deployed, and the
-// 15-day cycle takes care of itself - calling this daily is safe, it's a no-op most days.
+// Wire a daily cron (with CRON_SECRET) to GET here once deployed, and the 15-day cycle takes care
+// of itself - calling this daily is safe, it's a no-op most days. Only the scheduled task starts it:
+// a person uses "Update skill" (app/api/skill/generate), which has its own guards and logging.
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { generateContentSkill } from '@/lib/anthropic';
@@ -81,15 +82,11 @@ async function refresh() {
   }
 }
 
-export async function POST() {
-  return run();
-}
-
-// PORT NOTE: Vercel Cron can only call with GET, so a GET carrying CRON_SECRET runs the same
-// idempotent check as POST. Any other GET keeps the old 405.
+// Cron only (CRON_SECRET), GET or POST: a signed-in browser cannot start this paid batch refresh.
+// Any other request keeps the old 405.
 export async function GET(req: Request) {
   // Automatic work: in Testing mode it does not use AI (lib/aiQueue.ts).
   if (isCronRequest(req)) return runAutomatic(() => run());
   return methodNotAllowed();
 }
-export { methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };
+export { GET as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

@@ -24,7 +24,11 @@ async function addTask(url: string, issue: string, fix: string) {
 export async function scanPostsForAiText(maxPages = 5) {
   const found = [];
   for (let page = 1; page <= maxPages; page++) {
-    const { json } = await wpRequest('GET', '/wp/v2/posts', { query: { per_page: 100, page, status: 'publish', context: 'edit', _fields: 'id,link,title,content' } }).catch(() => ({ json: [] }));
+    // The first page failing means the website could not be read at all: the caller hears of it.
+    const { json } = await wpRequest('GET', '/wp/v2/posts', { query: { per_page: 100, page, status: 'publish', context: 'edit', _fields: 'id,link,title,content' } }).catch((e) => {
+      if (page === 1) throw e;
+      return { json: [] };
+    });
     if (!Array.isArray(json) || !json.length) break;
     for (const p of json) {
       const issues = aiLeftovers(p.title?.raw || '', p.content?.raw || '');
@@ -38,8 +42,15 @@ export async function scanPostsForAiText(maxPages = 5) {
 export async function runSiteChecks() {
   const out: any = { aiText: 0, robots: null, attachments: null, newTasks: 0 };
   // 1. AI instruction text on live posts.
-  const ai = await scanPostsForAiText();
-  out.aiText = ai.length;
+  let ai = [];
+  let scanFailed = false;
+  try {
+    ai = await scanPostsForAiText();
+    out.aiText = ai.length;
+  } catch (e) {
+    scanFailed = true;
+    out.aiText = `not checked: ${e.message}`;
+  }
   for (const p of ai) {
     if (await addTask(p.url, 'AI instruction text on a live post', `Edit the post in WordPress and remove: ${p.issues.join(' ')}`)) out.newTasks++;
   }
@@ -69,6 +80,12 @@ export async function runSiteChecks() {
     } else out.attachments = 'ok';
   } catch (e) {
     out.attachments = `not checked: ${e.message}`;
+  }
+
+  // Nothing could be checked (no connection, or the website is down): an error, so the scheduler
+  // keeps the day open and tries again on its next run instead of marking today's check done.
+  if (scanFailed && /^not checked/.test(String(out.robots)) && /^not checked/.test(String(out.attachments))) {
+    out.error = `Website not reachable: ${out.aiText.slice('not checked: '.length)}`;
   }
 
   if (out.newTasks) {

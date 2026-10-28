@@ -5,6 +5,10 @@ export const runtime = 'nodejs';
 
 // Old handler accepted any method.
 async function handler() {
+  // Not set up is not a failure: 200 with connected:false, so Settings shows 'Not connected'.
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY_JSON && !process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH) {
+    return NextResponse.json({ ok: false, connected: false, error: 'Set GOOGLE_SERVICE_ACCOUNT_KEY_JSON or GOOGLE_SERVICE_ACCOUNT_KEY_PATH to connect Search Console.' });
+  }
   try {
     const sites: any[] = await listAccessibleSites();
     if (sites.length === 0) {

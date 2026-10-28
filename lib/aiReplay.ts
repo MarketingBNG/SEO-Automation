@@ -127,7 +127,7 @@ export async function pruneReplay() {
 export async function resumeCreditPaused(): Promise<string | null> {
   const done: string[] = [];
   const { controlStrategyJob } = await import('./strategy/jobs');
-  for (const s of await prisma.seo_strategies.findMany({ where: { status: 'paused', OR: [{ progress_stage: { startsWith: 'Paused: AI credits' } }, { progress_stage: { startsWith: 'Paused: the server restarted' } }] }, select: { id: true, period: true } })) {
+  for (const s of await prisma.seo_strategies.findMany({ where: { status: 'paused', OR: [{ progress_stage: { startsWith: 'Paused: AI credits' } }, { progress_stage: { startsWith: 'Paused: Testing mode' } }, { progress_stage: { startsWith: 'Paused: the server restarted' } }] }, select: { id: true, period: true } })) {
     await controlStrategyJob(s.id, 'resume', 'automatic (credits available again)').then(() => done.push(`strategy ${s.period}`)).catch((e) => console.error('Strategy resume failed:', e.message));
   }
   const blog = await resumeCreditBlog();

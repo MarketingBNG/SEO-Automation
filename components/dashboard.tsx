@@ -257,6 +257,11 @@ export default function Dashboard() {
               Your account is blocked from taking actions. You can still look around. Ask an admin or your manager to unblock you.
             </div>
           )}
+          {shown !== tab && (
+            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              {TABS.find((t) => t.key === tab)?.label || 'That page'} is not open to your role, so Home is shown instead. Ask an admin if you need it.
+            </div>
+          )}
           {/* Kept mounted (just hidden) so a running conversation keeps streaming while you look at other tabs. */}
           {shown !== 'assistant' && <PageJump key={`jump-${shown}-${reloadKey}`} rootId={`tab-${shown}`} />}
           <div className={shown === 'assistant' ? 'block' : 'hidden'}>

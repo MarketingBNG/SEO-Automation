@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listPosts } from '@/lib/wordpress';
+import { listPosts, wpConfigured } from '@/lib/wordpress';
 import prisma from '@/lib/prisma';
 import { getMe } from '@/lib/auth';
 
@@ -9,6 +9,8 @@ export const runtime = 'nodejs';
 async function handler(req: NextRequest) {
   try {
     const page = parseInt(req.nextUrl.searchParams.get('page') as any, 10) || 1;
+    // Not set up is not a server failure: 200 with connected:false and the reason.
+    if (!wpConfigured()) return NextResponse.json({ posts: [], totalPages: 0, page, connected: false, error: 'WordPress connection is not configured, so the live blogs cannot be listed.' });
     const { posts, totalPages }: any = await listPosts({ perPage: 20, page });
 
     const audits = await prisma.blog_audits.findMany({

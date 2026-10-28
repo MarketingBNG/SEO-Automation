@@ -135,7 +135,7 @@ link to the Social dashboard (`/api/links`).
 | site/v1/pages, pages/[...slug], posts, posts/[...slug], redirects | GET | public website read API | `SITE_API_KEY` in route |
 | site/v1/import | POST | bulk import pages/posts/redirects | `SITE_IMPORT_KEY` in route |
 | skill | GET,POST | writing skill read / manual edit | GET signed-in; POST content.work |
-| skill/auto-check | GET,POST | refresh skill if >= 15 days old (Batch API) | GET only with CRON_SECRET; POST content.work |
+| skill/auto-check | GET,POST | refresh skill if >= 15 days old (Batch API) | cron only (CRON_SECRET); others get 405 |
 | skill/generate | POST | regenerate writing skill now | content.work |
 | skill/playbook | GET | playbook text | signed-in |
 | skill/status | any | skill age/status | GET signed-in |

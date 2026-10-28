@@ -12,6 +12,7 @@ import * as activity from '../activity';
 import { generateStrategy } from './generate';
 import { strategyWindow, type StrategyWindow } from './core';
 import { assertCredits, CreditPausedError, isCreditError } from '../aiCredits';
+import { TestingModeError } from '../aiQueue';
 import { recordDuration } from '../jobTimer';
 
 // Writes progress at most every 2 seconds (and always for 100%).
@@ -30,6 +31,8 @@ export function progressWriter(write: (stage: string, percent: number) => Promis
 
 const ACTIVE = ['generating', 'paused', 'stopping'];
 // Set on a run cut off by a server restart; the scheduler starts it again (resumeRestarted).
+// Testing mode stops automatic runs too (TestingModeError is a CreditPausedError), but credits are not low.
+export const TESTING_PAUSED = 'Paused: Testing mode is on. It starts again by itself in Live mode (finished steps are kept).';
 const RESTART_PAUSED = 'Paused: the server restarted. It starts again by itself (finished steps are kept).';
 // Runs alive in this server process, so Stop can abort them immediately. Kept on globalThis so
 // every route (each may load its own copy of this module) sees the same list.
@@ -75,7 +78,8 @@ function run(id: number, window: StrategyWindow, actor: string) {
     .catch(async (err: any) => {
       // Credits ran low: keep the run paused (not failed) so Resume starts it again after a top-up.
       if (err instanceof CreditPausedError || isCreditError(err)) {
-        await prisma.seo_strategies.update({ where: { id }, data: { status: 'paused', progress_stage: 'Paused: AI credits low. It starts again by itself when credits are back (finished steps are kept).' } }).catch(() => {});
+        const stage = err instanceof TestingModeError ? TESTING_PAUSED : 'Paused: AI credits low. It starts again by itself when credits are back (finished steps are kept).';
+        await prisma.seo_strategies.update({ where: { id }, data: { status: 'paused', progress_stage: stage } }).catch(() => {});
         return;
       }
       const stopped = controller.signal.aborted || err?.name === 'AbortError' || err?.name === 'APIUserAbortError' || /stopped by user/i.test(err?.message || '');

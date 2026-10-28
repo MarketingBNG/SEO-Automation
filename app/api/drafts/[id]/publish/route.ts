@@ -104,6 +104,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // Without a WordPress connection nothing can go out: stop before an author or cover is saved.
   if (!wpConfigured()) {
+    await activity.log('wordpress.publish_failed', { entityType: 'draft', entityId: nid, details: `"${draft.title}": WordPress connection is not configured`, actor: await getActor() }).catch(() => {});
     return NextResponse.json({ error: 'WordPress connection is not configured. Set WORDPRESS_SITE_URL, WORDPRESS_USERNAME and WORDPRESS_APPLICATION_PASSWORD (or the site connector), then publish again.' }, { status: 503 });
   }
   // The website connector refuses drafts (it makes every saved post live): refused here, before the

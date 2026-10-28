@@ -1627,6 +1627,43 @@ export class SkillBatchWaitingError extends Error {
   }
 }
 
+// The GA4 numbers are kept for the refresh cycle (3 days), so a batch refresh cut off by a restart
+// sends the same request the next day and picks up the batch already sent and paid for
+// (runBatchTurn finds it by the request), instead of paying for a second one with new numbers.
+// previousId: the skill version that request was built on, so a hand edit saved meanwhile does not
+// change the request (and lose the paid batch).
+const SKILL_GA4_KEY = 'skill_refresh_ga4';
+const SKILL_ASK = [{ role: 'user', content: "Research and produce this cycle's content-writing skill update." }];
+const skillOpts = (batch: boolean) => ({ maxUses: 10, batch, feature: 'training' });
+
+// Where runBatchTurn keeps the batch id of the skill request built on this note and skill version.
+export const skillPendingKey = (note: string, basis: { skill_content: string } | null) =>
+  `batch_pending:${requestHash(batchParamsFor(skillPrompt(note, basis), [...SKILL_ASK], skillOpts(true)))}`;
+
+// The saved refresh cycle: its GA4 note, the skill version it was built on (undefined for a cycle
+// saved before previousId was kept: the active version then), and whether the batch the automatic
+// refresh sent with them is still unread (kept 7 days). Another feature's pending batch does not count.
+async function savedSkillCycle() {
+  const saved = JSON.parse((await settings.get(SKILL_GA4_KEY)) || 'null');
+  if (!saved || typeof saved.note !== 'string') return null;
+  const active = await prisma.writing_skills.findFirst({ where: { status: 'active' }, orderBy: { id: 'desc' } });
+  let basis: { id: number; skill_content: string } | null = active;
+  if (saved.previousId === null) basis = null;
+  else if (typeof saved.previousId === 'number') basis = (await prisma.writing_skills.findUnique({ where: { id: saved.previousId } })) ?? active;
+  const raw = await settings.get(skillPendingKey(saved.note, basis)).catch(() => null);
+  let at = 0;
+  try {
+    at = raw?.startsWith('{') ? JSON.parse(raw).at || 0 : 0;
+  } catch {}
+  return { at: Number(saved.at) || 0, note: saved.note as string, basis, batchPending: Boolean(at && Date.now() - at < 7 * 86400000) };
+}
+
+// Whether the automatic refresh's paid batch is still waiting to be read (a hand edit of the skill
+// then waits too: the refresh would replace it with a version built on the older skill).
+export async function skillBatchWaiting(): Promise<boolean> {
+  return (await savedSkillCycle().catch(() => null))?.batchPending ?? false;
+}
+
 // Researches real high-engagement blogs across the internet (any niche - hooks, structure,
 // storytelling vs. educational patterns), combines that with our own GA4 engagement data, and
 // produces/refreshes the self-updating content-writing skill. Runs without human approval (it
@@ -1634,41 +1671,29 @@ export class SkillBatchWaitingError extends Error {
 // audit/rollback.
 async function generateContentSkill({ batch = false }: any = {}) {
   const previous = await prisma.writing_skills.findFirst({ where: { status: 'active' }, orderBy: { id: 'desc' } });
-
-  // The GA4 numbers are kept for the refresh cycle (3 days), so a batch refresh cut off by a restart
-  // sends the same request the next day and picks up the batch already sent and paid for
-  // (runBatchTurn finds it by the request), instead of paying for a second one with new numbers.
-  const GA4_KEY = 'skill_refresh_ga4';
-  const SKILL_ASK = [{ role: 'user', content: "Research and produce this cycle's content-writing skill update." }];
-  const SKILL_OPTS = { maxUses: 10, batch, feature: 'training' };
+  const SKILL_OPTS = skillOpts(batch);
   let ownPerformanceNote = 'No GA4 data available this cycle.';
-  let frozenNote: string | null = null;
+  let frozen: { note: string; basis: { skill_content: string } | null } | null = null;
   let batchWaiting = false;
   try {
-    const saved = JSON.parse((await settings.get(GA4_KEY)) || 'null');
-    if (saved && typeof saved.note === 'string') {
-      // The batch the automatic refresh sent with this very note, still unread (kept 7 days).
-      // Another feature's pending batch does not count.
-      const pending = async () => {
-        const raw = await settings.get(`batch_pending:${requestHash(batchParamsFor(skillPrompt(saved.note), [...SKILL_ASK], SKILL_OPTS))}`).catch(() => null);
-        let at = 0;
-        try {
-          at = raw?.startsWith('{') ? JSON.parse(raw).at || 0 : 0;
-        } catch {}
-        return Boolean(at && Date.now() - at < 7 * 86400000);
-      };
+    const saved = await savedSkillCycle();
+    if (saved) {
       // A manual update while that batch waits would pay for a second run, and its new skill would
       // leave the paid batch uncollected (the refresh is then not due for 15 days).
-      if (!batch) batchWaiting = await pending();
-      if (Date.now() - saved.at < 3 * 86400000) frozenNote = saved.note;
+      if (!batch) batchWaiting = saved.batchPending;
+      if (Date.now() - saved.at < 3 * 86400000) frozen = saved;
       // Also kept past 3 days while that batch is still unread (for example while AI work is paused
       // or Testing mode is on), so it is picked up instead of a second one sent.
-      else if (batch && (await pending())) frozenNote = saved.note;
+      else if (batch && saved.batchPending) frozen = saved;
     }
   } catch {}
   if (batchWaiting) throw new SkillBatchWaitingError((await aiMode()) === 'testing');
-  if (frozenNote != null) ownPerformanceNote = frozenNote;
-  else {
+  // The frozen cycle is sent on the skill version it was built on (the same request, so its batch is found).
+  let basis: { skill_content: string } | null = previous;
+  if (frozen) {
+    ownPerformanceNote = frozen.note;
+    basis = frozen.basis;
+  } else {
     try {
       const pages = await getTopLandingPages(28, 10);
       if (pages.length) {
@@ -1679,13 +1704,46 @@ async function generateContentSkill({ batch = false }: any = {}) {
     } catch (e: any) {
       ownPerformanceNote = `GA4 unavailable this cycle: ${e.message}`;
     }
-    if (batch) await settings.set(GA4_KEY, JSON.stringify({ at: Date.now(), note: ownPerformanceNote })).catch(() => {});
+    if (batch) await settings.set(SKILL_GA4_KEY, JSON.stringify({ at: Date.now(), note: ownPerformanceNote, previousId: previous?.id ?? null })).catch(() => {});
   }
 
-  const systemPrompt = skillPrompt(ownPerformanceNote);
+  const systemPrompt = skillPrompt(ownPerformanceNote, basis);
 
-  function skillPrompt(perfNote: string) {
-    return `You are a content-writing skill researcher. Your only job is to study how
+  const { text } = await callClaude(systemPrompt, [...SKILL_ASK], undefined, SKILL_OPTS);
+  // The cycle's answer is in: the next refresh reads fresh GA4 numbers.
+  await prisma.settings.deleteMany({ where: { key: SKILL_GA4_KEY } }).catch(() => {});
+
+  const get = (start, end) => {
+    const startIdx = text.indexOf(start);
+    if (startIdx === -1) return '';
+    const from = startIdx + start.length;
+    const endIdx = end ? text.indexOf(end, from) : text.length;
+    return text.slice(from, endIdx === -1 ? text.length : endIdx).trim();
+  };
+
+  const skillContent = get('===SKILL===', '===RESEARCH_SUMMARY===');
+  const researchSummary = get('===RESEARCH_SUMMARY===', '===SOURCES===');
+  const sourcesBlock = get('===SOURCES===', '===END===');
+
+  if (!skillContent) {
+    throw new Error("Could not parse a valid skill update from Claude's response.");
+  }
+
+  const sources = sourcesBlock
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.includes('|'))
+    .map((l) => {
+      const [title, url] = l.split('|').map((p) => p.trim());
+      return { title, url };
+    });
+
+  return { skillContent, researchSummary, sources, ownPerformanceNote };
+}
+
+// The skill researcher's system prompt, built on the previous skill version (null: the first one).
+function skillPrompt(perfNote: string, previous: { skill_content: string } | null) {
+  return `You are a content-writing skill researcher. Your only job is to study how
 genuinely high-engagement blogs are written - across any niche, not just finance - and distill
 concrete, reusable writing techniques from them. You are not writing a blog yourself.
 
@@ -1728,38 +1786,6 @@ writer follows, not a report about the research.>
 ===SOURCES===
 <one per line, format: Title | URL>
 ===END===`;
-  }
-
-  const { text } = await callClaude(systemPrompt, [...SKILL_ASK], undefined, SKILL_OPTS);
-  // The cycle's answer is in: the next refresh reads fresh GA4 numbers.
-  await prisma.settings.deleteMany({ where: { key: GA4_KEY } }).catch(() => {});
-
-  const get = (start, end) => {
-    const startIdx = text.indexOf(start);
-    if (startIdx === -1) return '';
-    const from = startIdx + start.length;
-    const endIdx = end ? text.indexOf(end, from) : text.length;
-    return text.slice(from, endIdx === -1 ? text.length : endIdx).trim();
-  };
-
-  const skillContent = get('===SKILL===', '===RESEARCH_SUMMARY===');
-  const researchSummary = get('===RESEARCH_SUMMARY===', '===SOURCES===');
-  const sourcesBlock = get('===SOURCES===', '===END===');
-
-  if (!skillContent) {
-    throw new Error("Could not parse a valid skill update from Claude's response.");
-  }
-
-  const sources = sourcesBlock
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.includes('|'))
-    .map((l) => {
-      const [title, url] = l.split('|').map((p) => p.trim());
-      return { title, url };
-    });
-
-  return { skillContent, researchSummary, sources, ownPerformanceNote };
 }
 
 // Re-checks the open issues of a draft that needs attention against the CURRENT article, with the

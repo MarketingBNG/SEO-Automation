@@ -30,7 +30,7 @@ export default function RenewalTab() {
     try {
       const res = await fetch('/api/wordpress/posts');
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
+      if (!res.ok || json.connected === false) throw new Error(json.error);
       setPosts(json.posts);
     } catch (err: any) {
       setError(err.message);

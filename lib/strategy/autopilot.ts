@@ -22,7 +22,7 @@ import { progressWriter } from './jobs';
 import { gatherAiVisibility } from '../aiVisibility';
 import { syncMeetings } from '../clientInsights';
 import { runFixes } from './fixer';
-import { runOutreach } from './outreach';
+import { runOutreach, checkOutreachLinks } from './outreach';
 import { stopSupersededRows } from './replaced';
 import { runSpeedFixes } from './speed';
 import { authorNames, pickAuthor, wpAuthorId } from '../authors';
@@ -298,13 +298,30 @@ const publishing = publishingRows;
 
 // Whether a held blog's reasons changed in a way worth a new notice. The publishing-pause line is
 // left out, so its text changing (a different crawl problem) does not send a notice every run.
+// Compared as a set (order does not matter: reasons carried over a pause are added at the end).
 export function holdChanged(saved: string | null | undefined, reasons: string[]): boolean {
-  const strip = (list: string[]) => list.filter((r) => !/^Auto-publishing paused:/.test(r));
-  let before: string[] = [];
+  const strip = (list: string[]) => list.filter((r) => !/^Auto-publishing paused:/.test(r)).sort();
+  return JSON.stringify(strip(savedReasons(saved))) !== JSON.stringify(strip(reasons));
+}
+
+function savedReasons(saved: string | null | undefined): string[] {
   try {
-    before = saved ? JSON.parse(saved) : [];
-  } catch {}
-  return JSON.stringify(strip(Array.isArray(before) ? before : [])) !== JSON.stringify(strip(reasons));
+    const list = saved ? JSON.parse(saved) : [];
+    return Array.isArray(list) ? list.filter((r) => typeof r === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+// The reasons from the paid checks a publishing pause skips (fact check, Surfer score, plagiarism).
+const PAUSE_SKIPPED = /^(Fact check could not confirm|Surfer score is |Plagiarism check:)/;
+
+// While publishing is paused those checks do not run, so their saved reasons on a held blog are kept
+// (not checked again is not passed): the calendar still shows the real reason, and the pause starting
+// or ending is not seen as a change worth a new notice. Returns the reasons with them added.
+export function keepSkippedReasons(saved: string | null | undefined, reasons: string[]): string[] {
+  const kept = savedReasons(saved).filter((r) => PAUSE_SKIPPED.test(r) && !reasons.includes(r));
+  return [...reasons, ...kept];
 }
 
 // Returns 'published', 'held', or 'busy' when another path is publishing this row right now.
@@ -360,6 +377,7 @@ async function publishRowOnce(row, now, verify) {
   // result is kept only for this text): the fact check may still change the text once the pause lifts.
   const orig = paused ? null : await ensureOriginality(checked.id).catch(() => null);
   if (orig && !orig.ok) reasons.push(originalityReason(orig));
+  if (paused && row.status === 'held') reasons.splice(0, reasons.length, ...keepSkippedReasons(row.hold_reasons, reasons));
   if (reasons.length) {
     // Notified when the blog is first held, and again when the reasons change (for example a fact
     // check that fails once a publishing pause lifts); the pause line alone changing does not count.
@@ -643,10 +661,16 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
     // repeat pass does not try (and give up on) a lead Smartlead refused 15 minutes earlier.
     const push = (await settings.get('last_outreach_push')) !== today;
     summary.outreach = await runOutreach(now, { checkLinks, push }).catch((e) => ({ error: e.message }));
-    if (!summary.outreach?.error && checkLinks) await settings.set('last_outreach_link_check', today);
+    // A link check that could not reach SE Ranking stays open (retried below on later runs today).
+    if (!summary.outreach?.error && checkLinks && !summary.outreach?.linkCheckError) await settings.set('last_outreach_link_check', today);
     if (!summary.outreach?.error && push) await settings.set('last_outreach_push', today);
     // Tasks that need Claude while AI work is not possible keep the day open (the rest was done).
     if (!summary.outreach?.error && !summary.outreach?.waitingForAi) await settings.set('last_outreach_run', today);
+  } else if ((await settings.get('last_outreach_link_check')) !== today) {
+    // The day's outreach is done but its link check failed (SE Ranking down): only the link check is
+    // tried again, so no other outreach work (or AI call) repeats.
+    summary.outreach = await checkOutreachLinks(now).catch((e) => ({ verified: 0, error: e.message }));
+    if (!summary.outreach?.error) await settings.set('last_outreach_link_check', today);
   }
   // Speed: page cache plugin and WebP images, once per day (only while a strategy is approved).
   if ((await settings.get('last_speed_run')) !== today && (await prisma.seo_strategies.count({ where: { status: 'approved' } }))) {

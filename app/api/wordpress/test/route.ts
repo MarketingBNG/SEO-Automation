@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
-import { testConnection } from '@/lib/wordpress';
+import { testConnection, wpConfigured } from '@/lib/wordpress';
 
 export const runtime = 'nodejs';
 
 // Old handler accepted any method.
 async function handler() {
+  // Not set up is not a failure: 200 with connected:false, so Settings shows 'Not connected'.
+  if (!wpConfigured()) return NextResponse.json({ ok: false, connected: false, error: 'WordPress connection is not configured. Set WORDPRESS_SITE_URL, WORDPRESS_USERNAME and WORDPRESS_APPLICATION_PASSWORD (or the site connector).' });
   try {
     const user: any = await testConnection();
     const roles: string[] = Array.isArray(user.roles) ? user.roles : [];

@@ -103,7 +103,11 @@ export async function compressImages({ max = 5, fetchBytes = async (u) => Buffer
   const out = { converted: 0, skipped: 0, failed: 0, savedKb: 0 };
   const seen = new Set((await prisma.technical_fix_tasks.findMany({ where: { strategy_id: 0, kind: 'image' }, select: { url: true } })).map((r) => r.url));
   for (let page = 1; page <= 5 && out.converted < max; page++) {
-    const { json: media } = await wpRequest('GET', '/wp/v2/media', { query: { media_type: 'image', per_page: 50, page, _fields: 'id,source_url,mime_type,media_details,alt_text,title' } }).catch(() => ({ json: [] }));
+    // The first page failing means the media library could not be read at all: the caller hears of it.
+    const { json: media } = await wpRequest('GET', '/wp/v2/media', { query: { media_type: 'image', per_page: 50, page, _fields: 'id,source_url,mime_type,media_details,alt_text,title' } }).catch((e) => {
+      if (page === 1) throw e;
+      return { json: [] };
+    });
     if (!media?.length) break;
     for (const m of media) {
       if (out.converted >= max) break;
@@ -150,6 +154,9 @@ export async function runSpeedFixes() {
   const out: any = {};
   out.cache = await ensurePageCache().catch((e) => ({ error: e.message }));
   out.images = await compressImages().catch((e) => ({ error: e.message }));
+  // Both steps failed (no WordPress connection, or the website is down): an error, so the scheduler
+  // keeps the day open and tries again later instead of marking today's speed work done.
+  if (out.cache?.error && out.images?.error) out.error = `cache: ${out.cache.error}; images: ${out.images.error}`;
   const i = out.images;
   if (i && !i.error && (i.converted || i.failed)) {
     await notify(`Speed: ${i.converted} image(s) converted to WebP, ${i.savedKb} KB saved${i.failed ? `, ${i.failed} failed` : ''}`, 'See the Activity Log for each image and page.').catch(() => {});

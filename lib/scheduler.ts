@@ -80,7 +80,7 @@ async function tick() {
 
   if (now.getUTCDay() === 1 && (await settings.get('last_weekly_run')) !== today) {
     const r: any = await runWeekly(now).catch((e) => ({ error: e.message }));
-    if (!r?.error) await settings.set('last_weekly_run', today);
+    if (!r?.error && !r?.skipped) await settings.set('last_weekly_run', today);
   }
 
   // Weekly: keep the tracked keywords topped up, and learn from the week's reviews and results.
