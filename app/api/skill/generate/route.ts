@@ -7,7 +7,13 @@ import { methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
 
+// One paid run at a time (two tabs or two people): a second run would be paid again, and the shared
+// timer key would drop it from /api/ai-credits (running.other) when the first one ends.
+let running = false;
+
 export async function POST() {
+  if (running) return NextResponse.json({ error: 'A skill update is already running.' }, { status: 409 });
+  running = true;
   try {
     // A live timer, so the run shows in the header bar and in /api/ai-credits (running.other).
     const result: any = await timed('skill-generate', 'skill', 'Content-writing skill update', () => generateContentSkill());
@@ -35,6 +41,8 @@ export async function POST() {
   } catch (err: any) {
     console.error(err);
     return NextResponse.json({ error: err.message }, { status: 500 });
+  } finally {
+    running = false;
   }
 }
 export { methodNotAllowed as GET, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

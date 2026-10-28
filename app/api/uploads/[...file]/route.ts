@@ -1,7 +1,6 @@
 import { readFile, mimeFor, toKey } from '@/lib/storage';
-import prisma from '@/lib/prisma';
 import { getMe } from '@/lib/auth';
-import { ownedBy } from '@/lib/assistant/conversations';
+import { canReadAssistantFile } from '@/lib/assistant/fileAccess';
 
 export const runtime = 'nodejs';
 
@@ -16,12 +15,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
   // normalising would change is refused, so the owner check below sees the key that is read.
   if (toKey(key) !== key) return new Response('Not found', { status: 404 });
 
-  // Documents attached in an assistant chat are private like the chat: the uploader or the admin.
-  if (key.startsWith('assistant/docs/')) {
-    const me = await getMe();
-    const own = me && (me.role === 'admin' || (await prisma.assistant_files.count({ where: { path: key, ...ownedBy(me, 'uploaded_by') } })) > 0);
-    if (!own) return new Response('Not found', { status: 404 });
-  }
+  // Documents and images attached in an assistant chat are private like the chat: the uploader or the admin.
+  if (key.startsWith('assistant/') && !(await canReadAssistantFile(await getMe(), key))) return new Response('Not found', { status: 404 });
 
   const data = await readFile(key);
   if (!data) return new Response('Not found', { status: 404 });

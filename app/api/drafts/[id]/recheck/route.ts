@@ -43,6 +43,8 @@ async function recheck(d: any, id: number, issues: string[], fix: boolean) {
     let fixed = false;
     // Only the words count: a new cover or a status change meanwhile does not throw the fix away.
     const sameWords = { id, title: d.title, meta_description: d.meta_description, content_html: d.content_html };
+    // The words the result below was judged on (the fixed version after a fix).
+    let checked: any = sameWords;
     const savedMeanwhile = { error: 'The draft was saved by someone while the fix ran, so the fix was not saved (nothing was overwritten). Press Check and fix again to fix the saved version.' };
     if (fix && open.length) {
       // Saved while the check ran: the paid fix is not started on the old text.
@@ -55,10 +57,16 @@ async function recheck(d: any, id: number, issues: string[], fix: boolean) {
       const saved = (await prisma.drafts.findUnique({ where: { id } }))!;
       await markEditedAsChecked(id, 'the issue fixer', { byPerson: false });
       fixed = true;
+      checked = { id, title: saved.title, meta_description: saved.meta_description, content_html: saved.content_html };
       const again = await recheckIssues(saved, open);
       open = again.filter((r) => r.open).map((r) => String(r.text || r.issue));
     }
-    await prisma.drafts.update({ where: { id }, data: { validation_issues: JSON.stringify(open), production_state: open.length ? 'NEEDS_ATTENTION' : 'READY_FOR_REVIEW' } });
+    // Written only when nobody saved the words while the check ran: a newer save was never checked,
+    // so it must not be marked ready for review (or lose its hold reasons) on the old text's result.
+    const { count: written } = await prisma.drafts.updateMany({ where: checked, data: { validation_issues: JSON.stringify(open), production_state: open.length ? 'NEEDS_ATTENTION' : 'READY_FOR_REVIEW' } });
+    if (!written) {
+      return NextResponse.json({ error: `The draft was saved by someone while the check ran, so the result was not saved${fixed ? ' (the fix itself was saved)' : ''}. Press Check issues again to check the saved version.`, fixed }, { status: 409 });
+    }
     // All resolved: the blog's old publishing-hold reasons no longer apply.
     if (!open.length) await prisma.blog_schedule.updateMany({ where: { draft_id: id, status: 'held' }, data: { hold_reasons: '[]' } });
     await activity.log('draft.issues_rechecked', { actor: await getActor(), entityType: 'draft', entityId: id, details: `${fix ? 'Checked and fixed: ' : ''}${issues.length - open.length} of ${issues.length} issue(s) resolved; ${open.length} still open.` });

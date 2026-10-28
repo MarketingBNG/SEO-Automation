@@ -136,3 +136,34 @@ test('assistant chats and files: owned by email; a shared display name opens onl
   assert.deepEqual(ownedBy({ email: 'x@example.com', name: 'x@example.com' }, 'created_by'), { OR: [{ created_by: 'x@example.com' }] });
   assert.equal(mineOnly({ ...a, role: 'admin' }), null);
 });
+
+test('an image attached in a private assistant chat is read and sent to Claude only by its uploader or the admin', { skip: !process.env.DATABASE_URL }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const { canReadAssistantFile, ownImageIds } = await import('../lib/assistant/fileAccess');
+  const stamp = Date.now();
+  const path = `assistant/${stamp}-secret.png`;
+  const model = `assistant/${stamp}-model.jpg`;
+  const legacy = `assistant/${stamp}-old.png`;
+  const a = { email: 'owner-a@example.com', name: 'Owner A', role: 'manager' };
+  const b = { email: 'member-b@example.com', name: 'Member B', role: 'user' };
+  const admin = { email: 'admin@example.com', name: 'Admin', role: 'admin' };
+  const img = await prisma.image_library.create({ data: { filename: 'secret.png', path, model_path: model } });
+  const old = await prisma.image_library.create({ data: { filename: 'old.png', path: legacy } });
+  const file = await prisma.assistant_files.create({ data: { kind: 'image', filename: 'secret.png', path, mime: 'image/png', size: 1, uploaded_by: a.email } });
+  try {
+    for (const key of [path, model]) {
+      assert.equal(await canReadAssistantFile(a, key), true, key);
+      assert.equal(await canReadAssistantFile(admin, key), true, key);
+      assert.equal(await canReadAssistantFile(b, key), false, key);
+      assert.equal(await canReadAssistantFile(null, key), false, key);
+    }
+    assert.equal(await canReadAssistantFile(b, legacy), true, 'attached before files were recorded: served as before');
+    assert.equal(await canReadAssistantFile(b, `assistant/docs/${stamp}-none.pdf`), false, 'a document needs its owner');
+    assert.deepEqual(await ownImageIds(a, [img.id]), [img.id]);
+    assert.deepEqual(await ownImageIds(b, [img.id, old.id]), [], "someone else's image (or one with no owner) is not sent");
+    assert.deepEqual(await ownImageIds(admin, [img.id]), [img.id]);
+  } finally {
+    await prisma.assistant_files.delete({ where: { id: file.id } });
+    await prisma.image_library.deleteMany({ where: { id: { in: [img.id, old.id] } } });
+  }
+});

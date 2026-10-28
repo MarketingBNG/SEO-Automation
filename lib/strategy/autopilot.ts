@@ -563,7 +563,14 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
           // The hold reason is cleared only once AI work is possible, so a row waiting for AI keeps it.
           await assertAiReady();
           if (row.hold_reasons) await update(row.id, { hold_reasons: null });
-          await writeDraft(row, '', write);
+          try {
+            await writeDraft(row, '', write);
+          } catch (err) {
+            // Anthropic's out-of-credit answer (or a pause) in the middle of the write: the row waits
+            // for AI again, so its hold and reason come back and the calendar still says why.
+            if (waitsForAi(err) && row.hold_reasons) await update(row.id, { hold_reasons: row.hold_reasons, ...(row.status === 'held' ? { status: 'held' } : {}) }).catch(() => {});
+            throw err;
+          }
           summary.drafted++;
         }
       } else if (action === 'publish') {

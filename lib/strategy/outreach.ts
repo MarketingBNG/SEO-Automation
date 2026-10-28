@@ -19,6 +19,7 @@ import { aiMode, isAutomatic, TestingModeError } from '../aiQueue';
 import { listReferringDomains } from '../seranking';
 import { smartleadConfigured, leadExists, addLead } from '../smartlead';
 import * as settings from '../settings';
+import { notify } from '../notify';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
 const HOST = () => SITE().replace(/^https?:\/\//, '').replace(/^www\./, '');
@@ -143,6 +144,8 @@ const failedNote = (prefix: string, day: string, why: string) => `${prefix} on $
 const failedToday = (note: any, prefix: string, day: string) => String(note || '').startsWith(`${prefix} on ${day}`);
 // The day "outreach stopped for today" was set (two different leads refused in a row).
 const STOPPED_DAY = 'outreach_stopped_day';
+// The first day of the current run of stopped days, so a person is told once it lasts two days.
+const STOPPED_SINCE = 'outreach_stopped_since';
 
 // `push: false` (a repeat pass on the same day, while it waits for AI) leaves out the leads whose
 // opening line is already saved: they were pushed, or refused, on the first pass of the day.
@@ -230,12 +233,20 @@ export async function runOutreach(now = new Date(), { checkLinks = true, push = 
   }
   const pushedToday = await prisma.backlink_tasks.count({ where: { sent_at: { startsWith: today } } });
   let budget = Math.max(0, DAILY_LIMIT() - pushedToday);
-  // Add-lead failures in a row in this run: two different leads refused means the campaign itself is
-  // the problem (deleted or paused, bad key), so the run stops instead of paying for more opening lines.
+  // Add-lead failures in a row in this run: two different leads refused, at least one of them never
+  // refused before, means the campaign itself is the problem (deleted or paused, bad key), so the run
+  // stops instead of paying for more opening lines. Two leads already refused on an earlier day do
+  // not stop it on their own (they come first every day, being the oldest): the next lead is tried,
+  // so two bad leads cannot stop outreach for good.
   let refusedInARow = 0;
-  // The leads of that streak given up on (refused for the second time): put back if the run stops.
-  let givenUpInStreak: number[] = [];
-  if ((await settings.get(STOPPED_DAY)) === today) {
+  let freshInStreak = false;
+  // Leads refused for the second time (on two days). They are given up on only when this run proves
+  // the campaign works (another lead is added); a refusal streak that stops the run drops them.
+  let againInStreak: number[] = [];
+  const giveUp: number[] = [];
+  let stopped = false;
+  const lastStopped = await settings.get(STOPPED_DAY);
+  if (lastStopped === today) {
     out.stoppedForToday = true;
     budget = 0;
   }
@@ -294,28 +305,36 @@ export async function runOutreach(now = new Date(), { checkLinks = true, push = 
         // A refusal that stops the run is blamed on the campaign, not the lead: it never gives a lead up,
         // and the leads of the same streak given up on before it are put back (their dated note stays).
         refusedInARow++;
-        const stop = refusedInARow >= 2;
-        const again = String(t.note || '').startsWith(ADD_LEAD_FAILED) && !stop;
+        const again = String(t.note || '').startsWith(ADD_LEAD_FAILED);
+        if (!again) freshInStreak = true;
+        const stop = refusedInARow >= 2 && freshInStreak;
         const why = String(err.message || err).slice(0, 400);
         t.note = failedNote(ADD_LEAD_FAILED, today, why);
-        await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: again ? 'failed' : 'planned', contact_email: contact.email, note: t.note } });
-        if (again) givenUpInStreak.push(t.id);
+        // Stays planned for now; its dated note keeps it out of the repeat passes today.
+        await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'planned', contact_email: contact.email, note: t.note } });
+        if (again) againInStreak.push(t.id);
         // Kept for the day, so a repeat pass 15 minutes later does not take the next leads.
         if (stop) {
+          stopped = true;
+          againInStreak = [];
           await settings.set(STOPPED_DAY, today);
           out.stoppedForToday = true;
-          if (givenUpInStreak.length) {
-            await prisma.backlink_tasks.updateMany({ where: { id: { in: givenUpInStreak }, status: 'failed' }, data: { status: 'planned' } });
-            for (const id of givenUpInStreak) await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: id, details: 'Put back to planned: the next lead was refused too, so the Smartlead campaign is the problem, not this lead.' });
-            givenUpInStreak = [];
+          // Stopped yesterday too: a person is told once (the campaign or the first leads need a look).
+          const yesterday = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+          const since = lastStopped === yesterday ? (await settings.get(STOPPED_SINCE)) || yesterday : today;
+          await settings.set(STOPPED_SINCE, since);
+          if (since === yesterday) {
+            await notify(`Backlink outreach stopped two days running (${yesterday} and ${today})`, `Smartlead refused two leads in a row on ${yesterday} and ${today}, so no leads were added. Check the Smartlead campaign (SMARTLEAD_CAMPAIGN_ID, paused or deleted, API key) and the last refusals in the Activity Log (backlink.failed).`, { action: 'alert.outreach_stopped' });
           }
         }
-        await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: `Smartlead add-lead failed${again ? ' again, so this lead is given up on' : ''}${stop ? '; outreach stopped for today' : ''}: ${why}` });
+        await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: `Smartlead add-lead failed${again ? ' again (given up on if another lead is added in this run)' : ''}${stop ? '; outreach stopped for today' : ''}: ${why}` });
         if (stop) break;
         continue;
       }
       refusedInARow = 0;
-      givenUpInStreak = [];
+      freshInStreak = false;
+      giveUp.push(...againInStreak);
+      againInStreak = [];
       await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'sent', contact_email: contact.email, email_body: line, sent_at: sqlNow(now), note: 'Added to Smartlead campaign.' } });
       await activity.log('backlink.sent', { entityType: 'backlink_task', entityId: t.id, details: `Added ${contact.email} (${t.target_site}) to the Smartlead campaign` });
       out.pushed++;
@@ -325,6 +344,14 @@ export async function runOutreach(now = new Date(), { checkLinks = true, push = 
       if (err instanceof CreditPausedError || isCreditError(err)) throw err;
       await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: String(err.message || err).slice(0, 500) });
     }
+  }
+  // A lead refused on two days is given up on only when another lead was added in this run, so a run
+  // that cannot tell a bad lead from a broken campaign (one attempt, or every attempt refused) gives
+  // nothing up.
+  if (!stopped) giveUp.push(...againInStreak);
+  if (out.pushed > 0 && giveUp.length) {
+    await prisma.backlink_tasks.updateMany({ where: { id: { in: giveUp }, status: 'planned' }, data: { status: 'failed' } });
+    for (const id of giveUp) await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: id, details: 'Given up on: Smartlead refused this lead on two days while it added other leads.' });
   }
   return out;
 }

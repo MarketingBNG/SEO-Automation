@@ -5,6 +5,7 @@ import { getActor, getMe } from '@/lib/auth';
 import * as activity from '@/lib/activity';
 import prisma from '@/lib/prisma';
 import { isOwner, ownerStamp } from '@/lib/assistant/conversations';
+import { ownImageIds } from '@/lib/assistant/fileAccess';
 
 export const runtime = 'nodejs';
 // Vercel Hobby plan limit. On Pro, raise to 800 for long generations.
@@ -23,6 +24,8 @@ export async function POST(req: NextRequest) {
     const row = await prisma.assistant_conversations.findUnique({ where: { id: Number(conversationId) }, select: { created_by: true } });
     if (row && me && me.role !== 'admin' && !isOwner(me, row.created_by)) return NextResponse.json({ error: 'This chat belongs to someone else.' }, { status: 403 });
   }
+  // Only images the person attached themselves: an id from someone else's private chat is refused.
+  if (ids.length && (await ownImageIds(me, ids)).length !== ids.length) return NextResponse.json({ error: 'An attached image belongs to someone else.' }, { status: 403 });
   await activity.log('assistant.asked', { details: String(message || '(image)').replace(/<attached_document[\s\S]*$/, '').trim().slice(0, 160) || 'Sent a file', source: 'assistant' }).catch(() => {});
 
   return streamNdjson(req, (emit, signal) =>
