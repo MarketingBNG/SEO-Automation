@@ -1658,6 +1658,13 @@ async function savedSkillCycle() {
   return { at: Number(saved.at) || 0, note: saved.note as string, basis, batchPending: Boolean(at && Date.now() - at < 7 * 86400000) };
 }
 
+// The skill version a reused cycle is built on. The version it was saved with only while a paid batch
+// sent on it waits (the same request, so that batch is found); otherwise the active version, so a hand
+// edit made since (allowed while no batch waits) is kept rather than replaced by a refinement of the older one.
+export function skillCycleBasis<T>(frozen: { basis: T | null; batchPending: boolean }, active: T | null): T | null {
+  return frozen.batchPending ? frozen.basis : active;
+}
+
 // Whether the automatic refresh's paid batch is still waiting to be read (a hand edit of the skill
 // then waits too: the refresh would replace it with a version built on the older skill).
 export async function skillBatchWaiting(): Promise<boolean> {
@@ -1673,7 +1680,7 @@ async function generateContentSkill({ batch = false }: any = {}) {
   const previous = await prisma.writing_skills.findFirst({ where: { status: 'active' }, orderBy: { id: 'desc' } });
   const SKILL_OPTS = skillOpts(batch);
   let ownPerformanceNote = 'No GA4 data available this cycle.';
-  let frozen: { note: string; basis: { skill_content: string } | null } | null = null;
+  let frozen: { at: number; note: string; basis: { id?: number; skill_content: string } | null; batchPending: boolean } | null = null;
   let batchWaiting = false;
   try {
     const saved = await savedSkillCycle();
@@ -1688,11 +1695,13 @@ async function generateContentSkill({ batch = false }: any = {}) {
     }
   } catch {}
   if (batchWaiting) throw new SkillBatchWaitingError((await aiMode()) === 'testing');
-  // The frozen cycle is sent on the skill version it was built on (the same request, so its batch is found).
   let basis: { skill_content: string } | null = previous;
   if (frozen) {
     ownPerformanceNote = frozen.note;
-    basis = frozen.basis;
+    basis = skillCycleBasis(frozen, previous);
+    // No batch was sent on the older version: this cycle is now sent on the active one, so record it
+    // (the waiting check then looks for the batch actually sent).
+    if (batch && basis !== frozen.basis) await settings.set(SKILL_GA4_KEY, JSON.stringify({ at: frozen.at, note: frozen.note, previousId: previous?.id ?? null })).catch(() => {});
   } else {
     try {
       const pages = await getTopLandingPages(28, 10);

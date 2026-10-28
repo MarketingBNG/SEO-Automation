@@ -154,9 +154,10 @@ export async function runSpeedFixes() {
   const out: any = {};
   out.cache = await ensurePageCache().catch((e) => ({ error: e.message }));
   out.images = await compressImages().catch((e) => ({ error: e.message }));
-  // Both steps failed (no WordPress connection, or the website is down): an error, so the scheduler
-  // keeps the day open and tries again later instead of marking today's speed work done.
-  if (out.cache?.error && out.images?.error) out.error = `cache: ${out.cache.error}; images: ${out.images.error}`;
+  // Nothing could be done (no WordPress connection, or the website is down): an error, so the scheduler
+  // keeps the day open and tries again later instead of marking today's speed work done. A skipped
+  // cache step (handled on an earlier day, the normal state) did no work either.
+  if (out.images?.error && (out.cache?.error || out.cache?.skipped)) out.error = `cache: ${out.cache.error}; images: ${out.images.error}`;
   const i = out.images;
   if (i && !i.error && (i.converted || i.failed)) {
     await notify(`Speed: ${i.converted} image(s) converted to WebP, ${i.savedKb} KB saved${i.failed ? `, ${i.failed} failed` : ''}`, 'See the Activity Log for each image and page.').catch(() => {});
