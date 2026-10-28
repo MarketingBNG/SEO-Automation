@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
     await setAiMode(body.mode);
     await activity.log('ai_queue.mode', { details: body.mode === 'testing' ? 'Testing mode on: AI work runs on the Claude Code subscription, no API credits' : 'Live mode on: AI work uses API credits again', actor });
     // Back on Live: the automatic work that waited picks up again (unless credits are paused).
-    if (body.mode === 'live') await import('@/lib/aiReplay').then((m) => m.resumeCreditPaused()).catch(() => null);
+    if (body.mode === 'live') await resumeStopped();
   } else if (body.action === 'cancel_job') {
     const id = Number(body.id);
     const r = await prisma.ai_jobs.updateMany({ where: { id, status: 'waiting' }, data: { status: 'cancelled', answered_at: sqlNow() } });

@@ -125,10 +125,13 @@ export async function pruneReplay() {
 // After credits are back: restarts the strategies paused for credits and the blogs that stopped for
 // credits (one blog at a time; the scheduler picks up the next one on its next tick).
 // In Testing mode they wait for Live mode (switching to Live calls this again): restarted now, a
-// strategy would repeat its data lookups and then stop at its first AI step.
+// strategy would repeat its data lookups and then stop at its first AI step. While AI work is still
+// paused (switched to Live before a top-up) nothing restarts either: a blog would only stop again.
 export async function resumeCreditPaused(): Promise<string | null> {
   const { aiMode } = await import('./aiQueue');
   if ((await aiMode()) === 'testing') return null;
+  const settings = await import('./settings');
+  if ((await settings.get('ai_paused')) === '1') return null;
   const done: string[] = [];
   const { controlStrategyJob } = await import('./strategy/jobs');
   for (const s of await prisma.seo_strategies.findMany({ where: { status: 'paused', OR: [{ progress_stage: { startsWith: 'Paused: AI credits' } }, { progress_stage: { startsWith: 'Paused: Testing mode' } }, { progress_stage: { startsWith: 'Paused: the server restarted' } }] }, select: { id: true, period: true } })) {

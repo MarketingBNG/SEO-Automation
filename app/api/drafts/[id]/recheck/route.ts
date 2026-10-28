@@ -66,6 +66,8 @@ async function recheck(d: any, id: number, issues: string[], fix: boolean) {
     // so it must not be marked ready for review (or lose its hold reasons) on the old text's result.
     const { count: written } = await prisma.drafts.updateMany({ where: checked, data: { validation_issues: JSON.stringify(open), production_state: open.length ? 'NEEDS_ATTENTION' : 'READY_FOR_REVIEW' } });
     if (!written) {
+      // The fix was saved (and paid for) even though the result was not: recorded, as on a failure below.
+      if (fixed) await activity.log('draft.issues_fixed', { actor: await getActor().catch(() => 'system'), entityType: 'draft', entityId: id, details: 'Checked and fixed: the fix was saved, but the draft was saved again during the check, so the result was not written. Press Check issues again to see what is still open.' }).catch(() => {});
       return NextResponse.json({ error: `The draft was saved by someone while the check ran, so the result was not saved${fixed ? ' (the fix itself was saved)' : ''}. Press Check issues again to check the saved version.`, fixed }, { status: 409 });
     }
     // All resolved: the blog's old publishing-hold reasons no longer apply.
