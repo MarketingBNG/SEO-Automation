@@ -9,6 +9,7 @@ function getApiKey() {
 
 async function graphql(query, variables) {
   const res = await fetch(API_URL, {
+    signal: AbortSignal.timeout(30000),
     method: 'POST',
     headers: {
       Authorization: `Bearer ${getApiKey()}`,

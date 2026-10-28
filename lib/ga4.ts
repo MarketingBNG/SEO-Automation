@@ -20,6 +20,7 @@ async function runReport(requestBody, { signal }: any = {}) {
   const res = await fetch(
     `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
     {
+      signal: AbortSignal.timeout(60000),
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,

@@ -32,3 +32,18 @@ test('a cleaned text that still has a price or name is held for review', async (
   assert.ok(leftovers('Amit asked about Ontario.', ['amit']).length > 0);
   assert.deepEqual(leftovers('Founders asked about Ontario tax residency.', ['amit']), []);
 });
+
+test('a cleaning that returns no notes is held for a person, so it is not cleaned again every day', { skip: process.env.DATABASE_URL.includes('unused') }, async () => {
+  const { autoReview } = await load();
+  const prisma = (await import('../lib/prisma')).default;
+  const row = await prisma.client_insights.create({ data: { title: 'T', overview: 'raw', status: 'pending_review' } });
+  try {
+    await autoReview(row.id, { cleaner: async () => ({ title: '', overview: '' }) });
+    const logs = await prisma.activity_log.count({ where: { action: 'client_insight.needs_review', entity_id: row.id } });
+    assert.equal(logs, 1);
+    assert.equal((await prisma.client_insights.findUnique({ where: { id: row.id } }))?.status, 'pending_review');
+  } finally {
+    await prisma.activity_log.deleteMany({ where: { entity_id: row.id, action: 'client_insight.needs_review' } });
+    await prisma.client_insights.delete({ where: { id: row.id } });
+  }
+});

@@ -8,7 +8,7 @@ async function listAccountsAndLocations() {
 
   const accountsRes = await fetch(
     'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
-    { headers: { Authorization: `Bearer ${accessToken}` } }
+    { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(30000) }
   );
   const accountsJson = await accountsRes.json();
   if (!accountsRes.ok) {
@@ -21,7 +21,7 @@ async function listAccountsAndLocations() {
   for (const account of accounts) {
     const locRes = await fetch(
       `https://mybusinessbusinessinformation.googleapis.com/v1/${account.name}/locations?readMask=name,title`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(30000) }
     );
     const locJson = await locRes.json();
     results.push({

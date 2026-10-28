@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as settings from '@/lib/settings';
+import * as activity from '@/lib/activity';
 import { getMe } from '@/lib/auth';
 import { istDay } from '@/lib/topics';
 import { LEVELS, PASS_PERCENT, prepareDay, runTrainingDay, submitTest, testQuestions, type Question } from '@/lib/associateTraining';
@@ -112,18 +113,20 @@ export async function POST(req: NextRequest) {
     }
     if (me.role !== 'admin') return NextResponse.json({ error: 'Only the admin can do this.' }, { status: 403 });
     if (body.action === 'run') {
-      void runTrainingDay().catch(() => {});
+      void runTrainingDay().catch((e: any) => activity.log('training.failed', { details: String(e?.message || e).slice(0, 300), actor: me.name }).catch(() => {}));
       return NextResponse.json({ started: true }, { status: 202 });
     }
     const email = String(body.email || '').toLowerCase();
     if (!(await prisma.training_profiles.findUnique({ where: { email } }))) return NextResponse.json({ error: 'Person not found' }, { status: 404 });
     if (body.action === 'active') {
       await prisma.training_profiles.update({ where: { email }, data: { active: Boolean(body.active) } });
+      await activity.log('training.profile_changed', { details: `${email}: ${body.active ? 'added back to' : 'taken out of'} the training`, actor: me.name });
       return NextResponse.json({ ok: true });
     }
     if (body.action === 'level') {
       const level = Math.max(1, Math.min(5, Number(body.level) || 1));
       await prisma.training_profiles.update({ where: { email }, data: { level, streak: 0 } });
+      await activity.log('training.profile_changed', { details: `${email}: level set to ${level} (streak reset)`, actor: me.name });
       return NextResponse.json({ ok: true });
     }
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });

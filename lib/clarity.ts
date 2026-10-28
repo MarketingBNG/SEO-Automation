@@ -12,6 +12,7 @@ async function getInsights({ numOfDays = 3, dimensions = [] }: any = {}) {
   dimensions.slice(0, 3).forEach((d, i) => url.searchParams.set(`dimension${i + 1}`, d));
 
   const res = await fetch(url.toString(), {
+    signal: AbortSignal.timeout(30000),
     headers: { Authorization: `Bearer ${getToken()}` },
   });
 

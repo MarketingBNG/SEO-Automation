@@ -3,6 +3,7 @@ import { auditBlog } from './anthropic';
 import { wordCount } from './validation';
 import { getPost } from './wordpress';
 import * as activity from './activity';
+import { safeFetchText } from './safeFetch';
 
 export function parseAuditRow(row) {
   return {
@@ -37,13 +38,13 @@ export async function createAudit({ title, contentHtml, sourceUrl, wpPostId }) {
     resolvedTitle = resolvedTitle || post.title.rendered;
     resolvedUrl = post.link;
   } else if (sourceUrl && !content) {
-    const pageRes = await fetch(sourceUrl);
+    const pageRes = await safeFetchText(sourceUrl, { timeoutMs: 20000 });
     if (!pageRes.ok) {
       const err: any = new Error(`Could not fetch that URL (HTTP ${pageRes.status})`);
       err.status = 400;
       throw err;
     }
-    content = await pageRes.text();
+    content = pageRes.text;
   }
 
   if (!content || !content.trim()) {

@@ -21,3 +21,9 @@ test('only possible business competitors are kept', async () => {
   ).map((c) => c.domain);
   assert.deepEqual(got, ['examplecfo.com', 'crossbordertax.in']);
 });
+
+test('only the marked list counts as kept, not domains named in the search narration', async () => {
+  const { parseKept } = await load();
+  assert.deepEqual(parseKept('Let me check a.com and b.io.\n===JSON===["c.com", "www.D.com."]===END==='), ['c.com', 'd.com']);
+  assert.throws(() => parseKept('Kept: a.com, b.com'));
+});

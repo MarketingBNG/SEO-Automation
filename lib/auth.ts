@@ -10,6 +10,17 @@ function isAllowed(email?: string | null): boolean {
   return !!email && email.toLowerCase().endsWith('@' + ALLOWED_DOMAIN);
 }
 
+// A refused sign-in is recorded (at most once an hour per email, so repeated tries cannot flood the log).
+async function logDenied(email: string | null | undefined, reason: string) {
+  try {
+    const { default: prisma } = await import('./prisma');
+    const { sqlNowOffset } = await import('./time');
+    const who = email ? email.toLowerCase() : null;
+    const recent = await prisma.activity_log.findFirst({ where: { action: 'auth.denied', actor_email: who, created_at: { gte: sqlNowOffset('-1 hour') } }, select: { id: true } });
+    if (!recent) await prisma.activity_log.create({ data: { action: 'auth.denied', details: `Sign-in refused: ${reason}`, actor: who || 'unknown', actor_email: who, source: 'dashboard' } });
+  } catch {}
+}
+
 export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   session: { strategy: 'jwt' },
@@ -25,12 +36,14 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async signIn({ profile, user }) {
       const p = profile as { email?: string; email_verified?: boolean } | undefined;
-      if (p && p.email_verified === false) return false;
       const email = p?.email || user?.email;
-      if (!isAllowed(email)) return false;
+      if (p && p.email_verified === false) return logDenied(email, 'the Google email is not verified').then(() => false);
+      if (!isAllowed(email)) return logDenied(email, `not a @${ALLOWED_DOMAIN} account`).then(() => false);
       // Only people the admin has added on the Team page (and the owner) can sign in.
       const { isMember } = await import('./team');
-      return isMember(email!).catch(() => false);
+      const ok = await isMember(email!).catch(() => false);
+      if (!ok) await logDenied(email, 'not on the Team list');
+      return ok;
     },
     // Role and block status travel in the session token, so every request can be checked on the
     // server without a database call. Refreshed whenever the session is read (every minute).

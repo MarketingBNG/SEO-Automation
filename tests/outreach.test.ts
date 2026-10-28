@@ -55,3 +55,10 @@ test('a description is not treated as a website; a domain is', async () => {
   assert.equal(isRealSite('Pages on startup and NRI resource sites that link to dead ITIN or EIN guides'), false);
   assert.equal(isRealSite('DATA MISSING: SE Ranking backlink gap list'), false);
 });
+
+test('the opening line keeps only the marked part, on one line, and refuses a missing or long one', async () => {
+  const { cleanOpeningLine } = await load();
+  assert.equal(cleanOpeningLine("I'll check their site.\n===LINE===Your guide on ITIN renewals\n explains the new — rules.===END==="), 'Your guide on ITIN renewals explains the new , rules.');
+  assert.throws(() => cleanOpeningLine("I'll check their site.\nYour guide on ITIN renewals."));
+  assert.throws(() => cleanOpeningLine(`===LINE===${'word '.repeat(45)}===END===`));
+});

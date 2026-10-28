@@ -7,6 +7,7 @@ function getKey() {
 
 async function surferFetch(path, opts = {}) {
   const res = await fetch(`https://app.surferseo.com${path}`, {
+    signal: AbortSignal.timeout(30000),
     ...opts,
     headers: {
       'API-KEY': getKey(),

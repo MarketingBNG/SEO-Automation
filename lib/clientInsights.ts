@@ -7,6 +7,7 @@ import prisma from './prisma';
 import * as activity from './activity';
 import { sqlNow } from './time';
 import { callClaude } from './anthropic';
+import { CreditPausedError } from './aiCredits';
 import { getRecentTranscripts } from './fireflies';
 
 // Money amounts and contact details that must never reach a blog via this route.
@@ -62,7 +63,11 @@ export async function autoReview(id: number, { participants = [], cleaner = clea
   if (!row || row.status !== 'pending_review') return row;
   const ids = identifiers(row.title || '', participants);
   const cleaned = await cleaner(row.title || '', row.overview || '');
-  if (!cleaned.overview) return row;
+  if (!cleaned.overview) {
+    // Logged so the sync holds it for a person instead of paying to clean it again every day.
+    await activity.log('client_insight.needs_review', { entityType: 'client_insight', entityId: id, details: 'The AI cleaning returned no notes. Left for manual review.' });
+    return row;
+  }
   const problems = [...new Set([...leftovers(cleaned.overview, ids), ...leftovers(cleaned.title, ids)])];
   const approved = problems.length === 0;
   const updated = await prisma.client_insights.update({
@@ -84,7 +89,15 @@ export async function autoReview(id: number, { participants = [], cleaner = clea
 }
 
 // Pulls recent Fireflies meetings, adds new ones, and auto-reviews everything still pending.
-export async function syncMeetings({ limit = 20, cleaner = clean } = {}) {
+// A sync started while one is running (the Sync button during the daily run) joins it, so one
+// meeting is not imported twice and cleaned twice.
+let running: Promise<any> | null = null;
+export function syncMeetings(opts: { limit?: number; cleaner?: any } = {}) {
+  if (!running) running = runSync(opts).finally(() => { running = null; });
+  return running;
+}
+
+async function runSync({ limit = 20, cleaner = clean } = {}) {
   const transcripts = await getRecentTranscripts(limit);
   const out = { added: 0, approved: 0, held: 0 };
   const participantsById = new Map();
@@ -113,9 +126,18 @@ export async function syncMeetings({ limit = 20, cleaner = clean } = {}) {
       out.held++;
       continue;
     }
-    const r = await autoReview(p.id, { participants: participantsById.get(p.transcript_id) || [], cleaner });
-    if (r?.status === 'approved') out.approved++;
-    else out.held++;
+    try {
+      const r = await autoReview(p.id, { participants: participantsById.get(p.transcript_id) || [], cleaner });
+      if (r?.status === 'approved') out.approved++;
+      else out.held++;
+    } catch (e: any) {
+      // Paused credits or Testing mode: stop, and clean it on a later run.
+      if (e instanceof CreditPausedError) throw e;
+      // Anything else (a refusal is billed before it throws): hold this row for a person, so one bad
+      // row does not fail the whole sync and get paid for again on every scheduler tick.
+      await activity.log('client_insight.needs_review', { entityType: 'client_insight', entityId: p.id, details: `Automatic cleaning failed: ${String(e?.message || e).slice(0, 300)}. Left for manual review.` });
+      out.held++;
+    }
   }
   return out;
 }

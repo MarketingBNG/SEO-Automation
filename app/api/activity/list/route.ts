@@ -46,7 +46,8 @@ export async function GET(req: NextRequest) {
   const shown = rows.filter((r) => !resolved(r));
   // Work running right now, shown with a live light at the top of the log.
   const live = runningTimers().map((t) => ({ key: t.key, kind: t.kind, label: t.label, startedAt: new Date(t.startedAt).toISOString() }));
-  const outcome = (action: string) => (/\.(failed|error|held|stopped|interrupted|rejected)$/.test(action) || /_failed$/.test(action) ? 'failed' : /\.(started|asked|queued|resumed|opened)$/.test(action) ? 'started' : 'done');
+  // Actions end in '.stopped' or '_stopped' ('draft.generation_stopped'), so both separators count.
+  const outcome = (action: string) => (/[._](failed|error|held|stopped|interrupted|rejected|denied)$/.test(action) ? 'failed' : /[._](started|asked|queued|resumed|opened)$/.test(action) ? 'started' : 'done');
   return NextResponse.json({
     admin,
     live,

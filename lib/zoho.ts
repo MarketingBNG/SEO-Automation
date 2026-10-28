@@ -11,8 +11,17 @@ async function zohoGet(path) {
   const accessToken = await getAccessToken();
   const res = await fetch(`${getApiBase()}${path}`, {
     headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+    signal: AbortSignal.timeout(30000),
   });
-  const json = await res.json();
+  // Zoho answers 204 with an empty body when a module has no records.
+  const raw = res.status === 204 ? '' : await res.text();
+  if (!raw && res.ok) return { data: [], info: { more_records: false } };
+  let json: any;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    json = raw;
+  }
   if (!res.ok) {
     throw new Error(`Zoho API error (${res.status}): ${JSON.stringify(json)}`);
   }

@@ -85,12 +85,24 @@ export async function findContact(site: string) {
 async function openingLine(task: any, company: string) {
   const { text } = await callClaude(
     `You write ONE personalised opening line (max 30 words) for a link outreach email from ${HOST()} (cross-border CFO, tax and compliance services for US and India businesses) to ${company}.
-Mention something specific and true about their site or content (check it with a web search). No flattery, no em dashes, no quotes. Return only the line.`,
+Mention something specific and true about their site or content (check it with a web search). No flattery, no em dashes, no quotes.
+Return ONLY ===LINE===the line===END===`,
     [{ role: 'user', content: `Target site: ${task.target_site}\nOutreach angle: ${task.method}\nOur page: ${task.our_page}` }],
     undefined,
     { maxUses: 2, effort: 'medium', feature: 'outreach' }
   );
-  return text.trim().replace(/^["']|["']$/g, '').replace(/—/g, ',');
+  return cleanOpeningLine(text);
+}
+
+// The reply joins every text block (a preamble before the search, pieces split at citations), so only
+// the marked part is kept, on one line. A line that is missing or too long throws: it is emailed to an
+// outside site owner with no review, so the lead is not added.
+export function cleanOpeningLine(text: string): string {
+  const marked = String(text || '').match(/===LINE===([\s\S]*?)===END===/)?.[1];
+  const line = (marked ?? '').replace(/\s+/g, ' ').trim().replace(/^["']|["']$/g, '').replace(/—/g, ',').trim();
+  if (!line) throw new Error('Opening line: Claude did not return a marked line.');
+  if (line.split(' ').length > 40) throw new Error('Opening line: longer than 40 words, not sent.');
+  return line;
 }
 
 
@@ -194,18 +206,27 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
         out.duplicates++;
         continue;
       }
-      const line = await writeLine(t, contact.company);
-      await addLead({
-        email: contact.email,
-        ...nameFromEmail(contact.email),
-        company_name: contact.company,
-        website: `https://${contact.domain}`,
-        custom_fields: { opening_line: line, target_page: pageUrl(t.our_page), topic: t.method },
-      });
+      budget--; // counted per attempt, so failures cannot spend a Claude call on every due task
+      // A line written on an earlier run whose add-lead failed is reused, so Claude is not paid again.
+      const line = t.email_body || (await writeLine(t, contact.company));
+      if (!t.email_body) await prisma.backlink_tasks.update({ where: { id: t.id }, data: { email_body: line } });
+      try {
+        await addLead({
+          email: contact.email,
+          ...nameFromEmail(contact.email),
+          company_name: contact.company,
+          website: `https://${contact.domain}`,
+          custom_fields: { opening_line: line, target_page: pageUrl(t.our_page), topic: t.method },
+        });
+      } catch (err: any) {
+        // Smartlead refuses leads (campaign deleted or paused, bad key): stop here instead of paying
+        // for an opening line on every other due task.
+        await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: `Smartlead add-lead failed, outreach stopped for today: ${String(err.message || err).slice(0, 400)}` });
+        break;
+      }
       await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'sent', contact_email: contact.email, email_body: line, sent_at: sqlNow(now), note: 'Added to Smartlead campaign.' } });
       await activity.log('backlink.sent', { entityType: 'backlink_task', entityId: t.id, details: `Added ${contact.email} (${t.target_site}) to the Smartlead campaign` });
       out.pushed++;
-      budget--;
     } catch (err: any) {
       await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: String(err.message || err).slice(0, 500) });
     }

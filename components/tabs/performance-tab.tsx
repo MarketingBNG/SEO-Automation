@@ -28,7 +28,7 @@ const PILLARS: Record<string, { title: string; sub: string }> = {
   geo: { title: 'GEO', sub: 'Generative AI: visits from ChatGPT, Gemini and others, and AI Overviews' },
 };
 
-const fmt = (n: any) => Number(n).toLocaleString('en-US');
+const fmt = (n: any) => (n === null || n === undefined ? '-' : Number(n).toLocaleString('en-US'));
 
 export function Change({ k }: { k: any }) {
   if (k.changePct === null || k.changePct === undefined || k.now === k.before) return <span className="text-muted-foreground">no change</span>;
