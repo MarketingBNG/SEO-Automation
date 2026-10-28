@@ -296,6 +296,17 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
 // Drafts & Review share it, lib/strategy/publishLock.ts), so two paths never publish the same blog at once.
 const publishing = publishingRows;
 
+// Whether a held blog's reasons changed in a way worth a new notice. The publishing-pause line is
+// left out, so its text changing (a different crawl problem) does not send a notice every run.
+export function holdChanged(saved: string | null | undefined, reasons: string[]): boolean {
+  const strip = (list: string[]) => list.filter((r) => !/^Auto-publishing paused:/.test(r));
+  let before: string[] = [];
+  try {
+    before = saved ? JSON.parse(saved) : [];
+  } catch {}
+  return JSON.stringify(strip(Array.isArray(before) ? before : [])) !== JSON.stringify(strip(reasons));
+}
+
 // Returns 'published', 'held', or 'busy' when another path is publishing this row right now.
 async function publishRow(row, now, verify = verifyAndCorrect) {
   const release = claimPublish(row.id, row.draft_id ?? null);
@@ -345,10 +356,14 @@ async function publishRowOnce(row, now, verify) {
   // Never publish copied text: the blog is compared with the pages ranking for its keyword and
   // with our own posts (a check that cannot run does not block; its result shows on the draft).
   const { ensureOriginality, originalityReason } = await import('../originality');
-  const orig = await ensureOriginality(checked.id).catch(() => null);
+  // A blog held because publishing is paused is not checked now either (the check is paid and its
+  // result is kept only for this text): the fact check may still change the text once the pause lifts.
+  const orig = paused ? null : await ensureOriginality(checked.id).catch(() => null);
   if (orig && !orig.ok) reasons.push(originalityReason(orig));
   if (reasons.length) {
-    const first = row.status !== 'held';
+    // Notified when the blog is first held, and again when the reasons change (for example a fact
+    // check that fails once a publishing pause lifts); the pause line alone changing does not count.
+    const first = row.status !== 'held' || holdChanged(row.hold_reasons, reasons);
     await update(row.id, { status: 'held', hold_reasons: JSON.stringify(reasons) });
     if (first) await notify(`Blog held: ${row.title}`, reasons.join('\n'));
     return 'held';

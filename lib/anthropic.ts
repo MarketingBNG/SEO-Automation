@@ -1620,8 +1620,8 @@ export class SkillBatchWaitingError extends Error {
   constructor(testing = false) {
     super(
       testing
-        ? 'The automatic skill refresh is waiting for its batch, which is already paid for. Testing mode is on, so it finishes only once Live mode is back on (at the next daily run); update the skill after that if you still want to.'
-        : 'The automatic skill refresh is waiting for its batch, which is already paid for. It finishes by itself; update the skill after that if you still want to.'
+        ? 'The automatic skill refresh is waiting for its batch, which is already paid for. It is collected at the next daily refresh (free, also in Testing mode), unless it needs a further part, which waits for Live mode; update the skill after that if you still want to.'
+        : 'The automatic skill refresh is waiting for its batch, which is already paid for. It is collected at the next daily refresh (free) and finishes by itself; update the skill after that if you still want to.'
     );
     this.name = 'SkillBatchWaitingError';
   }

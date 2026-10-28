@@ -21,8 +21,9 @@ export async function canReadAssistantFile(me: any, key: string): Promise<boolea
 }
 
 // The image ids (image_library) the person attached themselves in the assistant (an admin: all).
-// legacy: also an image attached before attached files were recorded (no assistant_files row at all),
-// the same rule canReadAssistantFile serves it by. The chat route leaves it off: a newly sent id
+// legacy: also an image attached in the assistant (an assistant/ key) before attached files were
+// recorded (no assistant_files row at all), the same rule canReadAssistantFile serves it by. An image
+// added elsewhere (Drafts & Review keeps its files under inline/) never has a row and is not one. The chat route leaves it off: a newly sent id
 // always has its row.
 export async function ownImageIds(me: any, ids: number[], { legacy = false }: { legacy?: boolean } = {}): Promise<number[]> {
   if (!ids.length || me?.role === 'admin') return ids;
@@ -32,7 +33,7 @@ export async function ownImageIds(me: any, ids: number[], { legacy = false }: { 
   const paths = new Set(owned.map((o) => o.path));
   if (legacy) {
     const recorded = new Set((await prisma.assistant_files.findMany({ where: { path: { in: imgs.map((i) => i.path) } }, select: { path: true } })).map((r) => r.path));
-    for (const i of imgs) if (!recorded.has(i.path)) paths.add(i.path);
+    for (const i of imgs) if (i.path.startsWith('assistant/') && !recorded.has(i.path)) paths.add(i.path);
   }
   const mine = new Set(imgs.filter((i) => paths.has(i.path)).map((i) => i.id));
   return ids.filter((id) => mine.has(id));

@@ -55,8 +55,10 @@ test('the Bing calls use the connector site when WORDPRESS_SITE_URL is not set',
     await withEnv({ SITE_CONNECTOR_URL: 'https://site.example.com/x.php', SITE_CONNECTOR_SECRET: 's' }, () =>
       assert.rejects(submitToBing(['https://site.example.com/a/']), /Network call in a test/)
     );
-    assert.equal(calls.length, 1);
-    assert.match(calls[0], /bing\.com/);
+    // The verified-site lookup (round 12) and then the submission, both to the stubbed Bing API.
+    assert.equal(calls.length, 2);
+    for (const c of calls) assert.match(c, /bing\.com/);
+    assert.match(calls[1], /SubmitUrlBatch/);
   } finally {
     if (prev === undefined) delete process.env.BING_WEBMASTER_API_KEY;
     else process.env.BING_WEBMASTER_API_KEY = prev;
@@ -115,9 +117,10 @@ test('a Testing-mode skill update is refused while the automatic refresh runs, a
   assert.equal(skillRunning(), null);
 });
 
-test('the batch-waiting refusal says Live mode is needed when Testing mode is on', () => {
-  assert.match(new SkillBatchWaitingError().message, /finishes by itself/);
+test('the batch-waiting refusal says the batch is collected at the next daily refresh, also in Testing mode', () => {
+  assert.match(new SkillBatchWaitingError().message, /next daily refresh/);
   const testing = new SkillBatchWaitingError(true).message;
-  assert.doesNotMatch(testing, /finishes by itself/);
-  assert.match(testing, /Live mode/);
+  assert.match(testing, /next daily refresh \(free, also in Testing mode\)/);
+  assert.doesNotMatch(testing, /finishes only once Live mode/);
+  assert.match(testing, /further part, which waits for Live mode/);
 });
