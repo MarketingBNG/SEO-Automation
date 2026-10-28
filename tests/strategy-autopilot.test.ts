@@ -338,13 +338,17 @@ test('a lead Smartlead keeps refusing is given up on and does not block the othe
   const bad = await prisma.backlink_tasks.create({ data: { ...base, target_site: 'bad-site.com' } });
   const good = await prisma.backlink_tasks.create({ data: { ...base, target_site: 'good-site.com' } });
   const line = async () => 'A line.';
+  const day1 = new Date('2030-03-01T10:00:00Z');
   try {
-    await runOutreach(new Date(), { checkLinks: false, line });
+    await runOutreach(day1, { checkLinks: false, line });
     assert.deepEqual(added, ['contact@good-site.com'], 'the next task is still pushed');
     assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: bad.id } }))!.status, 'planned', 'one refusal: tried again next run');
     assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: good.id } }))!.status, 'sent');
-    await runOutreach(new Date(), { checkLinks: false, line });
-    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: bad.id } }))!.status, 'failed', 'refused twice: given up on');
+    // A repeat pass on the same day (every 15 minutes while it waits for AI) does not try it again.
+    await runOutreach(new Date('2030-03-01T10:15:00Z'), { checkLinks: false, line });
+    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: bad.id } }))!.status, 'planned', 'refused today: waits for tomorrow');
+    await runOutreach(new Date('2030-03-02T10:00:00Z'), { checkLinks: false, line });
+    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: bad.id } }))!.status, 'failed', 'refused on two days: given up on');
   } finally {
     globalThis.fetch = saved.fetch;
     process.env.SMARTLEAD_API_KEY = saved.key || '';
@@ -374,16 +378,65 @@ test('an opening line that keeps failing is given up on after two runs', { skip:
     throw new Error('Opening line: Claude did not return a marked line.');
   };
   try {
-    await runOutreach(new Date(), { checkLinks: false, line });
+    await runOutreach(new Date('2030-04-01T10:00:00Z'), { checkLinks: false, line });
     let row = (await prisma.backlink_tasks.findUnique({ where: { id: t.id } }))!;
     assert.equal(row.status, 'planned', 'one failure: tried again next run');
     assert.match(row.note || '', /^Opening line failed/);
-    await runOutreach(new Date(), { checkLinks: false, line });
+    await runOutreach(new Date('2030-04-01T10:15:00Z'), { checkLinks: false, line, push: false });
+    assert.equal(calls, 1, 'not tried again on the same day');
+    await runOutreach(new Date('2030-04-02T10:00:00Z'), { checkLinks: false, line });
     row = (await prisma.backlink_tasks.findUnique({ where: { id: t.id } }))!;
     assert.equal(row.status, 'failed', 'failed twice: given up on');
-    await runOutreach(new Date(), { checkLinks: false, line });
+    await runOutreach(new Date('2030-04-03T10:00:00Z'), { checkLinks: false, line });
     assert.equal(calls, 2, 'not paid for again after giving up');
   } finally {
+    globalThis.fetch = saved.fetch;
+    process.env.SMARTLEAD_API_KEY = saved.key || '';
+    process.env.SMARTLEAD_CAMPAIGN_ID = saved.campaign || '';
+    await prisma.backlink_tasks.deleteMany({ where: { strategy_id: s.id } });
+    await prisma.seo_strategies.delete({ where: { id: s.id } });
+  }
+});
+
+test('a broken Smartlead campaign stops outreach for the whole day, and saved lines are pushed once a day', { skip: !hasDb }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const settings = await import('../lib/settings');
+  const { runOutreach } = await import('../lib/strategy/outreach');
+  const saved = { fetch: globalThis.fetch, key: process.env.SMARTLEAD_API_KEY, campaign: process.env.SMARTLEAD_CAMPAIGN_ID, stopped: await settings.get('outreach_stopped_day') };
+  process.env.SMARTLEAD_API_KEY = 'test-key';
+  process.env.SMARTLEAD_CAMPAIGN_ID = '1';
+  let adds = 0;
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = new URL(String(url));
+    if (u.hostname === 'server.smartlead.ai') {
+      if (init?.method === 'GET') return new Response('', { status: 404 });
+      adds++;
+      return new Response('{"error":"campaign paused"}', { status: 400 });
+    }
+    return new Response(`<p>contact@${u.hostname}</p>`, { status: 200 });
+  }) as any;
+  const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'approved', plan_json: '{}' } });
+  const base = { strategy_id: s.id, method: 'Resource page outreach', our_page: '/itin', send_date: '2020-01-01', tags: '[]', email_body: 'A saved line.' };
+  const ids: number[] = [];
+  for (const d of ['stop-a.com', 'stop-b.com', 'stop-c.com', 'stop-d.com']) ids.push((await prisma.backlink_tasks.create({ data: { ...base, target_site: d } })).id);
+  const line = async () => 'A line.';
+  try {
+    const r1: any = await runOutreach(new Date('2030-05-01T10:00:00Z'), { checkLinks: false, line });
+    assert.equal(adds, 2, 'two refusals stop the run');
+    assert.equal(r1.stoppedForToday, true);
+    // Repeat passes on the same day take no further leads, with or without push.
+    const r2: any = await runOutreach(new Date('2030-05-01T10:15:00Z'), { checkLinks: false, line });
+    await runOutreach(new Date('2030-05-01T10:30:00Z'), { checkLinks: false, line, push: false });
+    assert.equal(adds, 2, 'stopped for the rest of the day');
+    assert.equal(r2.stoppedForToday, true);
+    const rows = await prisma.backlink_tasks.findMany({ where: { id: { in: ids } } });
+    assert.equal(rows.filter((r) => r.status === 'failed').length, 0, 'nothing given up on the same day');
+    // push: false alone leaves saved-line leads for the first pass of the day.
+    await settings.set('outreach_stopped_day', '');
+    await runOutreach(new Date('2030-05-01T10:45:00Z'), { checkLinks: false, line, push: false });
+    assert.equal(adds, 2, 'saved lines are not pushed again on a repeat pass');
+  } finally {
+    await settings.set('outreach_stopped_day', saved.stopped || '');
     globalThis.fetch = saved.fetch;
     process.env.SMARTLEAD_API_KEY = saved.key || '';
     process.env.SMARTLEAD_CAMPAIGN_ID = saved.campaign || '';

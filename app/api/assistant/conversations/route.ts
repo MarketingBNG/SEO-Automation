@@ -4,12 +4,7 @@ import { basename } from '@/lib/storage';
 import { loadConversation, IMAGE_MARKER } from '@/lib/assistant/engine';
 import { getTool } from '@/lib/assistant/tools';
 import { getMe } from '@/lib/auth';
-
-// Who may see a conversation: its owner, or an admin (who sees everyone's).
-export function mineOnly(me: any) {
-  if (!me || me.role === 'admin') return null;
-  return { created_by: { in: [me.name, me.email].filter(Boolean) } };
-}
+import { mineOnly } from '@/lib/assistant/conversations';
 
 export const runtime = 'nodejs';
 

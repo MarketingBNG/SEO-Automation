@@ -18,6 +18,7 @@ import { CreditPausedError, isCreditError, assertCredits } from '../aiCredits';
 import { aiMode, isAutomatic, TestingModeError } from '../aiQueue';
 import { listReferringDomains } from '../seranking';
 import { smartleadConfigured, leadExists, addLead } from '../smartlead';
+import * as settings from '../settings';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
 const HOST = () => SITE().replace(/^https?:\/\//, '').replace(/^www\./, '');
@@ -136,10 +137,18 @@ async function assertAiReady() {
 // One pass: link check, then new leads for Smartlead within the daily cap. `line` is injectable for tests.
 const ADD_LEAD_FAILED = 'Smartlead add-lead failed';
 const LINE_FAILED = 'Opening line failed';
+// Failure notes carry their day ("<prefix> on 2026-10-28: why"), so the "given up after two runs"
+// rules span two days even when the pass repeats every 15 minutes while it waits for AI.
+const failedNote = (prefix: string, day: string, why: string) => `${prefix} on ${day}: ${why}`.slice(0, 500);
+const failedToday = (note: any, prefix: string, day: string) => String(note || '').startsWith(`${prefix} on ${day}`);
+// The day "outreach stopped for today" was set (two different leads refused in a row).
+const STOPPED_DAY = 'outreach_stopped_day';
 
-export async function runOutreach(now = new Date(), { checkLinks = true, line: writeLine = openingLine, find = findSites }: any = {}) {
+// `push: false` (a repeat pass on the same day, while it waits for AI) leaves out the leads whose
+// opening line is already saved: they were pushed, or refused, on the first pass of the day.
+export async function runOutreach(now = new Date(), { checkLinks = true, push = true, line: writeLine = openingLine, find = findSites }: any = {}) {
   // waitingForAi: some work needed Claude while AI work was not possible, so the day stays open.
-  const out = { pushed: 0, duplicates: 0, verified: 0, noContact: 0, manual: 0, skipped: '', waitingForAi: false };
+  const out = { pushed: 0, duplicates: 0, verified: 0, noContact: 0, manual: 0, skipped: '', waitingForAi: false, stoppedForToday: false };
   const today = now.toISOString().slice(0, 10);
   const strategies = await prisma.seo_strategies.findMany({ where: { status: 'approved' }, select: { id: true } });
   const tasks = await prisma.backlink_tasks.findMany({ where: { strategy_id: { in: strategies.map((s) => s.id) }, status: { in: ['planned', 'sent'] } }, orderBy: { id: 'asc' } });
@@ -224,11 +233,18 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
   // Add-lead failures in a row in this run: two different leads refused means the campaign itself is
   // the problem (deleted or paused, bad key), so the run stops instead of paying for more opening lines.
   let refusedInARow = 0;
+  if ((await settings.get(STOPPED_DAY)) === today) {
+    out.stoppedForToday = true;
+    budget = 0;
+  }
 
   for (const t of tasks.filter((x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && isRealSite(x.target_site) && isDue(x))) {
     if (budget <= 0) break;
     // No opening line yet and AI is not possible: it waits (no contact lookup either).
     if (!t.email_body && !aiReady) continue;
+    // A saved line was already tried on this day's first pass; a task that failed today waits for tomorrow.
+    if (t.email_body && !push) continue;
+    if (failedToday(t.note, ADD_LEAD_FAILED, today) || failedToday(t.note, LINE_FAILED, today)) continue;
     try {
       const contact = await findContact(t.target_site);
       if (!contact) {
@@ -251,12 +267,12 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
           line = await writeLine(t, contact.company);
         } catch (err: any) {
           if (err instanceof CreditPausedError || isCreditError(err)) throw err;
-          // A line that fails twice (on two runs) is given up on, so the same site is not paid for
+          // A line that fails twice (on two days) is given up on, so the same site is not paid for
           // again on every daily run.
           const again = String(t.note || '').startsWith(LINE_FAILED);
           const why = String(err.message || err).slice(0, 400);
-          await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: again ? 'failed' : 'planned', contact_email: contact.email, note: `${LINE_FAILED}: ${why}`.slice(0, 500) } });
-          t.note = `${LINE_FAILED}: ${why}`;
+          t.note = failedNote(LINE_FAILED, today, why);
+          await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: again ? 'failed' : 'planned', contact_email: contact.email, note: t.note } });
           await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: `Opening line failed${again ? ' again, so this task is given up on' : ''}: ${why}` });
           continue;
         }
@@ -271,14 +287,19 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
           custom_fields: { opening_line: line, target_page: pageUrl(t.our_page), topic: t.method },
         });
       } catch (err: any) {
-        // A lead refused twice (on two runs) is given up on, so one lead Smartlead keeps refusing does
+        // A lead refused twice (on two days) is given up on, so one lead Smartlead keeps refusing does
         // not block every other due task on every run.
         const again = String(t.note || '').startsWith(ADD_LEAD_FAILED);
         const why = String(err.message || err).slice(0, 400);
-        await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: again ? 'failed' : 'planned', contact_email: contact.email, note: `${ADD_LEAD_FAILED}: ${why}`.slice(0, 500) } });
-        t.note = `${ADD_LEAD_FAILED}: ${why}`;
+        t.note = failedNote(ADD_LEAD_FAILED, today, why);
+        await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: again ? 'failed' : 'planned', contact_email: contact.email, note: t.note } });
         refusedInARow++;
         const stop = refusedInARow >= 2;
+        // Kept for the day, so a repeat pass 15 minutes later does not take the next leads.
+        if (stop) {
+          await settings.set(STOPPED_DAY, today);
+          out.stoppedForToday = true;
+        }
         await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: `Smartlead add-lead failed${again ? ' again, so this lead is given up on' : ''}${stop ? '; outreach stopped for today' : ''}: ${why}` });
         if (stop) break;
         continue;

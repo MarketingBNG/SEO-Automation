@@ -70,10 +70,11 @@ export async function autoReview(id: number, { participants = [], cleaner = clea
   }
   const problems = [...new Set([...leftovers(cleaned.overview, ids), ...leftovers(cleaned.title, ids)])];
   const approved = problems.length === 0;
-  // Written only while it still waits for review: a person who deleted (or decided) it during the
-  // cleaning call keeps that, so a deleted meeting's text never comes back or gets approved.
+  // Written only while it still waits for review and its text is the one cleaned: a person who deleted,
+  // decided or edited it during the cleaning call keeps that, so a deleted meeting's text never comes
+  // back or gets approved, and a person's edit is not overwritten by notes cleaned from the old text.
   const done = await prisma.client_insights.updateMany({
-    where: { id, status: 'pending_review' },
+    where: { id, status: 'pending_review', title: row.title, overview: row.overview },
     data: {
       title: cleaned.title || 'Client meeting themes',
       overview: cleaned.overview,
@@ -82,7 +83,12 @@ export async function autoReview(id: number, { participants = [], cleaner = clea
       ...(approved ? { status: 'approved', decided_at: sqlNow() } : {}),
     },
   });
-  if (done.count === 0) return prisma.client_insights.findUnique({ where: { id } });
+  if (done.count === 0) {
+    const now = await prisma.client_insights.findUnique({ where: { id } });
+    // Edited by a person while it was cleaned: left for them to review (not cleaned again each day).
+    if (now?.status === 'pending_review') await activity.log('client_insight.needs_review', { entityType: 'client_insight', entityId: id, details: 'Edited by a person while the AI cleaned it, so the cleaned notes were not saved. Left for manual review.' });
+    return now;
+  }
   const updated = (await prisma.client_insights.findUnique({ where: { id } }))!;
   await activity.log(approved ? 'client_insight.auto_approved' : 'client_insight.needs_review', {
     entityType: 'client_insight',

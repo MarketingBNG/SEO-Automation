@@ -171,16 +171,19 @@ export async function startTopicBlog(id: number) {
   if (!t) throw Object.assign(new Error('Topic not found'), { status: 404 });
   if (t.draft_id) throw Object.assign(new Error('A blog for this topic was already started.'), { status: 409 });
   if (t.status === 'blog') throw Object.assign(new Error('A blog for this topic is being written.'), { status: 409 });
-  // Claimed in one step before anything is paid for, so two presses at the same moment start one run.
-  const claim = await prisma.topics.updateMany({ where: { id, draft_id: null, status: { not: 'blog' } }, data: { status: 'blog' } });
-  if (claim.count !== 1) throw Object.assign(new Error('A blog for this topic is being written.'), { status: 409 });
+  // The keyword is made first, so a topic marked 'blog' always has this run's keyword as its newest
+  // one (linkTopicBlogs, polled by the page, would otherwise find an earlier failed run's keyword and
+  // put the topic back to 'new'). Then the topic is claimed in one step before anything is paid for,
+  // so two presses at the same moment start one run; the press that loses removes its keyword.
   const kws: string[] = JSON.parse(t.keywords || '[]');
-  let kw;
-  try {
-    kw = await prisma.keywords.create({ data: { keyword: kws[0] || t.title.toLowerCase().slice(0, 80), batch_name: 'Topics', notes: topicNotes(t), status: 'generating' } });
-  } catch (e) {
-    await prisma.topics.update({ where: { id }, data: { status: t.status } }).catch(() => {});
+  const kw = await prisma.keywords.create({ data: { keyword: kws[0] || t.title.toLowerCase().slice(0, 80), batch_name: 'Topics', notes: topicNotes(t), status: 'generating' } });
+  const claim = await prisma.topics.updateMany({ where: { id, draft_id: null, status: { not: 'blog' } }, data: { status: 'blog' } }).catch(async (e) => {
+    await prisma.keywords.delete({ where: { id: kw.id } }).catch(() => {});
     throw e;
+  });
+  if (claim.count !== 1) {
+    await prisma.keywords.delete({ where: { id: kw.id } }).catch(() => {});
+    throw Object.assign(new Error('A blog for this topic is being written.'), { status: 409 });
   }
   const controller = new AbortController();
   void runBlogJob(kw, controller).then(async () => {

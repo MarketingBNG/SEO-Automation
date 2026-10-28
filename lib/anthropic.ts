@@ -338,6 +338,9 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
   // finds the later part by its id, instead of paying for every part again.
   const keptBatches: string[] = [];
   const dropKept = () => (keptBatches.length ? prisma.settings.deleteMany({ where: { key: { in: keptBatches.splice(0) } } }).catch(() => {}) : Promise.resolve());
+  // Whether this call has sent a part itself yet. Until it has, every part only collected a batch
+  // already paid for, so the first part it would send checks credits (see below).
+  let sentHere = false;
   for (let part = 0; part < maxParts; part++) {
     activity.part = part;
     // Refuses to start when AI work is paused for low credits (see lib/aiCredits.ts). Only before the
@@ -350,7 +353,10 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
     // Collecting a paid batch in Testing mode: a part not sent yet waits for Live mode (the parts
     // read so far keep their ids, so nothing is paid twice then).
     if (collectOnly && !pending) throw new TestingModeError();
-    if (part === 0 && !pending) await assertCredits();
+    // The first part this call sends checks credits, also when the parts before it were only collected
+    // from their kept batches (free) after a restart or in Testing mode.
+    if (!pending && !sentHere) await assertCredits();
+    if (!pending) sentHere = true;
     if (batch) {
       // Read now: the key names this part's request, before the conversation grows.
       const pendingKey = `batch_pending:${requestHash(batchParams)}`;
@@ -366,7 +372,7 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
         throw err;
       }
       keptBatches.push(pendingKey);
-      await recordUsage({ model, usage: response.usage, feature, batch: true });
+      await recordBatchUsageOnce(pendingKey, { model, usage: response.usage, feature });
       if (response.stop_reason === 'refusal') {
         await dropKept();
         throw new Error('The AI declined this request.');
@@ -499,6 +505,23 @@ async function pendingBatchId(params): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// A kept batch part is read again after a retry or restart (free at Anthropic): its usage is recorded on
+// the first read only, marked in its saved key ({"id","at","recorded":true}), so the spend estimate and
+// the low-credit pause do not count it again. A new batch sent for the same request rewrites the key
+// without the mark, so its usage is recorded.
+async function recordBatchUsageOnce(pendingKey: string, { model, usage, feature }: { model: string; usage: any; feature: string }) {
+  const raw = await settings.get(pendingKey).catch(() => null);
+  let saved: any = null;
+  if (raw) {
+    try {
+      saved = raw.startsWith('{') ? JSON.parse(raw) : { id: raw, at: Date.now() };
+    } catch {}
+  }
+  if (saved?.recorded) return;
+  await recordUsage({ model, usage, feature, batch: true });
+  if (saved?.id) await settings.set(pendingKey, JSON.stringify({ ...saved, recorded: true })).catch(() => {});
 }
 
 // `keep`: a result read successfully leaves its saved id in place (callClaudeLive drops it when the

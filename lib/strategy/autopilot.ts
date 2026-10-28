@@ -609,8 +609,12 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
   if ((await settings.get('last_outreach_run')) !== today) {
     // The SE Ranking link check runs once a day even while the pass repeats waiting for AI.
     const checkLinks = (await settings.get('last_outreach_link_check')) !== today;
-    summary.outreach = await runOutreach(now, { checkLinks }).catch((e) => ({ error: e.message }));
+    // Leads whose opening line is already saved are pushed on the first pass of the day only, so a
+    // repeat pass does not try (and give up on) a lead Smartlead refused 15 minutes earlier.
+    const push = (await settings.get('last_outreach_push')) !== today;
+    summary.outreach = await runOutreach(now, { checkLinks, push }).catch((e) => ({ error: e.message }));
     if (!summary.outreach?.error && checkLinks) await settings.set('last_outreach_link_check', today);
+    if (!summary.outreach?.error && push) await settings.set('last_outreach_push', today);
     // Tasks that need Claude while AI work is not possible keep the day open (the rest was done).
     if (!summary.outreach?.error && !summary.outreach?.waitingForAi) await settings.set('last_outreach_run', today);
   }

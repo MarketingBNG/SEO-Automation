@@ -69,3 +69,26 @@ test('a meeting deleted while it is being cleaned stays deleted, with no text an
     await prisma.client_insights.delete({ where: { id: row.id } });
   }
 });
+
+test('a person editing the overview while it is being cleaned keeps their edit, and it is not approved', { skip: process.env.DATABASE_URL.includes('unused') }, async () => {
+  const { autoReview } = await load();
+  const prisma = (await import('../lib/prisma')).default;
+  const row = await prisma.client_insights.create({ data: { title: 'T', overview: 'raw', status: 'pending_review' } });
+  try {
+    await autoReview(row.id, {
+      cleaner: async () => {
+        // A person edits the overview during the paid cleaning call (as PATCH /api/client-insights/[id] does).
+        await prisma.client_insights.update({ where: { id: row.id }, data: { overview: 'edited by a person' } });
+        return { title: 'Founders and Ontario', overview: '- Founders asked about Ontario tax residency.' };
+      },
+    });
+    const after = await prisma.client_insights.findUnique({ where: { id: row.id } });
+    assert.equal(after?.overview, 'edited by a person');
+    assert.equal(after?.status, 'pending_review');
+    assert.equal(await prisma.activity_log.count({ where: { action: 'client_insight.auto_approved', entity_id: row.id } }), 0);
+    assert.equal(await prisma.activity_log.count({ where: { action: 'client_insight.needs_review', entity_id: row.id } }), 1);
+  } finally {
+    await prisma.activity_log.deleteMany({ where: { entity_id: row.id, action: { startsWith: 'client_insight.' } } });
+    await prisma.client_insights.delete({ where: { id: row.id } });
+  }
+});

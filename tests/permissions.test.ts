@@ -107,3 +107,19 @@ test('only settings.change connects Zoho or Google Business Profile', () => {
     assert.equal(allowed('admin', 'GET', path), true);
   }
 });
+
+test('a private assistant document cannot be read through a key that storage would rewrite', { skip: !!process.env.BLOB_READ_WRITE_TOKEN }, async () => {
+  const { GET } = await import('../app/api/uploads/[...file]/route');
+  const { saveFile, deleteFile } = await import('../lib/storage');
+  // A real file on local disk, so a key that slipped past the owner check would be served (200).
+  const name = `test-${Date.now()}-a.pdf`;
+  await saveFile(`assistant/docs/${name}`, Buffer.from('private'));
+  try {
+    for (const file of [['x', 'uploads', 'assistant', 'docs', name], [`assistant\\docs\\${name}`], ['assistant', `docs\\${name}`]]) {
+      const res = await GET(new Request('http://localhost/api/uploads/x'), { params: Promise.resolve({ file }) });
+      assert.equal(res.status, 404, file.join('/'));
+    }
+  } finally {
+    await deleteFile(`assistant/docs/${name}`);
+  }
+});
