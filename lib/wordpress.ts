@@ -28,6 +28,13 @@ async function freeSiteSlug(slug: string) {
   throw new Error(`No free address found for /${slug}/ on the website.`);
 }
 
+// Whether publishing can reach the website at all (the site connector, or the WordPress login).
+// Checked before steps that save anything, so a publish that cannot go out changes nothing.
+function wpConfigured() {
+  if (connectorOn()) return true;
+  return Boolean((process.env.WORDPRESS_SITE_URL || '').trim() && process.env.WORDPRESS_USERNAME && process.env.WORDPRESS_APPLICATION_PASSWORD);
+}
+
 function getConfig() {
   const siteUrl = (process.env.WORDPRESS_SITE_URL || '').replace(/\/+$/, '');
   const username = process.env.WORDPRESS_USERNAME;
@@ -438,6 +445,7 @@ async function siteRequest(method: string, route: string, query: any, body: any)
 }
 
 export {
+  wpConfigured,
   freeSlug,
   testConnection,
   uploadBuffer,

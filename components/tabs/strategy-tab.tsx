@@ -321,7 +321,10 @@ export function StrategyView({ s, onChanged, active = true }: { s: any; onChange
   const [updateResult, setUpdateResult] = useState<any>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const approved = s.status === 'approved';
-  const p = editing ? draft : plan;
+  // A plan saved without one of its sections (an older or hand-made plan) shows that section empty
+  // instead of breaking the whole page.
+  const raw = (editing ? draft : plan) || {};
+  const p = { ...raw, summary: raw.summary || {}, blogPlan: raw.blogPlan || {}, aeoGeo: raw.aeoGeo || {}, technical: raw.technical || {} };
   const manual = useManualTasks(s.id, approved);
   const who = useRole();
   const canEdit = who.can('strategy.edit');
@@ -572,7 +575,7 @@ export function StrategyView({ s, onChanged, active = true }: { s: any; onChange
       {/* 7 */}
       <Section title="7. Automation map">
         <DataTable head={['Platform', 'What runs automatically', 'When']}>
-          {plan.automation.map((a: any, i: number) => (
+          {(plan.automation || []).map((a: any, i: number) => (
             <tr key={i}><td className={TD}>{a.platform}</td><td className={TD}>{a.what}</td><td className={TD_MUTED}>{a.when}</td></tr>
           ))}
         </DataTable>
@@ -603,7 +606,7 @@ export function StrategyView({ s, onChanged, active = true }: { s: any; onChange
       {/* 10 */}
       <Section title="10. Automatic safeguards">
         <DataTable head={['Safeguard', 'Rule']}>
-          {plan.safeguards.map((g: any) => (
+          {(plan.safeguards || []).map((g: any) => (
             <tr key={g.name}><td className={TD}>{g.name}</td><td className={TD}>{g.rule}</td></tr>
           ))}
         </DataTable>

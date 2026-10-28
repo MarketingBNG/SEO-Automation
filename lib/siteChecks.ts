@@ -9,7 +9,8 @@ import { wpRequest } from './wordpress';
 import { notify } from './notify';
 import { aiLeftovers } from './strategy/core';
 
-const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
+// No default domain: a local or test server without WORDPRESS_SITE_URL must not fetch the live site.
+const SITE = () => (process.env.WORDPRESS_SITE_URL || '').trim().replace(/\/+$/, '');
 
 async function addTask(url: string, issue: string, fix: string) {
   const exists = await prisma.technical_fix_tasks.findFirst({ where: { url, issue, status: { in: ['manual', 'planned'] } } });
@@ -42,12 +43,15 @@ export async function runSiteChecks() {
   }
 
   // 2. Sitemap listed in robots.txt.
-  try {
-    const txt = await (await fetch(`${SITE()}/robots.txt`, { signal: AbortSignal.timeout(15000) })).text();
-    out.robots = /^\s*sitemap:\s*https?:\/\//im.test(txt) ? 'ok' : 'missing';
-    if (out.robots === 'missing' && (await addTask(`${SITE()}/robots.txt`, 'Sitemap missing from robots.txt', `Add the line "Sitemap: ${SITE()}/sitemap_index.xml" (Yoast: SEO > Tools > File editor)`))) out.newTasks++;
-  } catch (e) {
-    out.robots = `not checked: ${e.message}`;
+  if (!SITE()) out.robots = 'not checked: WORDPRESS_SITE_URL not set';
+  else {
+    try {
+      const txt = await (await fetch(`${SITE()}/robots.txt`, { signal: AbortSignal.timeout(15000) })).text();
+      out.robots = /^\s*sitemap:\s*https?:\/\//im.test(txt) ? 'ok' : 'missing';
+      if (out.robots === 'missing' && (await addTask(`${SITE()}/robots.txt`, 'Sitemap missing from robots.txt', `Add the line "Sitemap: ${SITE()}/sitemap_index.xml" (Yoast: SEO > Tools > File editor)`))) out.newTasks++;
+    } catch (e) {
+      out.robots = `not checked: ${e.message}`;
+    }
   }
 
   // 3. Image attachment pages should redirect to the image (Yoast: Settings > Advanced > Media pages).

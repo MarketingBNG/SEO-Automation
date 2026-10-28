@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { ensurePhotoCover } from '@/lib/coverPhoto';
-import { uploadMedia, publishPost, updatePost, seoSlug, freeSlug, wpRequest } from '@/lib/wordpress';
+import { uploadMedia, publishPost, updatePost, seoSlug, freeSlug, wpRequest, wpConfigured } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
 import { getActor, getMe } from '@/lib/auth';
 import { canDo } from '@/lib/access';
@@ -65,9 +65,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'The draft still has a reviewer placeholder ([AUTHOR NAME], [REVIEWER NAME], [PRACTITIONER NOTE NEEDED], [VISUAL SUGGESTION] or [VERIFY]). Replace or remove it before publishing.' }, { status: 400 });
   }
 
-  const orig = await ensureOriginality(nid).catch(() => null);
-  if (orig && !orig.ok) return NextResponse.json({ error: originalityReason(orig) }, { status: 400 });
-
   const leftovers = aiLeftovers(draft.title, draft.meta_description, draft.content_html);
   if (leftovers.length) return NextResponse.json({ error: `Remove the AI notes first. ${leftovers.join(' ')}` }, { status: 400 });
 
@@ -104,6 +101,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'This is a tax, legal or compliance blog. Name the CA/CPA who reviewed it before it goes live.', reviewers: known }, { status: 400 });
     }
   }
+
+  // Without a WordPress connection nothing can go out: stop before an author or cover is saved.
+  if (!wpConfigured()) {
+    return NextResponse.json({ error: 'WordPress connection is not configured. Set WORDPRESS_SITE_URL, WORDPRESS_USERNAME and WORDPRESS_APPLICATION_PASSWORD (or the site connector), then publish again.' }, { status: 503 });
+  }
+  // The paid originality checks (live SERP searches, Copyscape) run only after the free refusals above.
+  const orig = await ensureOriginality(nid).catch(() => null);
+  if (orig && !orig.ok) return NextResponse.json({ error: originalityReason(orig) }, { status: 400 });
 
   // The scheduler (or a second press) may be publishing this blog right now: it is sent once.
   const release = claimPublish(row?.id ?? null, nid);

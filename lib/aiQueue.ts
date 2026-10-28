@@ -18,7 +18,17 @@ export type AiMode = 'live' | 'testing';
 
 let cached: { at: number; mode: AiMode } | null = null;
 
+// Tests pin the mode for their own process (tests/setup.ts sets it), so a test database left in
+// Testing mode does not send a test's requests to the Claude Code queue, where they would wait
+// forever, and a test that switches modes does not switch them for test files running alongside.
+const pinned = (): AiMode | null => {
+  const m = (globalThis as any).__AI_MODE_PIN;
+  return m === 'live' || m === 'testing' ? m : null;
+};
+
 export async function aiMode(): Promise<AiMode> {
+  const pin = pinned();
+  if (pin) return pin;
   if (cached && Date.now() - cached.at < 10000) return cached.mode;
   const mode: AiMode = (await settings.get('ai_mode').catch(() => null)) === 'testing' ? 'testing' : 'live';
   cached = { at: Date.now(), mode };

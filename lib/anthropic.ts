@@ -1614,6 +1614,15 @@ corrected draft again in the exact same format (===TITLE=== through ===END===):\
 }
 
 
+// A manual skill update refused because the automatic refresh's batch (already paid for) is still
+// waiting to be read.
+export class SkillBatchWaitingError extends Error {
+  constructor() {
+    super('The automatic skill refresh is waiting for its batch, which is already paid for. It finishes by itself; update the skill after that if you still want to.');
+    this.name = 'SkillBatchWaitingError';
+  }
+}
+
 // Researches real high-engagement blogs across the internet (any niche - hooks, structure,
 // storytelling vs. educational patterns), combines that with our own GA4 engagement data, and
 // produces/refreshes the self-updating content-writing skill. Runs without human approval (it
@@ -1630,23 +1639,30 @@ async function generateContentSkill({ batch = false }: any = {}) {
   const SKILL_OPTS = { maxUses: 10, batch, feature: 'training' };
   let ownPerformanceNote = 'No GA4 data available this cycle.';
   let frozenNote: string | null = null;
+  let batchWaiting = false;
   try {
     const saved = JSON.parse((await settings.get(GA4_KEY)) || 'null');
     if (saved && typeof saved.note === 'string') {
-      if (Date.now() - saved.at < 3 * 86400000) frozenNote = saved.note;
-      // Also kept past 3 days while the batch sent with this very note is still unread (for example
-      // while AI work is paused or Testing mode is on), so that batch is picked up instead of a second
-      // one sent. Another feature's pending batch does not count.
-      else if (batch) {
+      // The batch the automatic refresh sent with this very note, still unread (kept 7 days).
+      // Another feature's pending batch does not count.
+      const pending = async () => {
         const raw = await settings.get(`batch_pending:${requestHash(batchParamsFor(skillPrompt(saved.note), [...SKILL_ASK], SKILL_OPTS))}`).catch(() => null);
         let at = 0;
         try {
           at = raw?.startsWith('{') ? JSON.parse(raw).at || 0 : 0;
         } catch {}
-        if (at && Date.now() - at < 7 * 86400000) frozenNote = saved.note;
-      }
+        return Boolean(at && Date.now() - at < 7 * 86400000);
+      };
+      // A manual update while that batch waits would pay for a second run, and its new skill would
+      // leave the paid batch uncollected (the refresh is then not due for 15 days).
+      if (!batch) batchWaiting = await pending();
+      if (Date.now() - saved.at < 3 * 86400000) frozenNote = saved.note;
+      // Also kept past 3 days while that batch is still unread (for example while AI work is paused
+      // or Testing mode is on), so it is picked up instead of a second one sent.
+      else if (batch && (await pending())) frozenNote = saved.note;
     }
   } catch {}
+  if (batchWaiting) throw new SkillBatchWaitingError();
   if (frozenNote != null) ownPerformanceNote = frozenNote;
   else {
     try {

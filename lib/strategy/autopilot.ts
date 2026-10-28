@@ -158,6 +158,8 @@ async function publishingPaused() {
     const serverErrors = problems.filter((p) => (p.issues || []).some((i) => /^5\d\d status/.test(i))).length;
     if (serverErrors > 0) return `latest crawl has ${serverErrors} URL(s) with 5xx server errors`;
   }
+  // No default domain here: a local or test server must not fetch the live site.
+  if (!process.env.WORDPRESS_SITE_URL?.trim()) return 'WORDPRESS_SITE_URL is not set, so the site cannot be checked';
   try {
     const res = await fetch(`${SITE()}/robots.txt`, { signal: AbortSignal.timeout(15000) });
     if (res.status >= 500) return `site returned ${res.status}`;

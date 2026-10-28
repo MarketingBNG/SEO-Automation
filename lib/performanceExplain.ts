@@ -7,6 +7,7 @@ import prisma from './prisma';
 import * as settings from './settings';
 import { callClaude } from './anthropic';
 import { cachedPerformance } from './performanceReport';
+import { aiMode } from './aiQueue';
 
 const VIEWS = ['overall', 'seo', 'aeo', 'geo'];
 
@@ -17,7 +18,13 @@ function slice(perf, view) {
   return { ...base, [view]: pick(perf[view]) };
 }
 
-export async function explainPerformance(view: string, days = 28, { fresh = false } = {}) {
+// Every source the report reads (the names gatherPerformance gives its errors). When all of them
+// failed there is nothing to explain, so no AI call is made.
+const SOURCES = ['searchConsole', 'searchConsoleQueries', 'pages', 'pagesBefore', 'ga4Organic', 'ga4Ai', 'wordpress', 'seRanking'];
+export const noReportData = (perf) => SOURCES.every((k) => perf?.errors?.[k]);
+
+// fresh: the Rewrite button. signal: the page's request, so a closed page cancels a queued job.
+export async function explainPerformance(view: string, days = 28, { fresh = false, signal }: { fresh?: boolean; signal?: AbortSignal } = {}) {
   if (!VIEWS.includes(view)) throw new Error('Unknown view');
   const perf = await cachedPerformance(days);
   const key = `perf_explain_${view}_${days}`;
@@ -28,6 +35,16 @@ export async function explainPerformance(view: string, days = 28, { fresh = fals
       const j = JSON.parse(saved);
       if (j.basis === basis) return j;
     }
+  }
+
+  // Not saved, so the paragraph is written once the data can be read.
+  if (noReportData(perf)) {
+    return { basis, view, days, text: 'There is no data to explain for this period: none of the report sources (Search Console, GA4, WordPress, SE Ranking) could be read. Check the connections in Settings, then press Rewrite.', writtenAt: null, noData: true };
+  }
+  // Testing mode: a page view does not queue work for Claude Code (nor hold the page open waiting for
+  // it); only the Rewrite button does.
+  if (!fresh && (await aiMode()) === 'testing') {
+    return { basis, view, days, text: 'Testing mode is on, so this paragraph is not written when the page opens. Press Rewrite to queue it for Claude Code (answered when someone runs the SEO AI queue), and keep this page open until it is written.', writtenAt: null, testing: true };
   }
 
   const published = await prisma.drafts.findMany({
@@ -47,7 +64,7 @@ cannot show why something changed, say so plainly (for example "the data does no
 Respect the data notes (for example impressions not comparable across a reporting change). Name pages
 and KPIs exactly as given. No em dashes, no hype, no headings, no bullet points.`;
   const user = `Report data (JSON):\n${JSON.stringify(slice(perf, view)).slice(0, 60000)}\n\nBlogs published or updated since ${perf.ranges.previous.startDate}:\n${published.map((p) => `- ${p.title} (${p.wp_post_url}) ${p.updated_at}`).join('\n') || 'none recorded'}`;
-  const { text } = await callClaude(system, [{ role: 'user', content: user }], undefined, { maxUses: 1, effort: 'high', feature: 'reports' });
+  const { text } = await callClaude(system, [{ role: 'user', content: user }], signal, { maxUses: 1, effort: 'high', feature: 'reports' });
   const paragraph = text.replace(/—/g, ', ').replace(/\s+\n/g, '\n').trim();
   const out = { basis, view, days, text: paragraph, writtenAt: new Date().toISOString() };
   await settings.set(key, JSON.stringify(out));

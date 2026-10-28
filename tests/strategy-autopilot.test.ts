@@ -46,7 +46,7 @@ test('the rank check keeps the best engine per keyword', () => {
   assert.equal(best.find((r) => r.keyword === 'ein')!.position, 12);
 });
 
-test('an edit never turns a failed or missing fact check into a pass', { skip: !hasDb }, async () => {
+test('an edit never turns a failed or missing fact check into a pass', { skip: !hasDb, timeout: 60000 }, async () => {
   const { editedFactCheck } = await import('../lib/factCheckMark');
   const args = { stamp: '2026-11-01 10:00:00', textHash: 'h2', by: 'a@b.c', at: '2026-11-01 10:00:00' };
   // A failed check keeps its old stamp and hash, so the edited text is checked once more.
@@ -73,7 +73,7 @@ test('an edit never turns a failed or missing fact check into a pass', { skip: !
   assert.equal(editedFactCheck(okPrev, { ...args, byPerson: false }), okPrev);
 });
 
-test('a once-a-day job stopped by paused AI work runs again; other failures close the day', { skip: !hasDb }, async () => {
+test('a once-a-day job stopped by paused AI work runs again; other failures close the day', { skip: !hasDb, timeout: 60000 }, async () => {
   const { onceADay } = await import('../lib/onceADay');
   const { CreditPausedError } = await import('../lib/aiCredits');
   const settings = await import('../lib/settings');
@@ -90,7 +90,7 @@ test('a once-a-day job stopped by paused AI work runs again; other failures clos
   assert.equal(await settings.get(key), '2026-11-02', 'a real failure is not retried every 15 minutes');
 });
 
-test('a once-a-day tick skipped because a manual run is going leaves the day open', { skip: !hasDb }, async () => {
+test('a once-a-day tick skipped because a manual run is going leaves the day open', { skip: !hasDb, timeout: 60000 }, async () => {
   const { onceADay, AnotherRunGoing } = await import('../lib/onceADay');
   const { trainingTick } = await import('../lib/associateTraining');
   const settings = await import('../lib/settings');
@@ -112,7 +112,7 @@ test('a once-a-day tick skipped because a manual run is going leaves the day ope
   }
 });
 
-test('only a strategy waiting for review can be approved', { skip: !hasDb }, async () => {
+test('only a strategy waiting for review can be approved', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const { approveStrategy } = await import('../lib/strategy/service');
   const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'superseded', plan_json: '{}' } });
@@ -121,7 +121,7 @@ test('only a strategy waiting for review can be approved', { skip: !hasDb }, asy
   await prisma.seo_strategies.delete({ where: { id: s.id } });
 });
 
-test('a rewrite that keeps failing is stopped, and one cut off by a restart is picked up again', { skip: !hasDb }, async () => {
+test('a rewrite that keeps failing is stopped, and one cut off by a restart is picked up again', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runDaily } = await import('../lib/strategy/autopilot');
@@ -174,7 +174,7 @@ const written = (title: string) => ({
   facts: [],
 });
 
-test('a rewrite that fails after its new draft is saved resumes from that draft, with a new review', { skip: !hasDb }, async () => {
+test('a rewrite that fails after its new draft is saved resumes from that draft, with a new review', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runDaily } = await import('../lib/strategy/autopilot');
@@ -216,7 +216,7 @@ test('a rewrite that fails after its new draft is saved resumes from that draft,
   }
 });
 
-test('a draftless row past its slot that a restart left drafting, or that was already held, is written', { skip: !hasDb }, async () => {
+test('a draftless row past its slot that a restart left drafting, or that was already held, is written', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runDaily } = await import('../lib/strategy/autopilot');
@@ -247,7 +247,7 @@ test('a draftless row past its slot that a restart left drafting, or that was al
   }
 });
 
-test('a held draftless row keeps its hold reason when the AI runs out of credit mid-write', { skip: !hasDb }, async () => {
+test('a held draftless row keeps its hold reason when the AI runs out of credit mid-write', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runDaily } = await import('../lib/strategy/autopilot');
@@ -273,7 +273,7 @@ test('a held draftless row keeps its hold reason when the AI runs out of credit 
   }
 });
 
-test('a draft finished after its strategy was replaced gets no fact check and no review', { skip: !hasDb }, async () => {
+test('a draft finished after its strategy was replaced gets no fact check and no review', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runDaily } = await import('../lib/strategy/autopilot');
@@ -308,7 +308,7 @@ test('a draft finished after its strategy was replaced gets no fact check and no
   }
 });
 
-test('a calendar draft that really failed drops its saved steps; one waiting for AI keeps them', { skip: !hasDb }, async () => {
+test('a calendar draft that really failed drops its saved steps; one waiting for AI keeps them', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runDaily } = await import('../lib/strategy/autopilot');
@@ -340,7 +340,7 @@ test('a calendar draft that really failed drops its saved steps; one waiting for
   }
 });
 
-test('a lead Smartlead keeps refusing is given up on and does not block the other tasks', { skip: !hasDb }, async () => {
+test('a lead Smartlead keeps refusing is given up on and does not block the other tasks', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const { runOutreach } = await import('../lib/strategy/outreach');
   const saved = { fetch: globalThis.fetch, key: process.env.SMARTLEAD_API_KEY, campaign: process.env.SMARTLEAD_CAMPAIGN_ID };
@@ -387,7 +387,7 @@ test('a lead Smartlead keeps refusing is given up on and does not block the othe
   }
 });
 
-test('an opening line that keeps failing is given up on after two runs', { skip: !hasDb }, async () => {
+test('an opening line that keeps failing is given up on after two runs', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const { runOutreach } = await import('../lib/strategy/outreach');
   const saved = { fetch: globalThis.fetch, key: process.env.SMARTLEAD_API_KEY, campaign: process.env.SMARTLEAD_CAMPAIGN_ID };
@@ -427,7 +427,7 @@ test('an opening line that keeps failing is given up on after two runs', { skip:
   }
 });
 
-test('a broken Smartlead campaign stops outreach for the whole day, and saved lines are pushed once a day', { skip: !hasDb }, async () => {
+test('a broken Smartlead campaign stops outreach for the whole day, and saved lines are pushed once a day', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runOutreach } = await import('../lib/strategy/outreach');
@@ -493,7 +493,7 @@ test('a broken Smartlead campaign stops outreach for the whole day, and saved li
   }
 });
 
-test('two bad leads first in line do not stop outreach for good, and a lone refusal on a broken campaign gives nothing up', { skip: !hasDb }, async () => {
+test('two bad leads first in line do not stop outreach for good, and a lone refusal on a broken campaign gives nothing up', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runOutreach } = await import('../lib/strategy/outreach');
@@ -550,7 +550,7 @@ test('two bad leads first in line do not stop outreach for good, and a lone refu
   }
 });
 
-test('leads refused before do not use up a small daily limit, so the next lead is still tried', { skip: !hasDb }, async () => {
+test('leads refused before do not use up a small daily limit, so the next lead is still tried', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runOutreach } = await import('../lib/strategy/outreach');
@@ -605,7 +605,7 @@ test('leads refused before do not use up a small daily limit, so the next lead i
   }
 });
 
-test('onceADay clears only its own run marker', { skip: !hasDb }, async () => {
+test('onceADay clears only its own run marker', { skip: !hasDb, timeout: 60000 }, async () => {
   const settings = await import('../lib/settings');
   const { onceADay } = await import('../lib/onceADay');
   const key = `test_once_marker_${Date.now()}`;
@@ -619,7 +619,7 @@ test('onceADay clears only its own run marker', { skip: !hasDb }, async () => {
   await prisma.settings.deleteMany({ where: { key: { startsWith: key } } });
 });
 
-test('a fresh run marker from the day before blocks the next day; a stale one does not', { skip: !hasDb }, async () => {
+test('a fresh run marker from the day before blocks the next day; a stale one does not', { skip: !hasDb, timeout: 60000 }, async () => {
   const settings = await import('../lib/settings');
   const { onceADay, bootId } = await import('../lib/onceADay');
   const key = `test_once_nextday_${Date.now()}`;
@@ -632,7 +632,7 @@ test('a fresh run marker from the day before blocks the next day; a stale one do
   assert.equal(ran, 1, 'a marker of a run stuck past the limit does not block');
 });
 
-test('a run marker left by a restart (another process) is stale at once, so the day runs again', { skip: !hasDb }, async () => {
+test('a run marker left by a restart (another process) is stale at once, so the day runs again', { skip: !hasDb, timeout: 60000 }, async () => {
   const settings = await import('../lib/settings');
   const { onceADay } = await import('../lib/onceADay');
   const key = `test_once_restart_${Date.now()}`;
@@ -648,7 +648,7 @@ test('a run marker left by a restart (another process) is stale at once, so the 
   await prisma.settings.deleteMany({ where: { key: { startsWith: key } } });
 });
 
-test('a remembered Surfer editor that no longer exists is replaced, not retried for 7 days', { skip: !hasDb }, async () => {
+test('a remembered Surfer editor that no longer exists is replaced, not retried for 7 days', { skip: !hasDb, timeout: 60000 }, async () => {
   const settings = await import('../lib/settings');
   const { default: prisma } = await import('../lib/prisma');
   const { getTermsForKeyword } = await import('../lib/surfer');
@@ -682,7 +682,7 @@ test('a remembered Surfer editor that no longer exists is replaced, not retried 
   }
 });
 
-test('the steps after publishing are summed up for the Activity Log', { skip: !hasDb }, async () => {
+test('the steps after publishing are summed up for the Activity Log', { skip: !hasDb, timeout: 60000 }, async () => {
   const { afterPublishSummary } = await import('../lib/strategy/autopilot');
   const s = afterPublishSummary({ indexNow: { ok: true }, seRankingTracking: { ok: false, error: 'quota' }, internalLinks: { ok: true, result: ['https://x.test/a'] } });
   assert.match(s, /seRankingTracking failed \(quota\)/);
@@ -691,7 +691,7 @@ test('the steps after publishing are summed up for the Activity Log', { skip: !h
   assert.match(afterPublishSummary(null), /could not run/);
 });
 
-test('a topic whose finished blog was deleted before it was linked can be written again', { skip: !hasDb }, async () => {
+test('a topic whose finished blog was deleted before it was linked can be written again', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const { linkTopicBlogs } = await import('../lib/topics');
   const t = await prisma.topics.create({ data: { day: '2026-11-01', title: `Test topic ${Date.now()}`, keywords: '["test kw"]', sources: '[]', status: 'blog' } });
@@ -706,7 +706,7 @@ test('a topic whose finished blog was deleted before it was linked can be writte
   }
 });
 
-test('outreach waits for AI: tasks that need Claude wait (no site, Smartlead or log work), the rest still runs', { skip: !hasDb }, async () => {
+test('outreach waits for AI: tasks that need Claude wait (no site, Smartlead or log work), the rest still runs', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runOutreach } = await import('../lib/strategy/outreach');
@@ -780,7 +780,7 @@ test('outreach waits for AI: tasks that need Claude wait (no site, Smartlead or 
   }
 });
 
-test('a new version of a month keeps the started blogs of the same keyword instead of writing them twice', { skip: !hasDb }, async () => {
+test('a new version of a month keeps the started blogs of the same keyword instead of writing them twice', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const { approveStrategy } = await import('../lib/strategy/service');
   const { keywordKey } = await import('../lib/strategy/core');
@@ -842,7 +842,7 @@ test('a new version of a month keeps the started blogs of the same keyword inste
   }
 });
 
-test('blogs of a strategy replaced earlier are stopped visibly by the scheduler pass', { skip: !hasDb }, async () => {
+test('blogs of a strategy replaced earlier are stopped visibly by the scheduler pass', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const { stopSupersededRows } = await import('../lib/strategy/replaced');
   const { keywordKey } = await import('../lib/strategy/core');
@@ -873,7 +873,7 @@ test('blogs of a strategy replaced earlier are stopped visibly by the scheduler 
   }
 });
 
-test('a blog waiting for AI keeps its frozen inputs past 3 days; a fresh run rebuilds them', { skip: !hasDb }, async () => {
+test('a blog waiting for AI keeps its frozen inputs past 3 days; a fresh run rebuilds them', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const { withReplay, frozenInput, markAiWait, clearReplay } = await import('../lib/aiReplay');
   const scope = `blog-test-${Date.now()}`;
@@ -902,7 +902,7 @@ test('the best engine row of a keyword counts, also when another engine has no p
   assert.deepEqual(rows.map((r: any) => r.position), [4, 12, null]);
 });
 
-test('deleting a live topic blog that was never linked links it, so the topic is not written again', { skip: !hasDb }, async () => {
+test('deleting a live topic blog that was never linked links it, so the topic is not written again', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const { linkTopicBlogs, linkLiveTopic } = await import('../lib/topics');
   const t = await prisma.topics.create({ data: { day: '2026-11-02', title: `Live topic ${Date.now()}`, keywords: '["live kw"]', sources: '[]', status: 'blog' } });
@@ -919,7 +919,7 @@ test('deleting a live topic blog that was never linked links it, so the topic is
   }
 });
 
-test('a calendar blog whose slot passed with no draft is written, not held for good', { skip: !hasDb }, async () => {
+test('a calendar blog whose slot passed with no draft is written, not held for good', { skip: !hasDb, timeout: 60000 }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runDaily } = await import('../lib/strategy/autopilot');

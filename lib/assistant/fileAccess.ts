@@ -21,12 +21,19 @@ export async function canReadAssistantFile(me: any, key: string): Promise<boolea
 }
 
 // The image ids (image_library) the person attached themselves in the assistant (an admin: all).
-export async function ownImageIds(me: any, ids: number[]): Promise<number[]> {
+// legacy: also an image attached before attached files were recorded (no assistant_files row at all),
+// the same rule canReadAssistantFile serves it by. The chat route leaves it off: a newly sent id
+// always has its row.
+export async function ownImageIds(me: any, ids: number[], { legacy = false }: { legacy?: boolean } = {}): Promise<number[]> {
   if (!ids.length || me?.role === 'admin') return ids;
   if (!me) return [];
   const imgs = await prisma.image_library.findMany({ where: { id: { in: ids } }, select: { id: true, path: true } });
   const owned = await prisma.assistant_files.findMany({ where: { kind: 'image', path: { in: imgs.map((i) => i.path) }, ...ownedBy(me, 'uploaded_by') }, select: { path: true } });
   const paths = new Set(owned.map((o) => o.path));
+  if (legacy) {
+    const recorded = new Set((await prisma.assistant_files.findMany({ where: { path: { in: imgs.map((i) => i.path) } }, select: { path: true } })).map((r) => r.path));
+    for (const i of imgs) if (!recorded.has(i.path)) paths.add(i.path);
+  }
   const mine = new Set(imgs.filter((i) => paths.has(i.path)).map((i) => i.id));
   return ids.filter((id) => mine.has(id));
 }

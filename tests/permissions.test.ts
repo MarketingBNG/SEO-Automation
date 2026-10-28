@@ -108,6 +108,23 @@ test('only settings.change connects Zoho or Google Business Profile', () => {
   }
 });
 
+test('the Settings connection tests need settings.change for any method', () => {
+  for (const name of ['serphouse', 'surfer', 'bing', 'wordpress', 'zoho', 'gbp', 'seranking', 'gsc']) {
+    for (const method of ['GET', 'POST']) {
+      const path = `/api/${name}/test`;
+      assert.equal(actionFor(method, path), 'settings.change', `${method} ${path}`);
+      for (const r of ['manager', 'analyst', 'user'] as Role[]) assert.equal(allowed(r, method, path), false, `${r} ${method} ${path}`);
+    }
+  }
+  // The Meeting insights page checks Fireflies: a role that sees reports, not a plain user.
+  assert.equal(actionFor('GET', '/api/fireflies/test'), 'reports.view');
+  assert.equal(allowed('user', 'GET', '/api/fireflies/test'), false);
+  assert.equal(allowed('user', 'POST', '/api/fireflies/test'), false);
+  // Reports still read GSC and SE Ranking data.
+  assert.equal(actionFor('GET', '/api/gsc/queries'), 'reports.view');
+  assert.equal(actionFor('GET', '/api/seranking/keywords'), 'reports.view');
+});
+
 test('a private assistant document cannot be read through a key that storage would rewrite', { skip: !!process.env.BLOB_READ_WRITE_TOKEN }, async () => {
   const { GET } = await import('../app/api/uploads/[...file]/route');
   const { saveFile, deleteFile } = await import('../lib/storage');
@@ -162,6 +179,10 @@ test('an image attached in a private assistant chat is read and sent to Claude o
     assert.deepEqual(await ownImageIds(a, [img.id]), [img.id]);
     assert.deepEqual(await ownImageIds(b, [img.id, old.id]), [], "someone else's image (or one with no owner) is not sent");
     assert.deepEqual(await ownImageIds(admin, [img.id]), [img.id]);
+    // The upload tool also takes an image attached before files were recorded (served to everyone as
+    // before), never one someone else attached.
+    assert.deepEqual(await ownImageIds(b, [img.id, old.id], { legacy: true }), [old.id]);
+    assert.deepEqual(await ownImageIds(null, [old.id], { legacy: true }), []);
     // The assistant's wp_upload_image takes only an image the asker attached: another member cannot
     // publish it to the Media Library (nor see its file name in the preview). No WordPress call is made.
     const { getTool } = await import('../lib/assistant/tools');
@@ -173,6 +194,7 @@ test('an image attached in a private assistant chat is read and sent to Claude o
     assert.ok(seen.problem && !seen.file, "someone else's image reads as not found");
     await assert.rejects(upload.run(input, { me: b }), /not found/);
     await assert.rejects(upload.run(input, {}), /not found/);
+    assert.equal((await upload.preview({ image_id: old.id, alt_text: 'x' }, { me: b })).file, 'old.png', 'a member can still upload an older attached image');
   } finally {
     await prisma.assistant_files.delete({ where: { id: file.id } });
     await prisma.image_library.deleteMany({ where: { id: { in: [img.id, old.id] } } });

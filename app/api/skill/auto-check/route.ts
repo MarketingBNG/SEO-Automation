@@ -8,14 +8,15 @@ import * as activity from '@/lib/activity';
 import { isCronRequest, methodNotAllowed } from '../../_lib/http';
 import { runAutomatic } from '@/lib/aiQueue';
 import { CreditPausedError } from '@/lib/aiCredits';
+import { claimSkillRun, releaseSkillRun } from '@/lib/skillRun';
 
 export const runtime = 'nodejs';
 
 const REFRESH_DAYS = 15;
 // Runs through the Batch API (half price, can take up to hours), so the work continues in the
-// background after the cron request gets its answer. This flag stops a second call starting a
-// duplicate while one is still waiting (self-hosted Node keeps the process alive).
-let running = false;
+// background after the cron request gets its answer. The shared flag (lib/skillRun.ts) stops a
+// second call, or a manual "Update skill" press, starting a duplicate while one is still waiting
+// (self-hosted Node keeps the process alive).
 const MAX_ATTEMPTS = 3;
 
 async function run() {
@@ -30,9 +31,9 @@ async function run() {
     }
   }
 
-  if (running) return NextResponse.json({ ran: false, reason: 'A skill refresh is already running.' }, { status: 200 });
-  running = true;
-  refresh().finally(() => { running = false; });
+  const busy = claimSkillRun('auto');
+  if (busy) return NextResponse.json({ ran: false, reason: busy === 'manual' ? 'A manual skill update is running.' : 'A skill refresh is already running.' }, { status: 200 });
+  refresh().finally(() => releaseSkillRun('auto'));
   return NextResponse.json({ ran: true, started: true, mode: 'batch' }, { status: 202 });
 }
 

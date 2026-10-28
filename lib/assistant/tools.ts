@@ -1197,15 +1197,16 @@ defineTool({
   },
   summarize: (i) => `Upload attached image #${i.image_id} to Media Library (alt: "${snippet(i.alt_text, 60)}")`,
   // Only an image the asker attached themselves (an admin: any), so a member cannot publish an image
-  // someone else attached in a private chat; another person's image reads as not found.
+  // someone else attached in a private chat; another person's image reads as not found. An image
+  // attached before attached files were recorded has no owner on file and is allowed, as it is read.
   preview: async (i, ctx) => {
-    const img = (await ownImageIds(ctx?.me, [i.image_id])).length
+    const img = (await ownImageIds(ctx?.me, [i.image_id], { legacy: true })).length
       ? await prisma.image_library.findUnique({ where: { id: i.image_id }, select: { id: true, filename: true, width: true, height: true } })
       : null;
     return img ? { file: img.filename, dimensions: img.width ? `${img.width}x${img.height}` : 'unknown', alt_text: i.alt_text } : { problem: `Attached image ${i.image_id} not found.` };
   },
   run: async (i, ctx) => {
-    const img = (await ownImageIds(ctx?.me, [i.image_id])).length ? await prisma.image_library.findUnique({ where: { id: i.image_id } }) : null;
+    const img = (await ownImageIds(ctx?.me, [i.image_id], { legacy: true })).length ? await prisma.image_library.findUnique({ where: { id: i.image_id } }) : null;
     if (!img) throw new Error(`Attached image ${i.image_id} not found`);
     // PORT NOTE: img.path is now a storage key (lib/storage); lib/wordpress reads it via readFile.
     const media = await uploadMedia(img.path, { altText: i.alt_text, title: i.title, caption: i.caption });

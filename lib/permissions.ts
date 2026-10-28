@@ -15,7 +15,9 @@ export const ROLES = ['admin', 'manager', 'analyst', 'user', 'tester'] as const;
 export const TESTER_HOURS = 48;
 export type Role = (typeof ROLES)[number];
 
-export const OWNER_EMAIL = (process.env.ADMIN_EMAIL || 'abhuday@usaindiacfo.com').toLowerCase();
+// The owner always stays admin. OWNER_EMAIL or ADMIN_EMAIL (either name) sets it; a test or dev server
+// should set one, or the production owner is the owner there too.
+export const OWNER_EMAIL = (process.env.OWNER_EMAIL || process.env.ADMIN_EMAIL || 'abhuday@usaindiacfo.com').trim().toLowerCase();
 export const isRole = (r: unknown): r is Role => ROLES.includes(r as Role);
 
 export type Action =
@@ -130,6 +132,11 @@ export function actionFor(method: string, path: string): Action | null {
 
   // Reading
   if (!write) {
+    // The connection tests from Settings make live third-party calls and show account details
+    // (before the reports rule, which would let /api/gsc/test and /api/seranking/test through).
+    if (/^\/api\/(serphouse|surfer|bing|wordpress|zoho|gbp|seranking|gsc)\/test(\/|$)/.test(p)) return 'settings.change';
+    // The Meeting insights page checks its Fireflies connection (shows the connected name).
+    if (/^\/api\/fireflies\/test(\/|$)/.test(p)) return 'reports.view';
     if (/^\/api\/performance\/download|^\/api\/audit\/[^/]+\/download/.test(p)) return 'reports.download';
     if (/^\/api\/(performance|ga4|gsc|seranking|clarity|blog-analytics|zoho\/leads|zoho\/pipeline|zoho\/business)/.test(p)) return 'reports.view';
     if (/^\/api\/(ai-credits|agent)/.test(p)) return 'credits.view';

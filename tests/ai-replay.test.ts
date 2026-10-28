@@ -77,13 +77,13 @@ test('pruneReplay keeps unwritten calendar blogs and their fact checks, not a bl
   await prisma.seo_strategies.delete({ where: { id: s.id } });
 });
 
-test('a batch turn continued after pause_turn keeps its first part for a restart, so it is not paid again', { skip: !db }, async () => {
+test('a batch turn continued after pause_turn keeps its first part for a restart, so it is not paid again', { skip: !db, timeout: 60000 }, async () => {
   const prisma = (await import('../lib/prisma')).default;
   const { callClaude } = await import('../lib/anthropic');
-  const { aiMode, setAiMode, runAutomatic, TestingModeError } = await import('../lib/aiQueue');
+  const { runAutomatic, TestingModeError } = await import('../lib/aiQueue');
   const settings = await import('../lib/settings');
   const { CreditPausedError } = await import('../lib/aiCredits');
-  const saved = { fetch: globalThis.fetch, key: process.env.ANTHROPIC_API_KEY, secondary: process.env.ANTHROPIC_API_KEY_SECONDARY, mode: await aiMode(), paused: await settings.get('ai_paused') };
+  const saved = { fetch: globalThis.fetch, key: process.env.ANTHROPIC_API_KEY, secondary: process.env.ANTHROPIC_API_KEY_SECONDARY, paused: await settings.get('ai_paused') };
   process.env.ANTHROPIC_API_KEY = 'test-key';
   delete process.env.ANTHROPIC_API_KEY_SECONDARY;
   const batches = new Map<string, any>();
@@ -123,12 +123,12 @@ test('a batch turn continued after pause_turn keeps its first part for a restart
     assert.equal(await usageRows(), 1, 'a re-read part is not counted again');
     failPart1 = false;
     // Testing mode: the scheduler's run collects the part already paid for, and sends nothing new.
-    await setAiMode('testing');
+    (globalThis as any).__AI_MODE_PIN = 'testing';
     await assert.rejects(runAutomatic(() => callClaude('system', ask, undefined, opts)), (e: any) => e instanceof TestingModeError);
     await assert.rejects(runAutomatic(() => callClaude('system', ask, undefined, opts)), (e: any) => e instanceof TestingModeError);
     assert.equal(creates, 1, 'no new batch in Testing mode');
     assert.equal(await usageRows(), 1, 'collecting in Testing mode does not count the part again');
-    await setAiMode('live');
+    (globalThis as any).__AI_MODE_PIN = 'live';
     // AI work paused: the first part is collected (free) but the continuation is not sent.
     await settings.set('ai_paused', '1');
     await assert.rejects(callClaude('system', ask, undefined, opts), (e: any) => e instanceof CreditPausedError);
@@ -142,7 +142,7 @@ test('a batch turn continued after pause_turn keeps its first part for a restart
     assert.equal(left, 0, 'the saved ids are dropped once the whole call is done');
   } finally {
     globalThis.fetch = saved.fetch;
-    await setAiMode(saved.mode);
+    (globalThis as any).__AI_MODE_PIN = 'live';
     await settings.set('ai_paused', saved.paused || '0');
     process.env.ANTHROPIC_API_KEY = saved.key || '';
     if (saved.secondary) process.env.ANTHROPIC_API_KEY_SECONDARY = saved.secondary;
@@ -151,7 +151,7 @@ test('a batch turn continued after pause_turn keeps its first part for a restart
   }
 });
 
-test('a kept batch that is gone is not sent again while AI work is paused', { skip: !db }, async () => {
+test('a kept batch that is gone is not sent again while AI work is paused', { skip: !db, timeout: 60000 }, async () => {
   const prisma = (await import('../lib/prisma')).default;
   const { callClaude } = await import('../lib/anthropic');
   const settings = await import('../lib/settings');
@@ -204,7 +204,7 @@ test('a kept batch that is gone is not sent again while AI work is paused', { sk
   }
 });
 
-test('a kept batch is read with the key that sent it, so it is not paid again after a switch to the secondary key', { skip: !db }, async () => {
+test('a kept batch is read with the key that sent it, so it is not paid again after a switch to the secondary key', { skip: !db, timeout: 60000 }, async () => {
   const prisma = (await import('../lib/prisma')).default;
   const { callClaude } = await import('../lib/anthropic');
   const { switchedToSecondary, retryMainKey, keyInUse } = await import('../lib/anthropicClient');
@@ -277,5 +277,18 @@ test('a kept batch is read with the key that sent it, so it is not paid again af
     if (saved.slack) process.env.SLACK_WEBHOOK_URL = saved.slack;
     await prisma.settings.deleteMany({ where: { key: { startsWith: 'batch_pending:' }, value: { contains: 'msgbatch_test_keys_' } } });
     await prisma.ai_usage.deleteMany({ where: { feature } });
+  }
+});
+
+test('tests run in Live mode even when the database is left in Testing mode', { skip: !db, timeout: 60000 }, async () => {
+  const settings = await import('../lib/settings');
+  const { aiMode, setAiMode } = await import('../lib/aiQueue');
+  const before = await settings.get('ai_mode');
+  try {
+    await setAiMode('testing');
+    // Pinned by tests/setup.ts: a test's AI request never waits in the Claude Code queue.
+    assert.equal(await aiMode(), 'live');
+  } finally {
+    await settings.set('ai_mode', before === 'testing' ? 'testing' : 'live');
   }
 });

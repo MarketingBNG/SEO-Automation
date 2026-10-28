@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const days = Math.min(90, Math.max(7, parseInt(sp.get('days') as any, 10) || 28));
   try {
-    return NextResponse.json(await explainPerformance(String(sp.get('view') || 'overall'), days, { fresh: sp.get('fresh') === '1' }));
+    return NextResponse.json(await explainPerformance(String(sp.get('view') || 'overall'), days, { fresh: sp.get('fresh') === '1', signal: req.signal }));
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

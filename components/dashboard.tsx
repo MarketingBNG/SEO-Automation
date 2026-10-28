@@ -22,7 +22,8 @@ import { PageJump } from '@/components/shared/page-jump';
 
 import dynamic from 'next/dynamic';
 import { useRole } from '@/hooks/use-role';
-import type { Role } from '@/lib/permissions';
+import { defaultAccess } from '@/lib/permissions';
+import { TabBoundary } from '@/components/shared/tab-boundary';
 
 // Each page's code loads the first time the page is opened, not all at start-up, so the dashboard
 // starts fast on low-end devices. The pages work exactly as before once loaded.
@@ -78,16 +79,6 @@ const TABS = [
 
   { key: 'settings', label: 'Settings', icon: Settings, group: 'Admin', hint: 'Connections, blog rules, SE Ranking, AI credits' },
 ] as const;
-
-// Pages each role sees. Users only see the strategy and the assistant; the team page is for admins
-// and managers. (The server enforces the same rules on every action.)
-const HIDDEN: Record<Role, string[]> = {
-  admin: [],
-  manager: [],
-  analyst: ['team'],
-  tester: ['team'],
-  user: ['sitecontent', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
-};
 
 type TabKey = (typeof TABS)[number]['key'];
 const GROUPS = ['Start', 'Plan', 'Write', 'Website', 'Reports', 'Team', 'Admin'] as const;
@@ -149,7 +140,8 @@ export default function Dashboard() {
 
   const who = useRole();
   // Read once when the page loads (the clock is not read during render).
-  const visible = (key: string) => (who.loaded ? who.sees(key) : !HIDDEN[who.role].includes(key));
+  // Before the session loads, the role's default pages (lib/permissions.ts, the one list).
+  const visible = (key: string) => (who.loaded ? who.sees(key) : defaultAccess(who.role).pages.includes(key));
   // A page the role cannot see (for example from an old link) falls back to Home.
   const shown: TabKey = who.loaded && !visible(tab) ? 'home' : tab;
   const current = TABS.find((t) => t.key === shown)!;
@@ -268,13 +260,14 @@ export default function Dashboard() {
           {/* Kept mounted (just hidden) so a running conversation keeps streaming while you look at other tabs. */}
           {shown !== 'assistant' && <PageJump key={`jump-${shown}-${reloadKey}`} rootId={`tab-${shown}`} />}
           <div className={shown === 'assistant' ? 'block' : 'hidden'}>
-            <AssistantTab seed={assistantSeed} />
+            <TabBoundary name="assistant"><AssistantTab seed={assistantSeed} /></TabBoundary>
           </div>
           {/* Everything except the Assistant reloads when Refresh is pressed. Visited pages stay
               mounted but hidden, so switching back shows them at once. */}
           <div key={`tabs-${reloadKey}`} className="contents">
           {[...visited].filter((k) => k !== 'assistant' && visible(k)).map((k) => (
             <div key={k} id={`tab-${k}`} className={shown === k ? 'block' : 'hidden'}>
+              <TabBoundary name={k}>
               {k === 'home' && <HomeTab />}
               {k === 'topics' && <TopicsTab />}
               {k === 'calendar' && <MonthRunning standalone />}
@@ -292,6 +285,7 @@ export default function Dashboard() {
               {k === 'settings' && <SettingsTab />}
               {k === 'team' && <TeamTab />}
               {k === 'guide' && <GuideTab tabs={TABS} groups={GROUP_LABEL} onOpen={setTab} />}
+              </TabBoundary>
             </div>
           ))}
           </div>
