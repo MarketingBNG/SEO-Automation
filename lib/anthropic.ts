@@ -540,7 +540,7 @@ async function recordBatchUsageOnce(pendingKey: string, { model, usage, feature 
 // whole call ends), so a later part cut off by a restart does not make this part paid again.
 // `collectOnly` (Testing mode): only a batch already sent is read; none is sent.
 // `beforeSend`: runs right before a new (paid) batch is sent, for the caller's credit check.
-async function runBatchTurn(client, params, signal, { keep = false, collectOnly = false, beforeSend }: { keep?: boolean; collectOnly?: boolean; beforeSend?: () => Promise<void> } = {}) {
+export async function runBatchTurn(client, params, signal, { keep = false, collectOnly = false, beforeSend }: { keep?: boolean; collectOnly?: boolean; beforeSend?: () => Promise<void> } = {}) {
   const pendingKey = `batch_pending:${requestHash(params)}`;
   const forget = () => prisma.settings.deleteMany({ where: { key: pendingKey } }).catch(() => {});
   // Saved as {"id","at","key"} (at: when it was sent, so pruneReplay can drop a key whose request never
@@ -553,6 +553,7 @@ async function runBatchTurn(client, params, signal, { keep = false, collectOnly 
   // 5xx) is thrown, so the saved id is kept and the next run picks up the batch already paid for
   // instead of paying for a second one.
   let created: any = null;
+  let reader = client;
   if (savedId) {
     const both = Boolean(process.env.ANTHROPIC_API_KEY) && secondaryKeyConfigured();
     const first = (both && saved?.key) || clientKeyKind(client);
@@ -564,13 +565,16 @@ async function runBatchTurn(client, params, signal, { keep = false, collectOnly 
         return null;
       });
       if (created) {
-        client = c; // polled and read with the key that can reach it
+        reader = c;
         break;
       }
     }
   }
   // Only a batch from the last week that was not cancelled (its results are kept 29 days).
   if (created && (created.cancel_initiated_at || Date.now() - Date.parse(created.created_at) > 7 * 86400000)) created = null;
+  // A kept batch is polled and read with the key that can reach it; a new one is sent with the
+  // caller's client (the key in use now), not the key of a dropped old batch.
+  if (created) client = reader;
   if (!created && collectOnly) throw new TestingModeError();
   if (!created) {
     await beforeSend?.();
