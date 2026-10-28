@@ -177,7 +177,7 @@ VOICE (USAIndiaCFO blog house style): ${voiceGuidelines}
   }${memory ? `\n\n${memory}` : ''}${skillReference}${clientInsightReference}${strategyReference}
 
 CHECKED AUTOMATICALLY (a draft that fails any of these is sent back to you):
-- Title 50-60 characters (never over 65) with the target keyword early. Meta description 120-156
+- Title 50-60 characters (never over 60) with the target keyword early. Meta description 120-156
   characters that restates the answer plus one concrete detail.
 - No <h1> in the body (WordPress uses the title as the H1).
 - Internal links to genuinely related USAIndiaCFO posts or service pages from the brief: never zero,

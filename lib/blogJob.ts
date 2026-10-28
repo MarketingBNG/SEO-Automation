@@ -12,6 +12,7 @@ import { blogRuns } from './blogRuns';
 import { authorNames, pickAuthor } from './authors';
 import { startedAt } from './jobTimer';
 import { withReplay, clearReplay } from './aiReplay';
+import { CreditPausedError, isCreditError } from './aiCredits';
 
 // The run's finished AI steps are saved (lib/aiReplay.ts): if it stops for credits or a restart, the
 // next run of the same keyword reuses them. Once the draft is saved they are deleted.
@@ -140,7 +141,8 @@ async function runBlogJobOnce(keyword: any, controller: AbortController, send: (
         details: `"${keyword.keyword}": stopped by user`,
       });
       send({ status: 'stopped', stage: 'Stopped by user' });
-    } else if (err?.name === 'CreditPausedError' || /out of credit|credit balance is too low/i.test(err?.message || '')) {
+    } else if (err instanceof CreditPausedError || isCreditError(err)) {
+      // Also Testing mode (TestingModeError) for a run the scheduler restarted.
       // Not the keyword's fault: keep it in the queue so it runs again after a top-up.
       await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'pending', error: err.message, progress_stage: null, progress_percent: null } }).catch((e) => console.error(e));
       send({ status: 'error', stage: 'Paused', error: `${err.message} The keyword stays in the queue.` });

@@ -3,36 +3,44 @@ import prisma from '@/lib/prisma';
 import { sqlNowOffset } from '@/lib/time';
 import { blogRuns } from '@/lib/blogRuns';
 import { aiMode } from '@/lib/aiQueue';
+import { startedAt } from '@/lib/jobTimer';
+import { strategyRunning } from '@/lib/strategy/jobs';
+import * as activity from '@/lib/activity';
+import { isCronRequest } from '../../_lib/http';
 
 export const runtime = 'nodejs';
 
 // Replaces the old process-startup reset in lib/db.js: a keyword can be left stuck in 'generating'
 // (and an assistant conversation in 'running') if the function that was handling it was killed.
 // Serverless has no "fresh process start", so this cron sweeps rows that have been stuck for 15+
-// minutes instead. Auth (CRON_SECRET) is enforced in proxy.ts.
-export async function GET() {
+// minutes instead. Only the scheduled task (CRON_SECRET) may run it.
+export async function GET(req: Request) {
+  if (!isCronRequest(req)) return NextResponse.json({ error: 'Cron only' }, { status: 403 });
   const cutoff = sqlNowOffset('-15 minutes');
 
   // keywords only have created_at: treat as stuck when created 15+ min ago and no draft for it was
   // created in the last 15 minutes (a generation that just finished would have one).
   // In Testing mode a run can wait hours for Claude Code, so nothing is called stuck then; a blog
-  // still running in this server is never stuck.
+  // still running in this server (a Keywords-tab run or a calendar blog with a live timer) is never
+  // stuck. Calendar blogs ('Strategy #') are left to the schedule, which writes them again itself.
   const testing = (await aiMode()) === 'testing';
-  const stuck = testing ? [] : await prisma.keywords.findMany({
+  const stuck = testing ? [] : (await prisma.keywords.findMany({
     where: {
       status: 'generating',
       id: { notIn: [...blogRuns.keys()] },
       created_at: { lt: cutoff },
       drafts: { none: { created_at: { gte: cutoff } } },
+      OR: [{ batch_name: null }, { NOT: { batch_name: { startsWith: 'Strategy #' } } }],
     },
-    select: { id: true },
-  });
+    select: { id: true, keyword: true },
+  })).filter((k) => !startedAt(`blog-${k.id}`));
   const kw = stuck.length
     ? await prisma.keywords.updateMany({
         where: { id: { in: stuck.map((k) => k.id) }, status: 'generating' },
         data: { status: 'pending', progress_stage: null, progress_percent: null },
       })
     : { count: 0 };
+  if (kw.count) await activity.log('keywords.swept', { details: `${kw.count} blog run(s) left stuck as generating were put back in the queue: ${stuck.map((k) => k.keyword).join(', ').slice(0, 500)}` });
 
   const awaiting = await prisma.assistant_conversations.updateMany({
     where: { status: 'running', updated_at: { lt: cutoff }, pending: { not: null } },
@@ -43,12 +51,19 @@ export async function GET() {
     data: { status: 'idle' },
   });
 
-  // A strategy still 'generating' after 3 hours was cut off by a restart: mark it failed so a new
-  // one can be started.
-  const strategies = testing ? { count: 0 } : await prisma.seo_strategies.updateMany({
-    where: { status: 'generating', created_at: { lt: sqlNowOffset('-180 minutes') } },
-    data: { status: 'failed', error: 'Generation was interrupted (server restart or crash). Start it again.', progress_stage: 'Failed' },
-  });
+  // A strategy still 'generating' after 3 hours with no run in this server was cut off by a restart:
+  // mark it failed so a new one can be started. A run still alive here (for example one resumed after
+  // a credit pause, which keeps its old created_at) is left alone.
+  const lost = testing
+    ? []
+    : (await prisma.seo_strategies.findMany({ where: { status: 'generating', created_at: { lt: sqlNowOffset('-180 minutes') } }, select: { id: true, period: true } })).filter((r) => !strategyRunning(r.id));
+  const strategies = lost.length
+    ? await prisma.seo_strategies.updateMany({
+        where: { id: { in: lost.map((r) => r.id) }, status: 'generating' },
+        data: { status: 'failed', error: 'Generation was interrupted (server restart or crash). Start it again.', progress_stage: 'Failed' },
+      })
+    : { count: 0 };
+  for (const r of lost) await activity.log('strategy.generation_failed', { entityType: 'seo_strategy', entityId: r.id, details: `${r.period}: generation was interrupted (server restart or crash), marked failed by the sweep` });
 
   // A Stop that the server could not finish (restart) is completed here.
   await prisma.seo_strategies.updateMany({ where: { status: 'stopping', created_at: { lt: cutoff } }, data: { status: 'stopped', progress_stage: 'Stopped' } });

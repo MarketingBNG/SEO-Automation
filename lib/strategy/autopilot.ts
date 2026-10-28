@@ -7,7 +7,9 @@ import prisma from '../prisma';
 import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { researchAndWriteBlog, verifyAndCorrect } from '../anthropic';
-import { CreditPausedError } from '../aiCredits';
+import { CreditPausedError, isCreditError, assertCredits } from '../aiCredits';
+import { aiMode, isAutomatic, TestingModeError } from '../aiQueue';
+import { withReplay, clearReplay } from '../aiReplay';
 import { connectorOn, authorSlug } from '../siteConnector';
 import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia, freeSlug } from '../wordpress';
 import { listSites, getSiteRankings, addTrackedKeyword } from '../seranking';
@@ -26,7 +28,7 @@ import { makeCover, coverAlt } from '../cover';
 import { publishDraftImages } from '../inlineMedia';
 import { saveFile } from '../storage';
 import { callClaude } from '../anthropic';
-import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, faqAccordion, keywordKey, crawlIsFresh, needsExpertReview, reviewOverdue, REVIEW_HOURS } from './core';
+import { scheduleAction, extractClaims, writingRuleIssues, faqSchema, faqAccordion, keywordKey, crawlIsFresh, needsExpertReview, reviewOverdue, REVIEW_HOURS, bestRankPerKeyword } from './core';
 import { requireExpert } from '../reviewers';
 import { submitToBing } from '../bing';
 import { withByline, expertSchema } from '../byline';
@@ -39,9 +41,24 @@ const DRAFT_LEAD_HOURS = 72;
 
 const update = (id, data) => prisma.blog_schedule.update({ where: { id }, data: { ...data, updated_at: sqlNow() } });
 
-// Writes the draft for one calendar row (the same pipeline as the Keywords tab).
-async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
-  await update(row.id, { status: 'drafting' });
+// Paused AI credits, Anthropic's own out-of-credit answer and Testing mode are not failures: the
+// work waits and continues by itself once AI work is possible again.
+const waitsForAi = (e) => e instanceof CreditPausedError || isCreditError(e);
+
+// Checked before a blog is started, so no keyword row and no paid research is spent on a run that
+// cannot reach the AI (Testing mode for automatic work, or AI work paused for credits).
+async function assertAiReady() {
+  if (isAutomatic() && (await aiMode()) === 'testing') throw new TestingModeError();
+  await assertCredits();
+}
+
+// Writes the draft for one calendar row (the same pipeline as the Keywords tab). `busy` is the row's
+// status while it is written ('revising' for a rewrite after a rejection).
+// The finished AI steps are saved per calendar row (lib/aiReplay.ts): a run cut off by a credit
+// pause, the Pause button or a restart reuses them when the row is written again.
+async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog, busy = 'drafting') {
+  await assertAiReady();
+  await update(row.id, { status: busy });
   // The partner the post goes out under is fixed when the draft is written, so the Word preview, the
   // cover and the live post all show the same name.
   const draftAuthor = row.author || (row.refresh_url ? null : pickAuthor(await authorNames()));
@@ -56,9 +73,10 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
     writer(stage, percent);
   };
   let result;
+  const scope = `blog-sched-${row.id}`;
   startTimer(`blog-${kw.id}`, 'blog', `Blog: ${row.main_keyword}`);
   try {
-    result = await write(row.main_keyword, kw.notes, { onProgress });
+    result = await withReplay(scope, () => write(row.main_keyword, kw.notes, { onProgress }));
     await endTimer(`blog-${kw.id}`, true);
   } catch (err: any) {
     await endTimer(`blog-${kw.id}`, false);
@@ -109,6 +127,7 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog) {
     cta: result.cta ? JSON.stringify(result.cta) : row.cta || null,
     fact_check: inlineClean ? JSON.stringify({ inlineStamp: draft.updated_at, inlineModel: result.factCheck.model, inlineClaims: result.factCheck.checks.length }) : null,
   });
+  await clearReplay(scope);
   await activity.log('schedule.drafted', { entityType: 'draft', entityId: draft.id, details: `"${result.title}" for ${row.publish_at} UTC` });
   return draft;
 }
@@ -182,10 +201,14 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   const why = !prev ? 'first check before publishing' : 'the text changed since the last check';
   const startClean = prev?.inlineStamp && prev.inlineStamp === draft.updated_at ? 1 : 0;
   const facts = await prisma.facts.findMany({ where: { draft_id: draft.id }, select: { fact_id: true, claim: true, source_url: true } });
+  // Finished checks are saved per draft text, so a check cut off by a pause or restart is not paid twice.
+  const scope = `factcheck-${draft.id}-${words}`;
   const result = await timed(`factcheck-${draft.id}`, 'fact-check', `Fact check before publishing (${why}): ${draft.title}`, () =>
-    verify(
-      { title: draft.title, meta: draft.meta_description, content: draft.content_html || '', facts },
-      { mustCheckOf: (html) => extractClaims(html).map((c) => c.sentence), startClean }
+    withReplay(scope, () =>
+      verify(
+        { title: draft.title, meta: draft.meta_description, content: draft.content_html || '', facts },
+        { mustCheckOf: (html) => extractClaims(html).map((c) => c.sentence), startClean }
+      )
     )
   );
   let saved = draft;
@@ -198,6 +221,7 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   }
   const record = { stamp: saved.updated_at, textHash: textHash(saved), ok: result.ok, rounds: result.rounds, corrected: changed, log: result.log, checkedAt: sqlNow(), inlineCounted: Boolean(startClean) };
   await update(row.id, { fact_check: JSON.stringify(record) });
+  await clearReplay(scope);
   await activity.log('schedule.fact_checked', {
     entityType: 'draft',
     entityId: draft.id,
@@ -206,11 +230,30 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   return { ...record, draft: saved };
 }
 
+// Rows being published right now in this server (scheduler, cron route and Publish now share it),
+// so two paths never publish the same blog at once.
+const gp = globalThis as unknown as { __schedulePublishing?: Set<number> };
+const publishing = (gp.__schedulePublishing ||= new Set<number>());
+
+// Returns 'published', 'held', or 'busy' when another path is publishing this row right now.
 async function publishRow(row, now, verify = verifyAndCorrect) {
+  if (publishing.has(row.id)) return 'busy';
+  publishing.add(row.id);
+  try {
+    return await publishRowOnce(row, now, verify);
+  } finally {
+    publishing.delete(row.id);
+  }
+}
+
+async function publishRowOnce(row, now, verify) {
   const draft = row.draft_id ? await prisma.drafts.findUnique({ where: { id: row.draft_id } }) : null;
   if (!draft) {
-    await update(row.id, { status: 'held', hold_reasons: JSON.stringify(['No draft was written in time.']) });
-    await notify(`Blog held: ${row.title}`, 'No draft was ready at the publish slot.');
+    const why = JSON.stringify(['No draft was written in time.']);
+    // Told once, not on every 15-minute run while it stays held.
+    const first = row.status !== 'held' || row.hold_reasons !== why;
+    await update(row.id, { status: 'held', hold_reasons: why });
+    if (first) await notify(`Blog held: ${row.title}`, 'No draft was ready at the publish slot.');
     return 'held';
   }
   // K2: tax, legal and compliance blogs publish only after a named CA/CPA approves them.
@@ -233,7 +276,8 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
   const checked = fc.draft;
   if (/\[(PRACTITIONER NOTE NEEDED|VERIFY|AUTHOR NAME|REVIEWER NAME|VISUAL SUGGESTION)/i.test(checked.content_html || '')) reasons.push('Draft still has a reviewer placeholder.');
   if (!fc.ok) reasons.push(`Fact check could not confirm every claim from a primary source after ${fc.rounds} rounds. Not published.`);
-  const score = await surferScore(row.main_keyword, checked.content_html || '');
+  // A blog already held for another reason is not scored (each new Surfer Content Editor is paid).
+  const score = reasons.length ? null : await surferScore(row.main_keyword, checked.content_html || '');
   for (const i of writingRuleIssues({ title: checked.title, meta: checked.meta_description, html: checked.content_html || '', surferScore: score, siteHost: HOST() })) reasons.push(i);
   // Never publish copied text: the blog is compared with the pages ranking for its keyword and
   // with our own posts (a check that cannot run does not block; its result shows on the draft).
@@ -269,6 +313,13 @@ async function publishRow(row, now, verify = verifyAndCorrect) {
     }
     cover = imageKey ? await uploadMedia(imageKey, { altText: coverAlt(checked), title: checked.title }).catch(() => null) : null;
   }
+  // Published meanwhile by another path (Publish in Drafts & Review): not sent a second time.
+  const latest = await prisma.drafts.findUnique({ where: { id: checked.id }, select: { status: true, wp_post_id: true, wp_post_url: true } });
+  if (latest?.status === 'published' && latest.wp_post_url) {
+    await update(row.id, { status: 'published', wp_post_url: latest.wp_post_url, hold_reasons: null });
+    return 'published';
+  }
+  if (latest?.wp_post_id) checked.wp_post_id = latest.wp_post_id;
   const html = `${withByline(faqAccordion(inline.html), authorName, row.expert_reviewer)}\n${faqSchema(checked.content_html) || ''}\n${expertSchema({ title: checked.title, author: authorName, reviewer: row.expert_reviewer, image: cover?.url || null }) || ''}`;
   if (row.refresh_url) {
     const { json: found } = await wpRequest('GET', '/wp/v2/posts', { query: { slug: new URL(row.refresh_url).pathname.split('/').filter(Boolean).pop(), _fields: 'id,link' } });
@@ -327,7 +378,8 @@ async function reviseRow(row, verify = verifyAndCorrect, write = researchAndWrit
     draft = await writeDraft(
       row,
       `A reviewer REJECTED the previous version. Apply ALL of this feedback exactly:\n${feedback}\n\nPrevious version (keep what was good, fix what the feedback asks):\n${plainOld}`,
-      write
+      write,
+      'revising'
     );
   } catch (e) {
     await update(row.id, { status: 'rejected' });
@@ -355,8 +407,18 @@ async function reviseRow(row, verify = verifyAndCorrect, write = researchAndWrit
 }
 
 // One server process runs the jobs, so an in-memory flag stops a scheduled call from overlapping a
-// run that is still writing a long maximum-effort draft.
-let running = false;
+// run that is still writing a long maximum-effort draft. It is kept on globalThis: the built-in
+// scheduler and the cron route each load their own copy of this module.
+const gr = globalThis as unknown as { __autopilotRunning?: boolean };
+
+// A failed blog is stopped, not retried every 15 minutes (each retry can spend credits and repeats
+// the same error): logged, paused with the reason, and one notice sent.
+async function stopAfterFailure(row, e, from = row.status) {
+  await activity.log('schedule.failed', { entityType: 'blog_schedule', entityId: row.id, details: `${row.title}: ${e.message}` });
+  const reason = `Stopped after a failure, so it is not tried again on its own: ${String(e.message || e).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 300)}. Fix the cause, then press Resume or Publish now. If it is already done, press Already done.`;
+  await update(row.id, { status: 'paused', paused_from: from, paused_by: 'Automatic (stopped after a failure)', hold_reasons: JSON.stringify([reason]) }).catch(() => {});
+  await notify(`Blog stopped after a failure: ${row.title}`, reason).catch(() => {});
+}
 
 // The scheduler job. Meant to run every 15 minutes; every step is idempotent.
 // "Publish now" from the calendar: a reviewed or approved blog goes to the website at once instead
@@ -367,6 +429,7 @@ export async function publishScheduleNow(id: number, actor = 'system') {
   if (!row) throw Object.assign(new Error('Not found'), { status: 404 });
   if (row.status === 'published') throw Object.assign(new Error('Already published'), { status: 409 });
   if (['drafting', 'revising'].includes(row.status)) throw Object.assign(new Error('It is being written right now. Try again in a few minutes.'), { status: 409 });
+  if (publishing.has(id)) throw Object.assign(new Error('It is being published right now. Try again in a few minutes.'), { status: 409 });
   const draft = row.draft_id ? await prisma.drafts.findUnique({ where: { id: row.draft_id } }) : null;
   if (!draft) throw Object.assign(new Error('This blog has no draft yet.'), { status: 409 });
   if (!row.reviewed_at && draft.status !== 'approved') throw Object.assign(new Error('Approve it first (Approve here or in Drafts & Review), then publish.'), { status: 409 });
@@ -375,32 +438,39 @@ export async function publishScheduleNow(id: number, actor = 'system') {
   const ready = await prisma.blog_schedule.update({ where: { id }, data: { status: back, paused_from: null, paused_by: null, publish_at: sqlNow(now), updated_at: sqlNow() } });
   await activity.log('schedule.publish_now', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}": Publish now pressed (slot was ${row.publish_at} UTC)`, actor });
   const result = await publishRow(ready, now);
+  if (result === 'busy') throw Object.assign(new Error('It is being published right now. Try again in a few minutes.'), { status: 409 });
   const after = await prisma.blog_schedule.findUnique({ where: { id } });
   return { result, wp_post_url: after?.wp_post_url || null, hold_reasons: JSON.parse(after?.hold_reasons || '[]') };
 }
 
 export async function runDaily(now = new Date(), opts: { maxDrafts?: number; verify?: any; write?: any } = {}) {
-  if (running) return { skipped: 'A previous run is still in progress.' };
-  running = true;
+  if (gr.__autopilotRunning) return { skipped: 'A previous run is still in progress.' };
+  gr.__autopilotRunning = true;
   try {
     return await runDailyOnce(now, opts);
   } finally {
-    running = false;
+    gr.__autopilotRunning = false;
   }
 }
 
 async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrect, write = researchAndWriteBlog }: { maxDrafts?: number; verify?: any; write?: any }) {
   const summary: any = { opened: 0, published: 0, held: 0, drafted: 0, errors: [] };
-  const rows = await prisma.blog_schedule.findMany({ where: { status: { in: ['planned', 'drafting', 'in_review', 'held'] } }, orderBy: { publish_at: 'asc' } });
+  // Only the calendars of approved strategies run (a replaced strategy's blogs do not).
+  const approvedIds = (await prisma.seo_strategies.findMany({ where: { status: 'approved' }, select: { id: true } })).map((s) => s.id);
+  // No run is in progress (the flag above), so a row still 'revising' was cut off by a restart: it
+  // is rewritten again, reusing the finished AI steps.
+  await prisma.blog_schedule.updateMany({ where: { status: 'revising' }, data: { status: 'rejected', updated_at: sqlNow() } });
+  const rows = await prisma.blog_schedule.findMany({ where: { status: { in: ['planned', 'drafting', 'in_review', 'held'] }, strategy_id: { in: approvedIds } }, orderBy: { publish_at: 'asc' } });
 
   // Rejected blogs are rewritten first (one per run; a full rewrite takes a while).
-  const rejected = await prisma.blog_schedule.findFirst({ where: { status: 'rejected' }, orderBy: { updated_at: 'asc' } });
+  const rejected = await prisma.blog_schedule.findFirst({ where: { status: 'rejected', strategy_id: { in: approvedIds } }, orderBy: { updated_at: 'asc' } });
   if (rejected && summary.drafted < maxDrafts) {
     try {
       await reviseRow(rejected, verify, write);
       summary.drafted++;
     } catch (e: any) {
       summary.errors.push(`${rejected.title}: rewrite failed: ${e.message}`);
+      if (!waitsForAi(e)) await stopAfterFailure(rejected, { message: `rewrite failed: ${e.message}` }, 'rejected');
     }
   }
 
@@ -410,7 +480,7 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
     try {
       if (action === 'open_review') {
         if (!row.draft_id && summary.drafted < maxDrafts) {
-          await writeDraft(row);
+          await writeDraft(row, '', write);
           summary.drafted++;
         }
         const fresh = await prisma.blog_schedule.findUnique({ where: { id: row.id } });
@@ -424,28 +494,24 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
         }
       } else if (action === 'publish') {
         const r = await publishRow(row, now, verify);
-        summary[r]++;
+        if (r !== 'busy') summary[r]++;
       } else if (!row.draft_id && row.status === 'planned' && Date.parse(row.publish_at.replace(' ', 'T') + 'Z') - now.getTime() <= DRAFT_LEAD_HOURS * 3600000 && summary.drafted < maxDrafts) {
-        await writeDraft(row);
+        await writeDraft(row, '', write);
         summary.drafted++;
       }
     } catch (e: any) {
       summary.errors.push(`${row.title}: ${e.message}`);
-      // A failed blog is stopped, not retried every 15 minutes (each retry can spend credits and
-      // repeats the same error). Paused AI credits or Testing mode are not a failure: that work
-      // continues by itself once AI work is possible again, so nothing is logged as failed.
-      if (!(e instanceof CreditPausedError)) {
-        await activity.log('schedule.failed', { entityType: 'blog_schedule', entityId: row.id, details: `${row.title}: ${e.message}` });
-        const reason = `Stopped after a failure, so it is not tried again on its own: ${String(e.message || e).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 300)}. Fix the cause, then press Resume or Publish now. If it is already done, press Already done.`;
-        await update(row.id, { status: 'paused', paused_from: row.status, paused_by: 'Automatic (stopped after a failure)', hold_reasons: JSON.stringify([reason]) }).catch(() => {});
-        await notify(`Blog stopped after a failure: ${row.title}`, reason).catch(() => {});
-      }
+      // Paused AI credits (also Anthropic's out-of-credit answer) or Testing mode are not a failure:
+      // that work continues by itself once AI work is possible again, so nothing is logged as failed.
+      if (!waitsForAi(e)) await stopAfterFailure(row, e);
     }
   }
 
   // K9: a review that ran past 48 hours gets a reminder, then one every 12 hours until decided.
   summary.reminders = 0;
-  for (const row of rows.filter((r) => reviewOverdue(r, now))) {
+  // Read again: a blog published or held above is no longer waiting for a review.
+  const open = await prisma.blog_schedule.findMany({ where: { status: 'in_review', strategy_id: { in: approvedIds } }, orderBy: { publish_at: 'asc' } });
+  for (const row of open.filter((r) => reviewOverdue(r, now))) {
     const last = row.reminded_at ? Date.parse(row.reminded_at.replace(' ', 'T') + 'Z') : 0;
     if (now.getTime() - last < 12 * 3600000) continue;
     const hours = Math.round((now.getTime() - Date.parse(row.review_started.replace(' ', 'T') + 'Z')) / 3600000);
@@ -502,7 +568,9 @@ async function priorityKeywords() {
 export async function dailyRankCheck(now = new Date()) {
   const sites = await listSites();
   if (!sites.length) return { checked: 0, alerts: [] };
-  const rows = await getSiteRankings(sites[0].id);
+  // One row per keyword: a project tracking several engines lists each keyword once per engine, and
+  // only the best position is stored and compared (rank_snapshots has one value per keyword and day).
+  const rows = bestRankPerKeyword(await getSiteRankings(sites[0].id));
   const priority = await priorityKeywords();
   const today = now.toISOString().slice(0, 10);
   const alerts = [];

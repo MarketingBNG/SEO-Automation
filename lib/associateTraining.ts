@@ -11,6 +11,8 @@ import { callClaude } from './anthropic';
 import { parseJson } from './strategy/generate';
 import { getRecentTranscripts } from './fireflies';
 import { istDay, istHour } from './topics';
+import { onceADay, waitsForAi } from './onceADay';
+import { CreditPausedError } from './aiCredits';
 
 export const TRAINING_HOUR_IST = 9;
 export const PASS_PERCENT = 80;
@@ -179,10 +181,16 @@ export async function runTrainingDay(now = new Date()) {
     // Admins and managers watch; only associates get lessons and tests.
     const watchers = (await prisma.team_members.findMany({ where: { role: { in: ['admin', 'manager'] } }, select: { email: true } })).map((r) => r.email.toLowerCase());
     const people = await prisma.training_profiles.findMany({ where: { active: true, email: { notIn: watchers } } });
-    for (const p of people) await prepareDay(p.email, day).catch((e) => errors.push(`${p.email}: ${e.message}`));
+    // A person whose lessons stopped because AI work is paused gets them on a later run that day.
+    let waiting = false;
+    for (const p of people)
+      await prepareDay(p.email, day).catch((e) => {
+        errors.push(`${p.email}: ${e.message}`);
+        if (waitsForAi(e)) waiting = true;
+      });
     await settings.set('training_last_run', JSON.stringify({ at: new Date().toISOString(), day, people: people.length, errors }));
     if (errors.length) await activity.log('training.failed', { details: errors.join('; ').slice(0, 300) });
-    return { day, people: people.length, errors };
+    return { day, people: people.length, errors, waiting };
   } finally {
     g.__trainingRun = false;
   }
@@ -192,7 +200,10 @@ export async function runTrainingDay(now = new Date()) {
 export async function trainingTick(now = new Date()) {
   if (istHour(now) < TRAINING_HOUR_IST) return;
   const day = istDay(now);
-  if ((await settings.get('training_last_day')) === day) return;
-  await settings.set('training_last_day', day);
-  await runTrainingDay(now).catch((e) => console.error('Training day failed:', e.message));
+  // The day counts as done when the run ends; lessons stopped by paused AI work are made later.
+  await onceADay('training_last_day', day, async () => {
+    const r: any = await runTrainingDay(now);
+    if (r?.waiting) throw new CreditPausedError('AI work is paused; the remaining lessons are made when it is possible again.');
+    return r;
+  }).catch((e) => console.error('Training day failed:', e.message));
 }

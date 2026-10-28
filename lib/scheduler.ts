@@ -36,13 +36,16 @@ async function tick() {
   const credits = await import('./aiCredits');
   await credits.autoResumeAi().catch((e: any) => console.error('Scheduler: AI auto-resume failed:', e.message));
   const replay = await import('./aiReplay');
-  if ((await settings.get('ai_paused')) !== '1') await (await import('./strategy/jobs')).resumeRestarted().catch((e: any) => console.error('Scheduler: strategy restart failed:', e.message));
-  if ((await settings.get('ai_paused')) !== '1') await replay.resumeCreditBlog().catch((e: any) => console.error('Scheduler: credit blog resume failed:', e.message));
+  // In Testing mode the scheduler's work cannot use AI: restarting a run there would only spend the
+  // paid data lookups before it stops again. Those runs wait until Live mode is back.
+  const testing = (await (await import('./aiQueue')).aiMode()) === 'testing';
+  if (!testing && (await settings.get('ai_paused')) !== '1') await (await import('./strategy/jobs')).resumeRestarted().catch((e: any) => console.error('Scheduler: strategy restart failed:', e.message));
+  if (!testing && (await settings.get('ai_paused')) !== '1') await replay.resumeCreditBlog().catch((e: any) => console.error('Scheduler: credit blog resume failed:', e.message));
   await replay.pruneReplay();
 
   // A blog cut off by a server restart (for example a deploy) is started again automatically.
   const { resumeInterruptedBlog } = await import('./blogJob');
-  await resumeInterruptedBlog().catch((e: any) => console.error('Scheduler: blog resume failed:', e.message));
+  if (!testing) await resumeInterruptedBlog().catch((e: any) => console.error('Scheduler: blog resume failed:', e.message));
 
   // Blogs not yet on the website get their banner by themselves (made in the Social Media dashboard).
   const { fillMissingCovers } = await import('./coverPhoto');
@@ -103,10 +106,12 @@ export function startScheduler() {
   import('./blogJob')
     .then(async ({ requeueOrphanBlogs }) => {
       await requeueOrphanBlogs({ immediate: true });
+      // A strategy that was generating has no run here any more: marked so the first tick restarts it.
+      await (await import('./strategy/jobs')).markInterrupted();
       // Blogs an older version marked failed for the same reason are queued again too.
       const { default: prisma } = await import('./prisma');
       await prisma.keywords.updateMany({
-        where: { status: 'failed', error: { startsWith: 'Interrupted by a server restart' }, NOT: { batch_name: { startsWith: 'Strategy #' } } },
+        where: { status: 'failed', error: { startsWith: 'Interrupted by a server restart' }, OR: [{ batch_name: null }, { NOT: { batch_name: { startsWith: 'Strategy #' } } }] },
         data: { status: 'pending', error: 'The previous run was cut off by a server restart.' },
       });
     })

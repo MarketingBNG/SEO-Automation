@@ -12,6 +12,7 @@ import * as activity from './activity';
 import { callClaude } from './anthropic';
 import { parseJson } from './strategy/generate';
 import { startTimer, endTimer } from './jobTimer';
+import { onceADay } from './onceADay';
 import { runBlogJob } from './blogJob';
 import { startAudit, startRewrite } from './auditJobs';
 import { plainText, words } from './originality';
@@ -127,9 +128,8 @@ For every item fill "relevance" honestly: "write" only when it touches a service
 export async function topicsTick(now = new Date()) {
   if (istHour(now) < TOPICS_HOUR_IST) return;
   const day = istDay(now);
-  if ((await settings.get('topics_last_day')) === day) return;
-  await settings.set('topics_last_day', day);
-  await researchTopics(now).catch((e) => console.error('Topics research failed:', e.message));
+  // The day counts as done when the research ends; one stopped by paused AI work runs again later.
+  await onceADay('topics_last_day', day, () => researchTopics(now)).catch((e) => console.error('Topics research failed:', e.message));
 }
 
 // For a topic researched before the relevance note existed: why it matters to us, written on
@@ -161,6 +161,7 @@ export async function startTopicBlog(id: number) {
   const t = await prisma.topics.findUnique({ where: { id } });
   if (!t) throw Object.assign(new Error('Topic not found'), { status: 404 });
   if (t.draft_id) throw Object.assign(new Error('A blog for this topic was already started.'), { status: 409 });
+  if (t.status === 'blog') throw Object.assign(new Error('A blog for this topic is being written.'), { status: 409 });
   const kws: string[] = JSON.parse(t.keywords || '[]');
   const kw = await prisma.keywords.create({ data: { keyword: kws[0] || t.title.toLowerCase().slice(0, 80), batch_name: 'Topics', notes: topicNotes(t), status: 'generating' } });
   await prisma.topics.update({ where: { id }, data: { status: 'blog' } });
@@ -170,6 +171,21 @@ export async function startTopicBlog(id: number) {
     if (d) await prisma.topics.update({ where: { id }, data: { draft_id: d.id } });
   }).catch(() => {});
   return { keywordId: kw.id };
+}
+
+// Topics whose blog run ended without the in-memory link above (a restart, a resumed run): the draft
+// is found through the topic's keyword (same notes) and linked. A run that failed puts the topic back
+// to 'new', so "Write blog" can be pressed again. Returns the topics that changed.
+export async function linkTopicBlogs(rows: any[]) {
+  const changed = new Map<number, any>();
+  for (const t of rows.filter((r) => r.status === 'blog' && !r.draft_id)) {
+    const kw = await prisma.keywords.findFirst({ where: { batch_name: 'Topics', notes: topicNotes(t) }, orderBy: { id: 'desc' }, select: { id: true, status: true } });
+    if (!kw) continue;
+    const d = await prisma.drafts.findFirst({ where: { keyword_id: kw.id }, orderBy: { id: 'desc' }, select: { id: true } });
+    if (d) changed.set(t.id, await prisma.topics.update({ where: { id: t.id }, data: { draft_id: d.id } }));
+    else if (kw.status === 'failed') changed.set(t.id, await prisma.topics.update({ where: { id: t.id }, data: { status: 'new' } }));
+  }
+  return changed;
 }
 
 // Writes a LinkedIn article for the topic in the background.

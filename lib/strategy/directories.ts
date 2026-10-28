@@ -11,6 +11,7 @@ import * as activity from '../activity';
 import { callClaude } from '../anthropic';
 import { parseJson } from './generate';
 import { directoryTargets } from './core';
+import { onceADay } from '../onceADay';
 
 const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
 const METHOD = 'Directory or citation listing';
@@ -146,9 +147,15 @@ export async function directoriesTick(now = new Date(), find = findDirectories) 
     (await prisma.seo_strategies.findFirst({ where: { status: 'approved' }, orderBy: { id: 'desc' } }));
   if (!strategy?.plan_json) return null;
   const { perDay } = directoryTargets(JSON.parse(strategy.plan_json));
-  await settings.set('directories_last_day', today);
-  if (!perDay) return null;
+  if (!perDay) {
+    await settings.set('directories_last_day', today);
+    return null;
+  }
+  // The day counts as done when the run ends; one stopped by paused AI work runs again later.
+  return onceADay('directories_last_day', today, () => addDirectories(strategy, perDay, today, find));
+}
 
+async function addDirectories(strategy: any, perDay: number, today: string, find: typeof findDirectories) {
   await removeDuplicateDirectories();
   const used = await prisma.backlink_tasks.findMany({ where: { method: { contains: 'irectory' } }, select: { target_site: true } });
   const usedKeys = new Set(used.flatMap((u) => directoryKeys(u.target_site)));

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as settings from '@/lib/settings';
-import { researchTopics, istDay } from '@/lib/topics';
+import { researchTopics, istDay, linkTopicBlogs } from '@/lib/topics';
 import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
@@ -10,7 +10,10 @@ export const runtime = 'nodejs';
 // already started on. Untouched topics from earlier days are not shown.
 export async function GET() {
   const today = istDay();
-  const rows = await prisma.topics.findMany({ where: { OR: [{ day: today }, { status: { not: 'new' } }] }, orderBy: [{ day: 'desc' }, { id: 'asc' }], take: 70 });
+  const found = await prisma.topics.findMany({ where: { OR: [{ day: today }, { status: { not: 'new' } }] }, orderBy: [{ day: 'desc' }, { id: 'asc' }], take: 70 });
+  // A blog whose run lost its link (restart) is linked now; one that failed can be started again.
+  const changed = await linkTopicBlogs(found).catch(() => new Map());
+  const rows = found.map((r) => changed.get(r.id) || r);
   const draftIds = rows.flatMap((r) => [r.draft_id, r.article_draft_id]).filter((x): x is number => Boolean(x));
   const drafts = draftIds.length ? await prisma.drafts.findMany({ where: { id: { in: draftIds } }, select: { id: true, title: true, status: true, kind: true, wp_post_url: true } }) : [];
   const auditIds = rows.map((r) => r.audit_id).filter((x): x is number => Boolean(x));

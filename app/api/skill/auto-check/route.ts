@@ -6,6 +6,7 @@ import prisma from '@/lib/prisma';
 import { generateContentSkill } from '@/lib/anthropic';
 import * as activity from '@/lib/activity';
 import { isCronRequest, methodNotAllowed } from '../../_lib/http';
+import { runAutomatic } from '@/lib/aiQueue';
 
 export const runtime = 'nodejs';
 
@@ -79,7 +80,8 @@ export async function POST() {
 // PORT NOTE: Vercel Cron can only call with GET, so a GET carrying CRON_SECRET runs the same
 // idempotent check as POST. Any other GET keeps the old 405.
 export async function GET(req: Request) {
-  if (isCronRequest(req)) return run();
+  // Automatic work: in Testing mode it does not use AI (lib/aiQueue.ts).
+  if (isCronRequest(req)) return runAutomatic(() => run());
   return methodNotAllowed();
 }
 export { methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

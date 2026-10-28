@@ -14,8 +14,13 @@ export async function markEditedAsChecked(draftId: number, by: string) {
   try {
     prev = sched.fact_check ? JSON.parse(sched.fact_check) : {};
   } catch {}
-  await prisma.blog_schedule.update({
-    where: { id: sched.id },
-    data: { fact_check: JSON.stringify({ ...prev, stamp: d.updated_at, textHash, ok: true, rounds: 0, corrected: false, checkedAt: sqlNow(), checkedIn: `edited by ${by}; no automatic re-check` }) },
-  });
+  await prisma.blog_schedule.update({ where: { id: sched.id }, data: { fact_check: JSON.stringify(editedFactCheck(prev, { stamp: d.updated_at, textHash, by, at: sqlNow() })) } });
+}
+
+// The fact check record after an edit. An edit never turns a failed check into a pass: a blog whose
+// check could not confirm every claim stays not verified (and is not auto-published) until a person
+// approves it or presses "Check these issues again".
+export function editedFactCheck(prev: any, { stamp, textHash, by, at }: { stamp: string; textHash: string; by: string; at: string }) {
+  if (prev?.ok === false) return { ...prev, stamp, textHash, checkedIn: `edited by ${by}; the earlier fact check could not confirm every claim, so it is still not verified` };
+  return { ...prev, stamp, textHash, ok: true, rounds: 0, corrected: false, checkedAt: at, checkedIn: `edited by ${by}; no automatic re-check` };
 }

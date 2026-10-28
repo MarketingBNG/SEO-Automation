@@ -5,13 +5,15 @@
 import { NextResponse } from 'next/server';
 import { runDaily } from '@/lib/strategy/autopilot';
 import { runAutomatic } from '@/lib/aiQueue';
-import { methodNotAllowed } from '../../_lib/http';
+import { isCronRequest, methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
 // Only applies on Vercel (300 is its plan limit). The self-hosted Coolify server has no time limit.
 export const maxDuration = 300;
 
-export async function GET() {
+export async function GET(req: Request) {
+  // Only the scheduled task (CRON_SECRET) runs it; a signed-in browser cannot start paid work here.
+  if (!isCronRequest(req)) return NextResponse.json({ error: 'Cron only' }, { status: 403 });
   // Automatic work: in Testing mode it does not start (lib/aiQueue.ts).
   return NextResponse.json(await runAutomatic(() => runDaily()));
 }

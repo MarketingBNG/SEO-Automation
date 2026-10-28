@@ -6,6 +6,7 @@ import prisma from '@/lib/prisma';
 import { startStrategyJob } from '@/lib/strategy/jobs';
 import { strategyWindow } from '@/lib/strategy/core';
 import { isCronRequest, methodNotAllowed } from '../../_lib/http';
+import { runAutomatic } from '@/lib/aiQueue';
 
 export const runtime = 'nodejs';
 
@@ -23,7 +24,8 @@ export async function GET(req: Request) {
   const found = await covering();
   if (!isCronRequest(req)) return NextResponse.json({ window, due: !found, existingId: found?.id || null });
   if (found) return NextResponse.json({ ran: false, reason: `Strategy #${found.id} (${found.period}, ${found.status}) already covers the coming days.` });
-  const job = await startStrategyJob({ window, actor: 'Automatic run' });
+  // Automatic work: in Testing mode it does not use AI (lib/aiQueue.ts).
+  const job = await runAutomatic(() => startStrategyJob({ window, actor: 'Automatic run' }));
   return NextResponse.json({ ran: true, window, id: job.id }, { status: 202 });
 }
 export { methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

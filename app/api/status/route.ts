@@ -4,6 +4,7 @@ import * as settings from '@/lib/settings';
 import { publishPlan } from '@/lib/strategy/core';
 import { blogRuns } from '@/lib/blogRuns';
 import { methodNotAllowed } from '../_lib/http';
+import { calendarRowsWhere } from '@/lib/strategy/calendarRows';
 
 export const runtime = 'nodejs';
 
@@ -23,7 +24,7 @@ export async function GET() {
     last = JSON.parse(st.scheduler_last_run || 'null');
   } catch {}
   const strategy = await prisma.seo_strategies.findFirst({ where: { status: 'approved', plan_json: { not: null } }, orderBy: { id: 'desc' }, select: { id: true, period: true } });
-  const rows = strategy ? await prisma.blog_schedule.findMany({ where: { strategy_id: strategy.id }, orderBy: { publish_at: 'asc' } }) : [];
+  const rows = strategy ? await prisma.blog_schedule.findMany({ where: await calendarRowsWhere(strategy.id), orderBy: { publish_at: 'asc' } }) : [];
   const writing = await prisma.keywords.count({ where: { status: 'generating' } });
 
   const problems: string[] = [];

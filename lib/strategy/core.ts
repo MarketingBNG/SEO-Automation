@@ -230,7 +230,7 @@ export function approvalBlockers(plan: any, validation: ValidationResult | null,
 export const REVIEW_HOURS = 48;
 const toMs = (s: string) => Date.parse(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z'));
 
-type ScheduleRow = { status: string; publish_at: string; review_started?: string | null; reviewed_at?: string | null; main_keyword?: string | null; title?: string | null };
+type ScheduleRow = { status: string; publish_at: string; review_started?: string | null; reviewed_at?: string | null; main_keyword?: string | null; title?: string | null; draft_id?: number | null };
 type PlanRow = ScheduleRow & { reviewed_by?: string | null; hold_reasons?: string | null; wp_post_url?: string | null; updated_at?: string | null };
 
 const fmtIst = (ms: number) => new Date(ms).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
@@ -311,6 +311,9 @@ export function scheduleAction(row: ScheduleRow, now = new Date(), graceMinutes 
     if (requireExpert && !row.reviewed_at && needsExpertReview(row.main_keyword, row.title)) return 'wait';
     return t >= autoPublishAt(row) - grace ? 'publish' : 'wait';
   }
+  // A draft that never entered review (AI was unavailable until after its slot) gets its review
+  // first: it never publishes without the 48-hour window.
+  if (['drafting', 'planned'].includes(row.status) && row.draft_id && !row.review_started && !row.reviewed_at && t >= slot - REVIEW_HOURS * 3600000 - grace) return 'open_review';
   if (t >= slot - grace && ['held', 'drafting', 'planned'].includes(row.status)) return 'publish';
   if (t >= slot - REVIEW_HOURS * 3600000 - grace && ['planned', 'drafting'].includes(row.status)) return 'open_review';
   return 'wait';
@@ -341,22 +344,33 @@ export function extractClaims(html: string): { sentence: string; figures: string
 }
 
 // ---------- Writing rules (checked before auto-publish) ----------
+// Shared with the writer's validator (lib/validation.ts), so a draft that passes writing is not held
+// at its slot for a rule the writer was never asked to meet.
+export const TITLE_MAX = 60;
+export const MIN_INTERNAL_LINKS = 3;
+export const ANSWER_WORDS = { min: 40, max: 60 };
+
+// A direct 40-60 word answer under each question heading (h2 or h3 ending in "?").
+export function questionAnswerIssues(html: string): string[] {
+  const out: string[] = [];
+  for (const m of String(html).matchAll(/<h[23][^>]*>([^<]*\?)\s*<\/h[23]>\s*<p[^>]*>([\s\S]*?)<\/p>/gi)) {
+    const words = m[2].replace(/<[^>]+>/g, ' ').trim().split(/\s+/).filter(Boolean).length;
+    if (words < ANSWER_WORDS.min || words > ANSWER_WORDS.max) out.push(`Answer under "${m[1].trim()}" is ${words} words; it must be ${ANSWER_WORDS.min} to ${ANSWER_WORDS.max}.`);
+  }
+  return out;
+}
+
 export function writingRuleIssues({ title, meta, html, surferScore, siteHost }: { title: string; meta: string; html: string; surferScore?: number | null; siteHost: string }): string[] {
   const issues: string[] = [];
-  if (!title || title.length >= 60) issues.push(`Meta title must be under 60 characters (now ${title?.length || 0}).`);
+  if (!title || title.length > TITLE_MAX) issues.push(`Meta title must be ${TITLE_MAX} characters or fewer (now ${title?.length || 0}).`);
   if (!meta || meta.length >= 160) issues.push(`Meta description must be under 160 characters (now ${meta?.length || 0}).`);
   const hrefs = [...String(html).matchAll(/href="([^"]+)"/gi)].map((m) => m[1]);
   const internal = hrefs.filter((h) => h.startsWith('/') || h.includes(siteHost)).length;
-  if (internal < 3) issues.push(`Needs 3+ internal links (has ${internal}).`);
+  if (internal < MIN_INTERNAL_LINKS) issues.push(`Needs ${MIN_INTERNAL_LINKS}+ internal links (has ${internal}).`);
   const official = hrefs.filter((h) => /\.gov(\.[a-z]{2})?\/|\.gov\b|\.nic\.in|rbi\.org\.in|sebi\.gov\.in|incometax\.gov\.in|irs\.gov/i.test(h)).length;
   if (official < 1) issues.push('Needs 1+ official source link.');
   if (!/<h2[^>]*>\s*(?:<[^>]+>\s*)*(frequently asked questions|faqs?)\b/i.test(html)) issues.push('Needs an FAQ section.');
-  // A direct 40-60 word answer under each question heading.
-  const qHeads = [...String(html).matchAll(/<h[23][^>]*>([^<]*\?)\s*<\/h[23]>\s*<p[^>]*>([\s\S]*?)<\/p>/gi)];
-  for (const m of qHeads) {
-    const words = m[2].replace(/<[^>]+>/g, ' ').trim().split(/\s+/).filter(Boolean).length;
-    if (words < 40 || words > 60) issues.push(`Answer under "${m[1].trim()}" is ${words} words; it must be 40 to 60.`);
-  }
+  issues.push(...questionAnswerIssues(html));
   if (typeof surferScore === 'number' && surferScore < 75) issues.push(`Surfer score is ${surferScore}; it must be 75 or more.`);
   if (/[\u2014]/.test(html + title + meta)) issues.push('Contains an em dash.');
   issues.push(...aiLeftovers(title, meta, html));
@@ -533,6 +547,20 @@ export function sameTopic(a: string, b: string): boolean {
 }
 export function duplicateOf(keyword: string, existing: { keyword: string; where: string }[]): { keyword: string; where: string } | null {
   return existing.find((e) => sameTopic(keyword, e.keyword)) || null;
+}
+
+// ---------- Daily rank check ----------
+// A project that tracks several search engines lists each keyword once per engine. One row per
+// keyword is kept, with its best position (0 or null = not in the top 100 on any engine).
+export function bestRankPerKeyword<T extends { keyword: string; position: number | null }>(rows: T[]): T[] {
+  const rank = (p: number | null) => (p && p > 0 ? p : Infinity);
+  const best = new Map<string, T>();
+  for (const r of rows) {
+    const key = keywordKey(r.keyword);
+    const seen = best.get(key);
+    if (!seen || rank(r.position) < rank(seen.position)) best.set(key, r);
+  }
+  return [...best.values()];
 }
 
 // ---------- Overdue reviews (K9) ----------

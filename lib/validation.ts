@@ -1,5 +1,5 @@
 // @ts-nocheck -- PORT NOTE: ported 1:1 from untyped JS; type checking disabled for this file only (logic unchanged).
-import { aiLeftovers } from './strategy/core';
+import { aiLeftovers, TITLE_MAX, MIN_INTERNAL_LINKS, questionAnswerIssues } from './strategy/core';
 import * as settings from './settings';
 import { chooseKeywords, coverage } from './keywordPlanner';
 
@@ -220,8 +220,9 @@ async function validateDraft({ title, meta, content, facts, keyword, paaQuestion
 
   if (!title || title.length < 5) {
     issues.push('Title is missing or too short.');
-  } else if (title.length > 65) {
-    issues.push(`Title is ${title.length} characters. Keep it to 50-60 (never over 65) so Google shows it in full.`);
+  } else if (title.length > TITLE_MAX) {
+    // The same limit as the publish check (lib/strategy/core.ts writingRuleIssues).
+    issues.push(`Title is ${title.length} characters. Keep it to 50-${TITLE_MAX} (never over ${TITLE_MAX}) so Google shows it in full.`);
   } else if (title.length < 40) {
     warnings.push(`Title is only ${title.length} characters; 50-60 usually works best.`);
   }
@@ -319,8 +320,8 @@ async function validateDraft({ title, meta, content, facts, keyword, paaQuestion
   const allLinks = links(content);
   const internal = allLinks.filter((l) => l.host === 'usaindiacfo.com' || l.host.endsWith('.usaindiacfo.com'));
   const official = allLinks.filter((l) => OFFICIAL_HOSTS.some((re) => re.test(l.host)));
-  if (internal.length === 0) {
-    issues.push('No internal links. Link to 3-8 genuinely related USAIndiaCFO posts or service pages with descriptive anchor text.');
+  if (internal.length < MIN_INTERNAL_LINKS) {
+    issues.push(`${internal.length ? `Only ${internal.length} internal link(s)` : 'No internal links'}. Link to ${MIN_INTERNAL_LINKS}-8 genuinely related USAIndiaCFO posts or service pages with descriptive anchor text.`);
   }
   if ((facts || []).length >= 3 && official.length < 2) {
     issues.push(
@@ -472,8 +473,11 @@ function craftChecks({ title, meta, content, keyword, plainText, wc, allLinks, i
     if (faqStart < html.length * 0.5) warnings.push('The FAQ section sits in the first half of the article; it belongs near the end.');
   }
 
+  // A direct answer of the right length under every question heading: the publish check holds a
+  // blog that misses it, so it is fixed here.
+  issues.push(...questionAnswerIssues(html));
+
   // Links
-  if (internal.length > 0 && internal.length < 3 && wc > 800) warnings.push(`Only ${internal.length} internal link(s); 3-8 relevant ones is the editorial default for a post this long.`);
   const counts: any = {};
   for (const l of allLinks) counts[l.href.replace(/[#?].*$/, '').replace(/\/+$/, '')] = (counts[l.href.replace(/[#?].*$/, '').replace(/\/+$/, '')] || 0) + 1;
   const repeated = Object.entries(counts).filter(([, n]) => n > 2);

@@ -161,6 +161,11 @@ function fillPublishDates(plan) {
 async function syncCalendar(tx, id, period, calendar) {
   const started = await tx.blog_schedule.findMany({ where: { strategy_id: id, NOT: { status: 'planned', draft_id: null } } });
   const keep = new Set(started.map((r) => keywordKey(r.main_keyword)));
+  // A blog dropped before it was written gives its keyword back, so a later month can plan it.
+  const dropped = (await tx.blog_schedule.findMany({ where: { strategy_id: id, status: 'planned', draft_id: null }, select: { main_keyword: true } }))
+    .map((r) => keywordKey(r.main_keyword))
+    .filter((k) => !keep.has(k) && !calendar.some((b) => b.mainKeyword && keywordKey(b.mainKeyword) === k));
+  if (dropped.length) await tx.strategy_keywords.deleteMany({ where: { strategy_id: id, keyword_key: { in: dropped } } });
   await tx.blog_schedule.deleteMany({ where: { strategy_id: id, status: 'planned', draft_id: null } });
   for (const b of calendar) {
     if (!b.mainKeyword || !b.publishDate || keep.has(keywordKey(b.mainKeyword))) continue;
@@ -190,6 +195,9 @@ export async function approveStrategy(id: number, approver: string) {
   const row = await prisma.seo_strategies.findUnique({ where: { id } });
   if (!row?.plan_json) throw Object.assign(new Error('Not found'), { status: 404 });
   if (row.status === 'approved') throw Object.assign(new Error('Already approved.'), { status: 409 });
+  // Only a strategy waiting for review can be approved: a superseded, stopped or failed one would
+  // schedule its whole calendar a second time.
+  if (row.status !== 'pending_review') throw Object.assign(new Error(`This strategy is ${String(row.status).replace('_', ' ')}, so it cannot be approved.`), { status: 409 });
   const plan = JSON.parse(row.plan_json);
   const validation = await revalidate(plan);
   const blockers = approvalBlockers(plan, validation, await latestCrawl());
@@ -200,12 +208,29 @@ export async function approveStrategy(id: number, approver: string) {
 
   const now = sqlNow();
   await prisma.$transaction(async (tx) => {
-    // Only one approved strategy per month.
-    await tx.seo_strategies.updateMany({ where: { period: row.period, status: 'approved' }, data: { status: 'superseded' } });
-    await tx.seo_strategies.update({
-      where: { id },
+    // Claimed first, so two approvals at the same time cannot both schedule the calendar.
+    const claimed = await tx.seo_strategies.updateMany({
+      where: { id, status: 'pending_review' },
       data: { status: 'approved', approved_by: approver, approved_at: now, approved_version: row.version, decided_at: now, validation: JSON.stringify(validation) },
     });
+    if (claimed.count !== 1) throw Object.assign(new Error('Already approved.'), { status: 409 });
+    // Only one approved strategy per month. The replaced plan's work stops: blogs not written yet
+    // are removed (their keywords freed), started ones are paused for a person to decide, and its
+    // planned backlink and fix tasks are skipped.
+    const old = await tx.seo_strategies.findMany({ where: { period: row.period, status: 'approved', id: { not: id } }, select: { id: true } });
+    if (old.length) {
+      const oldIds = old.map((o) => o.id);
+      await tx.seo_strategies.updateMany({ where: { id: { in: oldIds } }, data: { status: 'superseded' } });
+      const unwritten = await tx.blog_schedule.findMany({ where: { strategy_id: { in: oldIds }, status: 'planned', draft_id: null }, select: { main_keyword: true } });
+      if (unwritten.length) await tx.strategy_keywords.deleteMany({ where: { strategy_id: { in: oldIds }, keyword_key: { in: unwritten.map((r) => keywordKey(r.main_keyword)) } } });
+      await tx.blog_schedule.deleteMany({ where: { strategy_id: { in: oldIds }, status: 'planned', draft_id: null } });
+      const reason = JSON.stringify([`Its strategy was replaced by the newly approved ${row.period} version ${row.version}, so the autopilot no longer publishes it. To keep it, publish its draft from Drafts & Review.`]);
+      for (const r of await tx.blog_schedule.findMany({ where: { strategy_id: { in: oldIds }, status: { in: ['planned', 'in_review', 'held', 'rejected'] } }, select: { id: true, status: true } })) {
+        await tx.blog_schedule.update({ where: { id: r.id }, data: { status: 'paused', paused_from: r.status, paused_by: 'Automatic (strategy replaced)', hold_reasons: reason, updated_at: now } });
+      }
+      await tx.backlink_tasks.updateMany({ where: { strategy_id: { in: oldIds }, status: 'planned' }, data: { status: 'skipped', note: 'Skipped: its strategy was replaced by a newer approved version.' } });
+      await tx.technical_fix_tasks.updateMany({ where: { strategy_id: { in: oldIds }, status: 'planned' }, data: { status: 'skipped', result: 'Skipped: its strategy was replaced by a newer approved version.' } });
+    }
     for (const b of plan.blogPlan?.calendar || []) {
       await tx.strategy_keywords.upsert({
         where: { keyword_key: keywordKey(b.mainKeyword) },

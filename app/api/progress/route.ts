@@ -50,7 +50,7 @@ export async function GET() {
   // Finished (or failed) in the last 15 minutes: audits, rewrites, blogs, publishes.
   const since = new Date(Date.now() - 15 * 60000).toISOString().slice(0, 19).replace('T', ' ');
   const done = await prisma.activity_log.findMany({
-    where: { created_at: { gte: since }, action: { in: ['audit.completed', 'audit.failed', 'audit.rewritten', 'audit.rewrite_failed', 'draft.generated', 'draft.generation_failed', 'schedule.published', 'schedule.failed', 'wordpress.published', 'strategy.generated', 'strategy.failed'] } },
+    where: { created_at: { gte: since }, action: { in: ['audit.completed', 'audit.failed', 'audit.rewritten', 'audit.rewrite_failed', 'draft.generated', 'draft.generation_failed', 'schedule.published', 'schedule.failed', 'wordpress.published', 'strategy.generated', 'strategy.generation_failed'] } },
     orderBy: { id: 'desc' },
     take: 6,
     select: { id: true, action: true, details: true },
@@ -71,7 +71,7 @@ export async function GET() {
     id: d.id,
     ok: !/failed/.test(d.action),
     kind: d.action.startsWith('audit') ? 'audit' : d.action.startsWith('draft') ? 'blog' : d.action.startsWith('strategy') ? 'strategy' : 'strategy',
-    label: `${{ 'audit.completed': 'Audit finished', 'audit.failed': 'Audit', 'audit.rewritten': 'Rewrite ready to review', 'audit.rewrite_failed': 'Rewrite', 'draft.generated': 'Blog written, waiting for review', 'draft.generation_failed': 'Blog', 'schedule.published': 'Blog published', 'schedule.failed': 'Blog', 'wordpress.published': 'Published to WordPress', 'strategy.generated': 'Strategy ready', 'strategy.failed': 'Strategy' }[d.action] || d.action}: ${String(d.details || '').slice(0, 120)}`,
+    label: `${{ 'audit.completed': 'Audit finished', 'audit.failed': 'Audit', 'audit.rewritten': 'Rewrite ready to review', 'audit.rewrite_failed': 'Rewrite', 'draft.generated': 'Blog written, waiting for review', 'draft.generation_failed': 'Blog', 'schedule.published': 'Blog published', 'schedule.failed': 'Blog', 'wordpress.published': 'Published to WordPress', 'strategy.generated': 'Strategy ready', 'strategy.generation_failed': 'Strategy' }[d.action] || d.action}: ${String(d.details || '').slice(0, 120)}`,
   }));
   const { aiMode } = await import('@/lib/aiQueue');
   const testing = (await aiMode()) === 'testing';

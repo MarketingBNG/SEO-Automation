@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as settings from '@/lib/settings';
 import { needsExpertReview, publishPlan, reviewOverdue } from '@/lib/strategy/core';
+import { calendarRowsWhere } from '@/lib/strategy/calendarRows';
 import { expertReviewers, requireExpert } from '@/lib/reviewers';
 import { methodNotAllowed } from '../_lib/http';
 
@@ -14,7 +15,8 @@ export async function GET() {
   const [strategy, generating, failedKeywords, pendingKeywords, pendingDrafts, onCalendar, recentDrafts, aiPaused, aiPausedReason, creditStamp, creditAlert] = await Promise.all([
     prisma.seo_strategies.findFirst({ where: { status: 'approved', plan_json: { not: null } }, orderBy: { id: 'desc' }, select: { id: true, period: true, end_date: true } }),
     prisma.seo_strategies.findFirst({ where: { status: { in: ['generating', 'paused', 'stopping', 'failed', 'pending_review'] } }, orderBy: { id: 'desc' }, select: { id: true, period: true, status: true, error: true } }),
-    prisma.keywords.findMany({ where: { status: 'failed' }, select: { id: true, keyword: true, error: true }, orderBy: { id: 'desc' }, take: 10 }),
+    // Calendar blogs ('Strategy #' batches) show on their calendar row; Try again would write them a second time.
+    prisma.keywords.findMany({ where: { status: 'failed', OR: [{ batch_name: null }, { NOT: { batch_name: { startsWith: 'Strategy #' } } }] }, select: { id: true, keyword: true, error: true }, orderBy: { id: 'desc' }, take: 10 }),
     prisma.keywords.count({ where: { status: 'pending' } }),
     // Drafts that wait for a review; the ones on the calendar are listed with their slot instead.
     prisma.drafts.findMany({ where: { status: 'pending_review' }, select: { id: true, title: true, author: true, updated_at: true, word_count: true, keyword: { select: { keyword: true } } }, orderBy: { id: 'desc' }, take: 40 }),
@@ -35,7 +37,9 @@ export async function GET() {
 
   const calendarDraftIds = new Set(onCalendar.map((r) => r.draft_id));
   const loose = pendingDrafts.filter((d) => !calendarDraftIds.has(d.id)).slice(0, 20);
-  const rows = strategy ? await prisma.blog_schedule.findMany({ where: { strategy_id: strategy.id }, orderBy: { publish_at: 'asc' } }) : [];
+  // The newest approved strategy's calendar, plus the blogs of an older approved month that are not
+  // live yet (the autopilot still reviews and publishes those, so they must stay visible).
+  const rows = strategy ? await prisma.blog_schedule.findMany({ where: await calendarRowsWhere(strategy.id), orderBy: { publish_at: 'asc' } }) : [];
   const expertOn = rows.length ? await requireExpert() : false;
   const reviewers = expertOn ? await expertReviewers() : [];
   const view = (r: any) => ({

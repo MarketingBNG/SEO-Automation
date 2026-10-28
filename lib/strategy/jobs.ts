@@ -11,7 +11,7 @@ import prisma from '../prisma';
 import * as activity from '../activity';
 import { generateStrategy } from './generate';
 import { strategyWindow, type StrategyWindow } from './core';
-import { assertCredits } from '../aiCredits';
+import { assertCredits, CreditPausedError, isCreditError } from '../aiCredits';
 import { recordDuration } from '../jobTimer';
 
 // Writes progress at most every 2 seconds (and always for 100%).
@@ -39,6 +39,9 @@ const running = (g.__strategyRuns ||= new Map<number, AbortController>());
 const gs = globalThis as unknown as { __strategyStarted?: Map<number, number> };
 export const strategyStarted = (gs.__strategyStarted ||= new Map<number, number>());
 
+// True while this server process is running the strategy (the sweep must not call it stuck).
+export const strategyRunning = (id: number) => running.has(id);
+
 const stopError = () => Object.assign(new Error('Stopped by user'), { name: 'AbortError' });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -58,7 +61,8 @@ function run(id: number, window: StrategyWindow, actor: string) {
   running.set(id, controller);
   strategyStarted.set(id, Date.now());
   const onProgress = progressWriter((stage, percent) =>
-    prisma.seo_strategies.updateMany({ where: { id, status: { in: ['generating', 'paused'] } }, data: { progress_stage: stage, progress_percent: percent } })
+    // Only while generating: a paused run keeps its "Paused: ..." stage, which the resume logic looks for.
+    prisma.seo_strategies.updateMany({ where: { id, status: 'generating' }, data: { progress_stage: stage, progress_percent: percent } })
   );
   // Detached on purpose: the self-hosted server keeps running it after the request returns.
   const began = Date.now();
@@ -70,7 +74,7 @@ function run(id: number, window: StrategyWindow, actor: string) {
     })
     .catch(async (err: any) => {
       // Credits ran low: keep the run paused (not failed) so Resume starts it again after a top-up.
-      if (err?.name === 'CreditPausedError' || /out of credit|credit balance is too low/i.test(err?.message || '')) {
+      if (err instanceof CreditPausedError || isCreditError(err)) {
         await prisma.seo_strategies.update({ where: { id }, data: { status: 'paused', progress_stage: 'Paused: AI credits low. It starts again by itself when credits are back (finished steps are kept).' } }).catch(() => {});
         return;
       }

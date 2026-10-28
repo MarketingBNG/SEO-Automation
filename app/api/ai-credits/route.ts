@@ -9,6 +9,7 @@ import { methodNotAllowed } from '../_lib/http';
 import prisma from '@/lib/prisma';
 import { strategyProgress } from '@/lib/strategy/progress';
 import * as settings from '@/lib/settings';
+import { runningTimers } from '@/lib/jobTimer';
 
 export const runtime = 'nodejs';
 
@@ -21,7 +22,10 @@ export async function GET(req: NextRequest) {
     prisma.keywords.findMany({ where: { status: 'generating' }, select: { keyword: true } }),
     prisma.seo_strategies.findMany({ where: { status: { in: ['generating', 'paused', 'stopping'] } }, select: { id: true, status: true } }),
   ]);
-  const running = { blogs: blogs.map((b) => b.keyword), strategies: strategies.map((s) => `#${s.id} ${s.status}`) };
+  // other: timed work that is not a blog being written (fact checks before publishing, audits,
+  // rewrites, refreshes, guides), the same list the header progress bar shows.
+  const other = runningTimers().filter((t) => !t.key.startsWith('blog-')).map((t) => t.label);
+  const running = { blogs: blogs.map((b) => b.keyword), strategies: strategies.map((s) => `#${s.id} ${s.status}`), other };
   return NextResponse.json({ ...(await creditStatus()), running, ...(await queueStatus()), month: await thisMonth(), ...(days ? { window: await spendWindow(days) } : {}) });
 }
 
@@ -81,6 +85,7 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(usd) || usd < 0) return NextResponse.json({ error: 'Enter the balance in US dollars.' }, { status: 400 });
     const threshold = body.threshold === undefined || body.threshold === '' ? undefined : Number(body.threshold);
     await setBalance(usd, actor, threshold);
+    await resumeStopped();
   } else if (body.action === 'test_keys') {
     // Each key's answer from Anthropic; if one works while AI work is paused, work starts again.
     const keys = [await checkKey('main'), await checkKey('secondary')];
@@ -88,6 +93,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ...(await creditStatus()), keyTest: keys, resumed });
   } else if (body.action === 'resume') {
     await resumeAi(actor);
+    await resumeStopped();
   } else if (body.action === 'pause') {
     await pauseAi(`Paused by ${actor}.`);
   } else if (body.action === 'mode') {
@@ -108,6 +114,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
   }
   return NextResponse.json({ ...(await creditStatus()), ...(await queueStatus()) });
+}
+
+// After Resume or a new balance: the strategies the pause stopped, and a blog left waiting for
+// credits, start again (their finished AI steps are reused). In Testing mode they wait for Live mode.
+async function resumeStopped() {
+  if ((await settings.get('ai_paused')) === '1' || (await aiMode()) === 'testing') return;
+  await import('@/lib/aiReplay').then((m) => m.resumeCreditPaused()).catch(() => null);
 }
 
 // Testing mode and what waits for Claude Code.

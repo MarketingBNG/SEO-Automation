@@ -61,11 +61,34 @@ async function getTermsForKeyword(mainKeyword, opts: any = {}) {
   return cachedCall('surfer-terms', String(mainKeyword || '').toLowerCase().trim(), 24 * 7, () => getTermsForKeywordLive(mainKeyword, opts));
 }
 
+// The Content Editor made for a keyword is remembered until its terms are saved, so a check that
+// timed out polls the same editor next time instead of paying for a new one. An editor Surfer
+// reported as failed blocks a new one for a few hours (a held blog is checked every 15 minutes).
+const PENDING_DAYS = 7;
+const FAILED_HOURS = 6;
+
 async function getTermsForKeywordLive(mainKeyword, { maxWaitMs = 90000, pollMs = 4000 }: any = {}) {
-  const editor = await createContentEditor({ mainKeyword });
+  const settings = await import('./settings').catch(() => null);
+  const key = `surfer-editor:${String(mainKeyword || '').toLowerCase().trim()}`;
+  let saved = null;
+  try {
+    saved = settings ? JSON.parse((await settings.get(key)) || 'null') : null;
+  } catch {}
+  if (saved?.failedAt && Date.now() - saved.failedAt < FAILED_HOURS * 3600000) {
+    throw new Error(`Surfer Content Editor failed for this keyword recently; not tried again until ${FAILED_HOURS} hours have passed`);
+  }
+  let id;
+  let state;
+  if (saved?.id && Date.now() - saved.at < PENDING_DAYS * 86400000) {
+    id = saved.id;
+    state = (await getContentEditor(id)).state;
+  } else {
+    const editor = await createContentEditor({ mainKeyword });
+    id = editor.id;
+    state = editor.state;
+    if (settings) await settings.set(key, JSON.stringify({ id, at: Date.now() })).catch(() => {});
+  }
   const start = Date.now();
-  let state = editor.state;
-  const id = editor.id;
 
   while (state !== 'completed' && state !== 'failed' && Date.now() - start < maxWaitMs) {
     await new Promise((r) => setTimeout(r, pollMs));
@@ -73,11 +96,13 @@ async function getTermsForKeywordLive(mainKeyword, { maxWaitMs = 90000, pollMs =
     state = polled.state;
   }
 
+  if (state === 'failed' && settings) await settings.set(key, JSON.stringify({ failedAt: Date.now() })).catch(() => {});
   if (state !== 'completed') {
     throw new Error(`Surfer Content Editor did not complete in time (last state: ${state})`);
   }
 
   const { terms } = await getTerms(id);
+  if (settings) await settings.set(key, '').catch(() => {});
   return { editorId: id, terms };
 }
 

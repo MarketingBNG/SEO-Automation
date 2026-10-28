@@ -15,7 +15,8 @@ export const maxDuration = 300;
 // Claims the oldest pending keyword atomically: two concurrent requests can't both pick the same one.
 async function claimNextPending(): Promise<any | null> {
   for (let attempt = 0; attempt < 20; attempt++) {
-    const candidate = await prisma.keywords.findFirst({ where: { status: 'pending' }, orderBy: { id: 'asc' } });
+    // Calendar blogs ('Strategy #') are written by their schedule, never as a separate blog here.
+    const candidate = await prisma.keywords.findFirst({ where: { status: 'pending', OR: [{ batch_name: null }, { NOT: { batch_name: { startsWith: 'Strategy #' } } }] }, orderBy: { id: 'asc' } });
     if (!candidate) return null;
     const res = await prisma.keywords.updateMany({ where: { id: candidate.id, status: 'pending' }, data: { status: 'generating' } });
     if (res.count === 1) return { ...candidate, status: 'generating' };
