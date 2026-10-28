@@ -108,15 +108,31 @@ export default function HomeTab() {
   // Managers and associates review too: approve, reject, pause and reschedule.
   const canReview = who.can('manual.do');
   const canWork = who.can('content.work');
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  // A failed load keeps what is on screen and says so, instead of spinning for ever.
   const load = useCallback(async () => {
-    setData(await fetch('/api/home').then((r) => (r.ok ? r.json() : null)).catch(() => null));
+    const res = await fetch('/api/home').catch(() => null);
+    const j = res?.ok ? await res.json().catch(() => null) : null;
+    if (j) {
+      setData(j);
+      setLoadErr(null);
+    } else {
+      setLoadErr(res ? `Could not load this page (HTTP ${res.status}).` : 'Could not reach the server.');
+    }
   }, []);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 
+  const retry = loadErr && (
+    <div className="flex items-center gap-2 text-sm text-destructive">
+      {loadErr}
+      <Button size="sm" variant="outline" onClick={() => load()}>Retry</Button>
+    </div>
+  );
   if (!data) {
+    if (retry) return retry;
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 animate-spin" />
@@ -127,6 +143,7 @@ export default function HomeTab() {
   const waiting = (data.approvals?.length || 0) + (canWork ? data.looseDrafts?.length || 0 : 0);
   return (
     <div className="space-y-4">
+      {retry}
       {msg && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-sm">{msg}</div>}
 
       <div className="flex flex-wrap gap-2">

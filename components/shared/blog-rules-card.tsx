@@ -17,6 +17,33 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [running, setRunning] = useState<string | null>(null);
+  // Save stays off until the stored values are in the boxes, so it cannot write the defaults over them.
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/settings');
+        const s = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(s.error || `Could not load the saved blog rules (HTTP ${res.status}).`);
+        if (off) return;
+        try {
+          const custom = JSON.parse(s.service_ctas || '[]');
+          if (Array.isArray(custom) && custom.length) setCtas(custom);
+        } catch {}
+        if (s.tracked_keyword_target) setTarget(String(s.tracked_keyword_target));
+        setLoaded(true);
+      } catch (e: any) {
+        if (!off) setMsg(e.message);
+      }
+      const l = await fetch('/api/lessons').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (!off && l) setLessons(l.lessons || '');
+    })();
+    return () => {
+      off = true;
+    };
+  }, []);
 
   // Both jobs run on the server in the background; this polls until they finish.
   async function runNow(kind: 'lessons' | 'topup') {
@@ -114,7 +141,7 @@ export function BlogRulesCard({ canChange }: { canChange: boolean }) {
         </fieldset>
 
         <div className="flex items-center gap-2">
-          <Button onClick={save} disabled={!canChange || busy}>
+          <Button onClick={save} disabled={!canChange || busy || !loaded}>
             {busy ? <Loader2 className="animate-spin" /> : <Save />} Save blog rules
           </Button>
           {msg && <span className="text-muted-foreground">{msg}</span>}

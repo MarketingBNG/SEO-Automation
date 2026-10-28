@@ -41,6 +41,9 @@ export default function KeywordsTab() {
   const [message, setMessage] = useState('');
   const [progress, setProgress] = useState<{ stage: string; percent: number } | null>(null); // { stage, percent }
   const abortRef = useRef<AbortController | null>(null);
+  // The keyword the running generation writes (the stream's first line), and a Stop pressed before it arrived.
+  const runIdRef = useRef<number | null>(null);
+  const stopWantedRef = useRef(false);
 
   const [seedKeyword, setSeedKeyword] = useState('');
   const [researchType, setResearchType] = useState('similar');
@@ -69,6 +72,8 @@ export default function KeywordsTab() {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    runIdRef.current = null;
+    stopWantedRef.current = false;
 
     try {
       const res = await fetch('/api/generate', {
@@ -96,6 +101,11 @@ export default function KeywordsTab() {
         for (const line of lines) {
           if (!line.trim()) continue;
           const evt = JSON.parse(line);
+          if (evt.keywordId) {
+            runIdRef.current = Number(evt.keywordId);
+            if (stopWantedRef.current) void stopGeneration();
+            continue;
+          }
           if (evt.stage || evt.percent != null) setProgress({ stage: evt.stage, percent: evt.percent });
           if (evt.status === 'done') {
             setMessage(`Draft ready: "${evt.result.title}". Check the Drafts tab.`);
@@ -122,12 +132,21 @@ export default function KeywordsTab() {
       setGenerating(false);
       setProgress(null);
       abortRef.current = null;
+      runIdRef.current = null;
+      stopWantedRef.current = false;
     }
   }
 
   async function stopGeneration() {
-    // Stop the run on the server first (it no longer stops just because the page closes).
-    await fetch('/api/generate/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+    // Stop the run on the server first (it no longer stops just because the page closes). Only this
+    // page's run: other blogs running at the same time carry on.
+    const keywordId = runIdRef.current;
+    if (!keywordId) {
+      // The run has not said which keyword it writes yet: stop it as soon as it does.
+      stopWantedRef.current = true;
+      return;
+    }
+    await fetch('/api/generate/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keywordId }) }).catch(() => {});
     abortRef.current?.abort();
   }
 

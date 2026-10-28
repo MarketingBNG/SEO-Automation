@@ -202,6 +202,7 @@ function ImplementationStart({ plan, approved, approvedAt }: { plan: any; approv
 // How much of the strategy is done, and the estimated AI cost for its 30 days.
 function StrategyProgress({ id, approved, active = true }: { id: number; approved: boolean; active?: boolean }) {
   const [d, setD] = useState<any>(null);
+  const [taskErr, setTaskErr] = useState<string | null>(null);
   const load = useCallback(async () => {
     setD(await fetch(`/api/strategy/${id}/progress`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
   }, [id]);
@@ -215,7 +216,12 @@ function StrategyProgress({ id, approved, active = true }: { id: number; approve
   }, [load, active]);
   if (!d) return null;
   async function toggle(t: any) {
-    await fetch(`/api/strategy/backlinks/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: t.status === 'done' ? 'planned' : 'done' }) });
+    setTaskErr(null);
+    const res = await fetch(`/api/strategy/backlinks/${t.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: t.status === 'done' ? 'planned' : 'done' }) }).catch(() => null);
+    if (!res || !res.ok) {
+      const j = res ? await res.json().catch(() => ({})) : {};
+      setTaskErr(`Not changed: ${j.error || (res ? `HTTP ${res.status}` : 'the server could not be reached')}`);
+    }
     load();
   }
   return (
@@ -260,6 +266,7 @@ function StrategyProgress({ id, approved, active = true }: { id: number; approve
             {d.backlinks.tasks.length > 0 && (
               <details>
                 <summary className="cursor-pointer">Backlink tasks ({d.backlinks.tasks.length})</summary>
+                {taskErr && <p className="mt-2 text-xs text-destructive">{taskErr}</p>}
                 <ul className="mt-2 space-y-1">
                   {d.backlinks.tasks.map((t: any) => (
                     <li key={t.id} className="flex items-start gap-2">
@@ -838,6 +845,8 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
   const [view, setView] = useState<any>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Generating, pausing, stopping and the crawl upload need strategy.edit (the server checks it too).
+  const canEdit = useRole().can('strategy.edit');
 
   const load = useCallback(async () => {
     const rows = await fetch('/api/strategy').then((r) => (r.ok ? r.json() : [])).catch(() => []);
@@ -917,10 +926,12 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
             {list.map((s) => <option key={s.id} value={s.id}>{s.period} ({s.status.replace('_', ' ')}, v{s.version})</option>)}
           </select>
         )}
-        <Button variant="outline" disabled={starting || !!generating} onClick={generate}>
-          {(starting || generating) && <Loader2 className="animate-spin" />}
-          {generating ? (paused ? 'Paused' : 'Generating...') : 'Generate strategy (next 30 days)'}
-        </Button>
+        {canEdit && (
+          <Button variant="outline" disabled={starting || !!generating} onClick={generate}>
+            {(starting || generating) && <Loader2 className="animate-spin" />}
+            {generating ? (paused ? 'Paused' : 'Generating...') : 'Generate strategy (next 30 days)'}
+          </Button>
+        )}
       </div>
       <p className="text-xs text-muted-foreground">Each strategy covers 30 days from the day it is generated. A new one is generated automatically when the current one has 3 days left. Uses only real dashboard numbers. Generation runs on the server, so you can leave this page; progress also shows at the top of every tab.</p>
       {generating && (
@@ -931,12 +942,14 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
             <span className="text-muted-foreground">{paused ? 'Waiting for you to resume' : generating.progress?.stage}</span>
             <span className="ml-auto tabular-nums">{generating.progress?.percent ?? 0}%</span>
           </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {generating.status === 'generating' && <Button size="sm" variant="outline" onClick={() => control('pause')}>Pause</Button>}
-            {paused && <Button size="sm" onClick={() => control('resume')}>Resume</Button>}
-            {generating.status !== 'stopping' && <Button size="sm" variant="destructive" onClick={() => control('stop')}>Stop</Button>}
-            <span className="self-center text-xs text-muted-foreground">Pause takes effect at the next step; Stop cancels at once.</span>
-          </div>
+          {canEdit && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {generating.status === 'generating' && <Button size="sm" variant="outline" onClick={() => control('pause')}>Pause</Button>}
+              {paused && <Button size="sm" onClick={() => control('resume')}>Resume</Button>}
+              {generating.status !== 'stopping' && <Button size="sm" variant="destructive" onClick={() => control('stop')}>Stop</Button>}
+              <span className="self-center text-xs text-muted-foreground">Pause takes effect at the next step; Stop cancels at once.</span>
+            </div>
+          )}
           <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
             <div className="h-full rounded-full bg-primary transition-all duration-700" style={{ width: `${Math.max(2, generating.progress?.percent ?? 0)}%` }} />
           </div>
@@ -973,6 +986,7 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
           <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm font-bold">
             ACTION REQUIRED BEFORE APPROVAL: Upload the latest Screaming Frog crawl export (full links list) to the dashboard. The strategy cannot be approved without it.
           </div>
+          {canEdit && (
           <label className="block text-sm">
             Screaming Frog crawl export (CSV or XLSX):{' '}
             <input
@@ -990,6 +1004,7 @@ export default function StrategyTab({ active = true }: { active?: boolean }) {
               }}
             />
           </label>
+          )}
           <p className="text-sm text-muted-foreground">No strategy yet. Generate one, or wait for the monthly run.</p>
         </>
       )}

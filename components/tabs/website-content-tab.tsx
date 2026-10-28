@@ -8,12 +8,16 @@ import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useRole } from '@/hooks/use-role';
 
-const EMPTY_PAGE = { slug: '/', title: '', metaDescription: '', canonical: '', status: 'published', sections: { hero: { heading: '', html: '<p></p>' } }, schema: [] };
+// A new item starts with no URL path: '/' is the home page, and saving over it would replace it.
+const EMPTY_PAGE = { slug: '', title: '', metaDescription: '', canonical: '', status: 'published', sections: { hero: { heading: '', html: '<p></p>' } }, schema: [] };
 const EMPTY_POST = { slug: '/blog/', title: '', metaDescription: '', canonical: '', status: 'published', html: '<p></p>', cover: { url: '', alt: '' }, categories: [], tags: [], schema: [] };
 const pretty = (v: any) => JSON.stringify(v ?? null, null, 2);
 
 function Editor({ type, start, canEdit, onDone }: { type: 'page' | 'post'; start: any; canEdit: boolean; onDone: () => void }) {
   const [item, setItem] = useState<any>(start);
+  // A new item is saved with create: true, so the server refuses a URL path that is already taken.
+  // An existing item keeps its URL path (renaming would leave the old row behind).
+  const [isNew, setIsNew] = useState(!start.updatedAt);
   const [sections, setSections] = useState(pretty(start.sections || {}));
   const [schema, setSchema] = useState(pretty(start.schema || []));
   const [busy, setBusy] = useState(false);
@@ -24,10 +28,15 @@ function Editor({ type, start, canEdit, onDone }: { type: 'page' | 'post'; start
     setBusy(true);
     setMsg(null);
     try {
+      if (isNew && !String(item.slug || '').trim()) throw new Error('Enter the URL path of the new item, for example /services/itin.');
       const out = { ...item, schema: JSON.parse(schema || '[]'), ...(type === 'page' ? { sections: JSON.parse(sections || '{}') } : {}) };
-      const res = await fetch('/api/site-content', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', type, item: out }) });
+      const res = await fetch('/api/site-content', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save', type, item: out, ...(isNew ? { create: true } : {}) }) });
       const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (!res.ok) throw new Error(j.error);
+      if (isNew) {
+        setIsNew(false);
+        setItem({ ...item, slug: j.slug });
+      }
       setMsg(j.webhook?.sent ? 'Saved. The website was told to refresh this page.' : `Saved. The website was not told yet: ${j.webhook?.reason}.`);
       onDone();
     } catch (e: any) {
@@ -43,7 +52,7 @@ function Editor({ type, start, canEdit, onDone }: { type: 'page' | 'post'; start
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1">
           <div className="font-medium">URL path</div>
-          <input className={input} value={item.slug} onChange={(e) => set('slug', e.target.value)} disabled={!canEdit} />
+          <input className={input} value={item.slug} onChange={(e) => set('slug', e.target.value)} disabled={!canEdit || !isNew} placeholder="/services/itin" />
         </label>
         <label className="space-y-1">
           <div className="font-medium">Status</div>
@@ -116,6 +125,11 @@ export default function WebsiteContentTab() {
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ type: 'page' | 'post'; item: any } | null>(null);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const edit = (v: { type: 'page' | 'post'; item: any } | null) => {
+    setDeleteErr(null);
+    setEditing(v);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -135,12 +149,19 @@ export default function WebsiteContentTab() {
   async function open(slug: string, type: 'page' | 'post') {
     const res = await fetch(`/api/site-content?slug=${encodeURIComponent(slug)}`);
     const j = await res.json().catch(() => ({}));
-    if (res.ok) setEditing({ type, item: j.item });
+    if (res.ok) edit({ type, item: j.item });
   }
   async function remove(slug: string) {
     if (!confirm(`Delete ${slug} from the website content?`)) return;
-    await fetch('/api/site-content', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', slug }) });
-    setEditing(null);
+    setDeleteErr(null);
+    const res = await fetch('/api/site-content', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', slug }) }).catch(() => null);
+    const j = res ? await res.json().catch(() => ({})) : {};
+    if (!res || !res.ok) {
+      // Keep the editor open so it is clear the item is still there.
+      setDeleteErr(`Not deleted: ${j.error || (res ? `HTTP ${res.status}` : 'the server could not be reached')}`);
+      return;
+    }
+    edit(null);
     load();
   }
 
@@ -156,10 +177,10 @@ export default function WebsiteContentTab() {
           <CardDescription>The words, meta tags and blog posts of the new website. The website reads them through the content API; saving here updates the live site.</CardDescription>
           {canEdit && (
             <CardAction className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setEditing({ type: 'page', item: { ...EMPTY_PAGE } })}>
+              <Button variant="outline" size="sm" onClick={() => edit({ type: 'page', item: { ...EMPTY_PAGE } })}>
                 <Plus className="size-4" /> Page
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setEditing({ type: 'post', item: { ...EMPTY_POST } })}>
+              <Button variant="outline" size="sm" onClick={() => edit({ type: 'post', item: { ...EMPTY_POST } })}>
                 <Plus className="size-4" /> Blog post
               </Button>
             </CardAction>
@@ -184,12 +205,13 @@ export default function WebsiteContentTab() {
                   <Trash2 className="size-4" /> Delete
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
+              <Button variant="ghost" size="sm" onClick={() => edit(null)}>
                 Close
               </Button>
             </CardAction>
           </CardHeader>
           <CardContent>
+            {deleteErr && <div className="mb-3 text-sm text-red-600">{deleteErr}</div>}
             <Editor key={editing.item.slug + editing.type} type={editing.type} start={editing.item} canEdit={canEdit} onDone={load} />
           </CardContent>
         </Card>

@@ -13,7 +13,6 @@ import { parseJson } from './strategy/generate';
 import { getRecentTranscripts } from './fireflies';
 import { istDay, istHour } from './topics';
 import { onceADay, waitsForAi } from './onceADay';
-import { CreditPausedError } from './aiCredits';
 
 export const TRAINING_HOUR_IST = 9;
 export const PASS_PERCENT = 80;

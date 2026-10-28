@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
+import { useRole } from '@/hooks/use-role';
 
 const inr = (n: number, fx: { rate: number } | null | undefined) => (fx ? ` (₹${Math.round(n * fx.rate).toLocaleString('en-IN')})` : '');
 const usd = (n: number | null | undefined) => (n === null || n === undefined ? 'Not set' : `$${n.toFixed(2)}`);
@@ -24,6 +25,8 @@ const FEATURE: Record<string, string> = {
 
 // AI credits: which models run, what they cost, estimated credit left, and the automatic pause.
 export function AiCreditsCard() {
+  // Only the admin may switch between Testing and Live mode (the route refuses everyone else).
+  const isAdmin = useRole().role === 'admin';
   const [s, setS] = useState<any>(null);
   const [balance, setBalance] = useState('');
   const [threshold, setThreshold] = useState('');
@@ -102,7 +105,7 @@ export function AiCreditsCard() {
             </div>
           )}
           <div className="mt-2 flex flex-wrap gap-2">
-            {s.aiMode === 'testing' ? (
+            {!isAdmin ? null : s.aiMode === 'testing' ? (
               <Button size="sm" disabled={busy} onClick={() => window.confirm('Switch to Live mode? AI work will use API credits again, and automatic work starts again.') && post({ action: 'mode', mode: 'live' })}>Switch to Live mode (use API credits)</Button>
             ) : (
               <Button size="sm" disabled={busy} onClick={() => post({ action: 'mode', mode: 'testing' })}><FlaskConical />Switch to Testing mode (Claude Code subscription)</Button>

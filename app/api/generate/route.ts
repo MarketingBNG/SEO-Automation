@@ -59,6 +59,8 @@ export async function POST(req: NextRequest) {
         }
       };
 
+      // First line: which keyword this run writes, so the page's Stop stops only this run.
+      send({ keywordId: keyword.id });
       runBlogJob(keyword, controller, send).finally(() => {
         if (!closed) {
           closed = true;

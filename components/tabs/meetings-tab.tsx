@@ -19,6 +19,9 @@ export default function MeetingsTab() {
   const [loadingTranscripts, setLoadingTranscripts] = useState(false);
 
   const [insights, setInsights] = useState<any[]>([]);
+  // A failed save or decision on one insight; the overview box goes back to the saved text.
+  const [insightErr, setInsightErr] = useState<{ id: any; text: string } | null>(null);
+  const [overviewReset, setOverviewReset] = useState(0);
 
   const loadInsights = useCallback(async () => {
     const j = await fetch('/api/client-insights').then((r) => r.json()).catch(() => null);
@@ -73,21 +76,27 @@ export default function MeetingsTab() {
     loadInsights();
   }
 
-  async function decideInsight(id: any, status: string) {
-    await fetch(`/api/client-insights/${id}`, {
+  // Returns true when the server saved the change; otherwise the error shows on that insight.
+  async function patchInsight(id: any, body: any) {
+    setInsightErr(null);
+    const res = await fetch(`/api/client-insights/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
+      body: JSON.stringify(body),
+    }).catch(() => null);
+    if (res?.ok) return true;
+    const j = res ? await res.json().catch(() => ({})) : {};
+    setInsightErr({ id, text: `Not saved: ${j.error || (res ? `HTTP ${res.status}` : 'the server could not be reached')}` });
+    return false;
+  }
+
+  async function decideInsight(id: any, status: string) {
+    await patchInsight(id, { status });
     loadInsights();
   }
 
   async function updateInsightOverview(id: any, overview: string) {
-    await fetch(`/api/client-insights/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ overview }),
-    });
+    if (!(await patchInsight(id, { overview }))) setOverviewReset((n) => n + 1);
     loadInsights();
   }
 
@@ -155,12 +164,14 @@ export default function MeetingsTab() {
                 </Badge>
               </div>
               <Textarea
+                key={`${i.overview}-${overviewReset}`}
                 rows={5}
                 defaultValue={i.overview}
                 onBlur={(e) => {
                   if (e.target.value !== i.overview) updateInsightOverview(i.id, e.target.value);
                 }}
               />
+              {insightErr && insightErr.id === i.id && <p className="text-sm text-destructive">{insightErr.text}</p>}
               {i.status === 'approved' && (
                 <div>
                   <Button variant="outline" size="sm" onClick={() => decideInsight(i.id, 'rejected')}>

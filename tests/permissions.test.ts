@@ -99,3 +99,11 @@ test('the cron secret opens only the scheduled job routes, on GET', async () => 
     else process.env.CRON_SECRET = prev;
   }
 });
+
+test('only settings.change connects Zoho or Google Business Profile', () => {
+  for (const path of ['/api/zoho/auth-url', '/api/zoho/oauth-callback', '/api/gbp/auth-url', '/api/gbp/oauth-callback']) {
+    assert.equal(actionFor('GET', path), 'settings.change', path);
+    for (const r of ['manager', 'analyst', 'user'] as Role[]) assert.equal(allowed(r, 'GET', path), false, `${r} ${path}`);
+    assert.equal(allowed('admin', 'GET', path), true);
+  }
+});
