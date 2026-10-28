@@ -11,6 +11,17 @@ import * as settings from './settings';
 import { saveFile } from './storage';
 import { composeCover } from './cover';
 
+// A photo source that fails (wrong key, unknown model, size refused) is said in the server log and,
+// at most once a day per source, in the Activity Log, so a broken cover path does not go unseen.
+const failSaidAt: Record<string, number> = {};
+async function sourceFailed(source: string, res: Response | null) {
+  const body = res ? await res.text().catch(() => '') : '';
+  const what = res ? `HTTP ${res.status}: ${body.slice(0, 200)}` : 'no answer (network error or timeout)';
+  console.error(`Cover photo: ${source} failed, ${what}`);
+  if (Date.now() - (failSaidAt[source] || 0) < 86400000) return;
+  failSaidAt[source] = Date.now();
+  await import('./activity').then((a) => a.log('draft.cover_source_failed', { details: `${source} failed for a blog banner (${what}). Check its key and settings.` })).catch(() => {});
+}
 
 // Topic words -> what the photo should show (searched on Pexels, newest topic match first).
 const SCENES: [RegExp, string[]][] = [
@@ -42,7 +53,10 @@ async function pexelsPhoto(topic: string, first: string[] = []): Promise<Buffer 
   const used = await usedPhotos();
   for (const q of [...first, ...photoQueries(topic)]) {
     const res = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&orientation=landscape&size=large&per_page=30`, { headers: { Authorization: key }, signal: AbortSignal.timeout(20000) }).catch(() => null);
-    if (!res?.ok) continue;
+    if (!res?.ok) {
+      await sourceFailed('Pexels', res);
+      continue;
+    }
     const photos: any[] = ((await res.json().catch(() => ({}))) as any).photos || [];
     const pick = photos.find((p) => !used.includes(`pexels-${p.id}`) && p.width >= 1600);
     if (!pick) continue;
@@ -54,9 +68,12 @@ async function pexelsPhoto(topic: string, first: string[] = []): Promise<Buffer 
   return null;
 }
 
-async function aiPhoto(topic: string, direction?: string): Promise<Buffer | null> {
+async function aiPhoto(topic: string, direction?: string, draftId?: number): Promise<Buffer | null> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return null;
+  // A paid image: not made in Testing mode or while AI work is paused.
+  const { aiMode } = await import('./aiQueue');
+  if ((await aiMode()) === 'testing' || (await settings.get('ai_paused')) === '1') return null;
   // The art director's scene when there is one; the house rules for the photo always apply.
   const scene = direction ? direction.slice(0, 900) : `A premium modern office for a cross-border finance and tax firm, scene about: ${topic}. Real objects only (desk, documents, laptop, small Indian and US desk flags, city skyline through the window).`;
   const prompt = `Professional editorial photograph, shot on a full-frame camera, natural window light, shallow depth of field. ${scene} The left third of the frame is calm and slightly darker so a headline can sit on it. No people's faces, no text, no letters, no logos, no watermark. Realistic, not illustrated, not 3D render.`;
@@ -66,8 +83,13 @@ async function aiPhoto(topic: string, direction?: string): Promise<Buffer | null
     body: JSON.stringify({ model: process.env.COVER_IMAGE_MODEL || 'gpt-image-2.5-sunburst', prompt, size: '1536x1024', n: 1 }),
     signal: AbortSignal.timeout(120000),
   }).catch(() => null);
-  if (!res?.ok) return null;
+  if (!res?.ok) {
+    await sourceFailed(`OpenAI image (${process.env.COVER_IMAGE_MODEL || 'gpt-image-2.5-sunburst'})`, res);
+    return null;
+  }
   const b64 = ((await res.json().catch(() => ({}))) as any)?.data?.[0]?.b64_json;
+  // OpenAI images are not Anthropic credit, so they stay out of ai_usage; each one is noted here.
+  if (b64) await import('./activity').then((a) => a.log('draft.cover_ai_image', { entityType: 'draft', entityId: draftId, details: 'AI cover photo made with OpenAI (paid per image).' })).catch(() => {});
   return b64 ? Buffer.from(b64, 'base64') : null;
 }
 
@@ -108,7 +130,18 @@ Return only JSON: {"main": "...", "cutout": "...", "queries": ["...", "...", "..
 
 // Makes and saves the photo cover for a draft that has none. Returns the stored key, or null when
 // no photo source is set up or nothing worked (the branded cover is then used, as before).
-export async function ensurePhotoCover(draftId: number): Promise<string | null> {
+// A second call for a draft whose cover is already being made (the new-draft job, the scheduler and
+// a publish can overlap) waits for that one instead of paying for another banner.
+const inFlight = new Map<number, Promise<string | null>>();
+export function ensurePhotoCover(draftId: number): Promise<string | null> {
+  const running = inFlight.get(draftId);
+  if (running) return running;
+  const job = makePhotoCover(draftId).finally(() => inFlight.delete(draftId));
+  inFlight.set(draftId, job);
+  return job;
+}
+
+async function makePhotoCover(draftId: number): Promise<string | null> {
   const d = await prisma.drafts.findUnique({ where: { id: draftId }, include: { keyword: { select: { keyword: true } } } });
   if (!d || d.featured_image_path || d.kind === 'article') return d?.featured_image_path || null;
   const topic = `${d.title || ''} ${d.keyword?.keyword || ''}`.trim();
@@ -121,7 +154,7 @@ export async function ensurePhotoCover(draftId: number): Promise<string | null> 
   const { socialBanner } = await import('./socialSkills');
   let jpg = await socialBanner({ title, topic, author, main: dir?.main, cutout: dir?.cutout });
   if (!jpg) {
-    const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo).catch(() => null));
+    const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo, draftId).catch(() => null));
     if (!photo) return null;
     jpg = await composeCover(photo, title, { gold: dir?.gold });
   }
@@ -132,9 +165,14 @@ export async function ensurePhotoCover(draftId: number): Promise<string | null> 
 }
 
 // Every blog not yet on the website gets its banner by itself: a few per scheduler run, so nobody has to press anything.
-// A blog that could not get one is tried again after six hours.
+// A blog that could not get one is tried again after six hours, up to 3 times; then the Activity Log
+// says so once, so someone uploads a cover (each try can pay for art direction and an AI image).
+const MAX_COVER_TRIES = 3;
 export async function fillMissingCovers(max = 2): Promise<number> {
-  const tried: Record<string, number> = JSON.parse((await settings.get('cover_fill_tried').catch(() => null)) || '{}');
+  const raw: Record<string, number | { at: number; n: number }> = JSON.parse((await settings.get('cover_fill_tried').catch(() => null)) || '{}');
+  // Older entries are a bare timestamp (one try).
+  const tried: Record<string, { at: number; n: number }> = {};
+  for (const [k, v] of Object.entries(raw)) tried[k] = typeof v === 'number' ? { at: v, n: 1 } : v;
   const now = Date.now();
   const rows = await prisma.drafts.findMany({
     where: { featured_image_path: null, wp_post_url: null, kind: { not: 'article' }, status: { notIn: ['in_progress', 'rejected', 'published'] } },
@@ -143,11 +181,22 @@ export async function fillMissingCovers(max = 2): Promise<number> {
     take: 20,
   });
   let made = 0;
-  for (const r of rows.filter((x) => now - (tried[x.id] || 0) > 6 * 3600000).slice(0, max)) {
-    tried[r.id] = now;
-    if (await ensurePhotoCover(r.id).catch(() => null)) made++;
+  const due = rows.filter((x) => (tried[x.id]?.n || 0) < MAX_COVER_TRIES && now - (tried[x.id]?.at || 0) > 6 * 3600000);
+  for (const r of due.slice(0, max)) {
+    const n = (tried[r.id]?.n || 0) + 1;
+    tried[r.id] = { at: now, n };
+    let why = 'no photo source gave a picture';
+    const key = await ensurePhotoCover(r.id).catch((e: any) => {
+      why = String(e?.message || e).slice(0, 200);
+      return null;
+    });
+    if (key) made++;
+    else if (n >= MAX_COVER_TRIES) {
+      await import('./activity').then((a) => a.log('draft.cover_failed', { entityType: 'draft', entityId: r.id, details: `No banner could be made after ${n} tries (${why}). Upload a cover for this draft.` })).catch(() => {});
+    }
   }
-  for (const k of Object.keys(tried)) if (now - tried[k] > 7 * 86400000) delete tried[k];
+  // A draft given up on is kept for 30 days so it is not tried again; others are forgotten after 7.
+  for (const k of Object.keys(tried)) if (now - tried[k].at > (tried[k].n >= MAX_COVER_TRIES ? 30 : 7) * 86400000) delete tried[k];
   await settings.set('cover_fill_tried', JSON.stringify(tried)).catch(() => {});
   return made;
 }

@@ -169,6 +169,9 @@ async function runLoop(conv, emit, signal) {
         jsonRetries = 0;
         await recordUsage({ model: message.model || MODEL, usage: message.usage, feature: 'assistant' });
       } catch (err: any) {
+        // A failed attempt is billed for what it used so far: record it for the credit estimate.
+        const partial = !message && (stream as any).currentMessage?.usage;
+        if (partial) await recordUsage({ model: MODEL, usage: partial, feature: 'assistant' }).catch(() => {});
         await onApiError(err, (client as any).keyKind);
         if (signal.aborted || err instanceof Anthropic.APIError || jsonRetries++ >= 2) throw err;
         emit({ type: 'notice', text: 'Retrying a step that came back malformed…' });
