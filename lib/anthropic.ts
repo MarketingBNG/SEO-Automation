@@ -251,7 +251,7 @@ words LINK HERE. 120-200 words, no hashtag spam (3 at most), no emojis, no em da
 // maxParts: how many times a long turn that the API paused (pause_turn, common with many web
 // searches) is continued before giving up.
 // Errors worth retrying: dropped connections, timeouts, overloaded or server errors, rate limits.
-function isTransient(err: any) {
+export function isTransient(err: any) {
   const status = Number(err?.status);
   if ([408, 409, 429, 500, 502, 503, 504, 529].includes(status)) return true;
   if (status >= 400 && status < 500) return false;
@@ -461,7 +461,13 @@ const BATCH_MAX_WAIT_MS = 25 * 60 * 60 * 1000; // batches expire after 24h
 async function runBatchTurn(client, params, signal) {
   const pendingKey = `batch_pending:${requestHash(params)}`;
   const forget = () => prisma.settings.deleteMany({ where: { key: pendingKey } }).catch(() => {});
-  const savedId = await settings.get(pendingKey).catch(() => null);
+  // Saved as {"id","at"} (at: when it was sent, so pruneReplay can drop a key whose request never came
+  // back); a plain id from before is still read.
+  const savedRaw = await settings.get(pendingKey).catch(() => null);
+  let savedId: string | null = savedRaw || null;
+  try {
+    if (savedRaw && savedRaw.startsWith('{')) savedId = JSON.parse(savedRaw).id || null;
+  } catch {}
   let created: any = savedId ? await client.messages.batches.retrieve(savedId).catch(() => null) : null;
   // Only a batch from the last week that was not cancelled (its results are kept 29 days).
   if (created && (created.cancel_initiated_at || Date.now() - Date.parse(created.created_at) > 7 * 86400000)) created = null;
@@ -469,7 +475,7 @@ async function runBatchTurn(client, params, signal) {
     created = await client.messages.batches
       .create({ requests: [{ custom_id: 'turn', params }] })
       .catch((err: any) => rethrowFriendly(err, signal, clientKeyKind(client)));
-    await settings.set(pendingKey, created.id).catch(() => {});
+    await settings.set(pendingKey, JSON.stringify({ id: created.id, at: Date.now() })).catch(() => {});
   }
   const started = Date.now();
   let status = created.processing_status;
@@ -1503,16 +1509,29 @@ corrected draft again in the exact same format (===TITLE=== through ===END===):\
 async function generateContentSkill({ batch = false }: any = {}) {
   const previous = await prisma.writing_skills.findFirst({ where: { status: 'active' }, orderBy: { id: 'desc' } });
 
+  // The GA4 numbers are kept for the refresh cycle (3 days), so a batch refresh cut off by a restart
+  // sends the same request the next day and picks up the batch already sent and paid for
+  // (runBatchTurn finds it by the request), instead of paying for a second one with new numbers.
+  const GA4_KEY = 'skill_refresh_ga4';
   let ownPerformanceNote = 'No GA4 data available this cycle.';
+  let frozenNote: string | null = null;
   try {
-    const pages = await getTopLandingPages(28, 10);
-    if (pages.length) {
-      ownPerformanceNote = pages
-        .map((p) => `${p.page}: ${p.sessions} sessions, ${p.conversions} conversions`)
-        .join('\n');
+    const saved = JSON.parse((await settings.get(GA4_KEY)) || 'null');
+    if (saved && typeof saved.note === 'string' && Date.now() - saved.at < 3 * 86400000) frozenNote = saved.note;
+  } catch {}
+  if (frozenNote != null) ownPerformanceNote = frozenNote;
+  else {
+    try {
+      const pages = await getTopLandingPages(28, 10);
+      if (pages.length) {
+        ownPerformanceNote = pages
+          .map((p) => `${p.page}: ${p.sessions} sessions, ${p.conversions} conversions`)
+          .join('\n');
+      }
+    } catch (e: any) {
+      ownPerformanceNote = `GA4 unavailable this cycle: ${e.message}`;
     }
-  } catch (e: any) {
-    ownPerformanceNote = `GA4 unavailable this cycle: ${e.message}`;
+    if (batch) await settings.set(GA4_KEY, JSON.stringify({ at: Date.now(), note: ownPerformanceNote })).catch(() => {});
   }
 
   const systemPrompt = `You are a content-writing skill researcher. Your only job is to study how
@@ -1565,6 +1584,8 @@ writer follows, not a report about the research.>
     undefined,
     { maxUses: 10, batch, feature: 'training' }
   );
+  // The cycle's answer is in: the next refresh reads fresh GA4 numbers.
+  await prisma.settings.deleteMany({ where: { key: GA4_KEY } }).catch(() => {});
 
   const get = (start, end) => {
     const startIdx = text.indexOf(start);

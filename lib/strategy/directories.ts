@@ -152,7 +152,9 @@ export async function directoriesTick(now = new Date(), find = findDirectories) 
     return null;
   }
   // The day counts as done when the run ends; one stopped by paused AI work runs again later.
-  return onceADay('directories_last_day', today, () => addDirectories(strategy, perDay, today, find));
+  // The finder runs as a batch, which can wait up to 25 hours: the run marker is trusted for 26 hours,
+  // so a batch still waiting is never joined by a second run (only a restart leaves it stale).
+  return onceADay('directories_last_day', today, () => addDirectories(strategy, perDay, today, find), 26 * 60);
 }
 
 async function addDirectories(strategy: any, perDay: number, today: string, find: typeof findDirectories) {

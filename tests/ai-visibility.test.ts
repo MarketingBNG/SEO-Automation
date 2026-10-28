@@ -2,8 +2,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+// SE Ranking answers are saved for 24 hours in the settings table (lib/apiCache.ts). Each test starts
+// with that cache empty, so it sees its own stubbed answers, not the ones an earlier test (or run) saved.
+async function clearSavedAnswers() {
+  if (!process.env.DATABASE_URL) return;
+  const { default: prisma } = await import('../lib/prisma');
+  await prisma.settings.deleteMany({ where: { key: { startsWith: 'apicache:seranking' } } });
+}
+
 test('AI visibility pulls ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode from SE Ranking', async () => {
   process.env.SERANKING_API_KEY = 'test-key';
+  await clearSavedAnswers();
   const seen: string[] = [];
   globalThis.fetch = (async (url: any, init: any) => {
     const u = new URL(String(url));
@@ -35,6 +44,7 @@ test('AI visibility pulls ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode 
 });
 
 test('AI visibility reports failures as errors, never as numbers', async () => {
+  await clearSavedAnswers();
   globalThis.fetch = (async () => Response.json({ error_description: 'Plan does not include AI Search' }, { status: 403 })) as any;
   const { gatherAiVisibility } = await import('../lib/aiVisibility');
   const r = await gatherAiVisibility('usaindiacfo.com');

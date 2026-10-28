@@ -127,6 +127,8 @@ Return ONLY ===JSON===[{"domain":"example.com","why":"one line"}]===END===`,
 const pageUrl = (p: string) => (p?.startsWith('http') ? p : `${SITE()}${p?.startsWith('/') ? '' : '/'}${p || ''}`);
 
 // One pass: link check, then new leads for Smartlead within the daily cap. `line` is injectable for tests.
+const ADD_LEAD_FAILED = 'Smartlead add-lead failed';
+
 export async function runOutreach(now = new Date(), { checkLinks = true, line: writeLine = openingLine, find = findSites }: any = {}) {
   const out = { pushed: 0, duplicates: 0, verified: 0, noContact: 0, manual: 0, skipped: '' };
   const today = now.toISOString().slice(0, 10);
@@ -189,6 +191,9 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
   }
   const pushedToday = await prisma.backlink_tasks.count({ where: { sent_at: { startsWith: today } } });
   let budget = Math.max(0, DAILY_LIMIT() - pushedToday);
+  // Add-lead failures in a row in this run: two different leads refused means the campaign itself is
+  // the problem (deleted or paused, bad key), so the run stops instead of paying for more opening lines.
+  let refusedInARow = 0;
 
   for (const t of tasks.filter((x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && isRealSite(x.target_site) && (!x.send_date || x.send_date.slice(0, 10) <= today))) {
     if (budget <= 0) break;
@@ -219,11 +224,19 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
           custom_fields: { opening_line: line, target_page: pageUrl(t.our_page), topic: t.method },
         });
       } catch (err: any) {
-        // Smartlead refuses leads (campaign deleted or paused, bad key): stop here instead of paying
-        // for an opening line on every other due task.
-        await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: `Smartlead add-lead failed, outreach stopped for today: ${String(err.message || err).slice(0, 400)}` });
-        break;
+        // A lead refused twice (on two runs) is given up on, so one lead Smartlead keeps refusing does
+        // not block every other due task on every run.
+        const again = String(t.note || '').startsWith(ADD_LEAD_FAILED);
+        const why = String(err.message || err).slice(0, 400);
+        await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: again ? 'failed' : 'planned', contact_email: contact.email, note: `${ADD_LEAD_FAILED}: ${why}`.slice(0, 500) } });
+        t.note = `${ADD_LEAD_FAILED}: ${why}`;
+        refusedInARow++;
+        const stop = refusedInARow >= 2;
+        await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: `Smartlead add-lead failed${again ? ' again, so this lead is given up on' : ''}${stop ? '; outreach stopped for today' : ''}: ${why}` });
+        if (stop) break;
+        continue;
       }
+      refusedInARow = 0;
       await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'sent', contact_email: contact.email, email_body: line, sent_at: sqlNow(now), note: 'Added to Smartlead campaign.' } });
       await activity.log('backlink.sent', { entityType: 'backlink_task', entityId: t.id, details: `Added ${contact.email} (${t.target_site}) to the Smartlead campaign` });
       out.pushed++;

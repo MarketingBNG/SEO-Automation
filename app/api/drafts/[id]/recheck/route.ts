@@ -37,7 +37,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (fix && open.length) {
       const out = await fixIssues(d, open);
       const words = String(out.content || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
-      const saved = await prisma.drafts.update({ where: { id }, data: { title: out.title, meta_description: out.meta, content_html: out.content, word_count: words, updated_at: sqlNow() } });
+      // Saved only when nobody saved the draft while the fix ran: a person's save is never overwritten.
+      const { count } = await prisma.drafts.updateMany({ where: { id, updated_at: d.updated_at }, data: { title: out.title, meta_description: out.meta, content_html: out.content, word_count: words, updated_at: sqlNow() } });
+      if (!count) {
+        return NextResponse.json({ error: 'The draft was saved by someone while the fix ran, so the fix was not saved (nothing was overwritten). Press Check and fix again to fix the saved version.' }, { status: 409 });
+      }
+      const saved = (await prisma.drafts.findUnique({ where: { id } }))!;
       await markEditedAsChecked(id, 'the issue fixer');
       fixed = true;
       const again = await recheckIssues(saved, open);

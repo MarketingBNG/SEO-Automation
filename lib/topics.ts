@@ -12,7 +12,7 @@ import * as activity from './activity';
 import { callClaude } from './anthropic';
 import { parseJson } from './strategy/generate';
 import { startTimer, endTimer } from './jobTimer';
-import { onceADay } from './onceADay';
+import { onceADay, waitsForAi } from './onceADay';
 import { runBlogJob } from './blogJob';
 import { startAudit, startRewrite } from './auditJobs';
 import { plainText, words } from './originality';
@@ -116,7 +116,9 @@ For every item fill "relevance" honestly: "write" only when it touches a service
     return { day, topics: saved, note };
   } catch (e: any) {
     await settings.set('topics_last_run', JSON.stringify({ at: new Date().toISOString(), day, error: String(e?.message || e).slice(0, 300) }));
-    await activity.log('topics.failed', { details: String(e?.message || e).slice(0, 200) });
+    // Waiting for AI (Testing mode, a credit pause) is not a failure: the run is tried again on later
+    // ticks that day, and a failure row on each of them would only be noise.
+    if (!waitsForAi(e)) await activity.log('topics.failed', { details: String(e?.message || e).slice(0, 200) });
     await endTimer(key, false);
     throw e;
   } finally {

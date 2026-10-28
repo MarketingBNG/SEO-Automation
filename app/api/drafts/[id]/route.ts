@@ -62,6 +62,14 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   // Claude Code edits words only; approving, rejecting and publishing stay with a signed-in person.
   const viaToken = hasDraftToken(req);
   if (viaToken && (status != null || cover_alt != null || author != null)) return NextResponse.json({ error: 'The edit token changes only the title, meta description and article. Approve or reject in the dashboard.' }, { status: 403 });
+  // Only the review states the screen sets. 'published' comes only from a real publish (it needs the
+  // WordPress post), and a blog already live is not moved back to review here.
+  if (status != null && !['approved', 'rejected', 'pending_review'].includes(status)) {
+    return NextResponse.json({ error: 'Status must be approved, rejected or pending_review. Publishing is done with Publish.' }, { status: 400 });
+  }
+  if (status != null && existing.status === 'published') {
+    return NextResponse.json({ error: 'This blog is already published; its review status cannot change here.' }, { status: 409 });
+  }
   // Sent by scripts/draft.ts: refuse when someone saved the draft after it was read.
   if (if_updated_at != null && String(if_updated_at) !== String(existing.updated_at)) {
     return NextResponse.json({ error: `The draft was changed at ${existing.updated_at} (after it was read at ${if_updated_at}). Read it again and redo the edit.` }, { status: 409 });

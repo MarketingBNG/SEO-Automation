@@ -39,3 +39,40 @@ test('pruneReplay keeps the old steps of a run still waiting to resume', { skip:
   await prisma.ai_replay.deleteMany({ where: { scope: `blog-${kw.id}` } });
   await prisma.keywords.delete({ where: { id: kw.id } });
 });
+
+test('frozenInput: a blog input saved days ago is built again; a strategy keeps its own', { skip: !db }, async () => {
+  const prisma = (await import('../lib/prisma')).default;
+  const { withReplay, frozenInput, clearReplay } = await import('../lib/aiReplay');
+  const blog = `blog-test-stale-${Date.now()}`;
+  const strategy = `strategy-test-stale-${Date.now()}`;
+  const old = '2000-01-01 00:00:00';
+  await prisma.ai_replay.createMany({ data: [
+    { scope: blog, hash: 'input:today', result: JSON.stringify({ run: 'x', value: '2000-01-01' }), created_at: old },
+    { scope: strategy, hash: 'input:today', result: JSON.stringify({ run: 'x', value: '2000-01-01' }), created_at: old },
+  ] });
+  const build = async () => 'fresh';
+  assert.equal(await withReplay(blog, () => frozenInput('today', build)), 'fresh');
+  // Saved again with a new date, so the next attempt of the same run reads it back.
+  assert.equal(await withReplay(blog, () => frozenInput('today', async () => 'other')), 'fresh');
+  assert.equal(await withReplay(strategy, () => frozenInput('today', build)), '2000-01-01');
+  await clearReplay(blog);
+  await clearReplay(strategy);
+});
+
+test('pruneReplay keeps unwritten calendar blogs and their fact checks, not a blog a person stopped', { skip: !db }, async () => {
+  const prisma = (await import('../lib/prisma')).default;
+  const { pruneReplay } = await import('../lib/aiReplay');
+  const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'approved', plan_json: '{}' } });
+  const row = await prisma.blog_schedule.create({ data: { strategy_id: s.id, publish_at: '2099-01-01 00:00:00', title: 't', main_keyword: `prune ${Date.now()}`, tags: '[]', status: 'planned', draft_id: 987654321 } });
+  const stopped = await prisma.keywords.create({ data: { keyword: `stopped ${Date.now()}`, status: 'pending' } });
+  const old = '2000-01-01 00:00:00';
+  const scopes = [`blog-sched-${row.id}`, 'factcheck-987654321-abc', `blog-${stopped.id}`, 'factcheck-987654322-abc'];
+  await prisma.ai_replay.createMany({ data: scopes.map((scope) => ({ scope, hash: 'h', result: '{}', created_at: old })) });
+  await pruneReplay();
+  const left = (await prisma.ai_replay.findMany({ where: { scope: { in: scopes } } })).map((r) => r.scope).sort();
+  assert.deepEqual(left, [`blog-sched-${row.id}`, 'factcheck-987654321-abc'].sort());
+  await prisma.ai_replay.deleteMany({ where: { scope: { in: scopes } } });
+  await prisma.keywords.delete({ where: { id: stopped.id } });
+  await prisma.blog_schedule.delete({ where: { id: row.id } });
+  await prisma.seo_strategies.delete({ where: { id: s.id } });
+});

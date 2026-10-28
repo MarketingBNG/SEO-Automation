@@ -118,3 +118,182 @@ test('a rewrite that keeps failing is stopped, and one cut off by a restart is p
     await prisma.seo_strategies.delete({ where: { id: s.id } });
   }
 });
+
+// A writer result as researchAndWriteBlog returns it, for the rewrite tests below.
+const written = (title: string) => ({
+  title,
+  meta: 'Meta',
+  content: '<p>New text</p>',
+  researchNotes: '',
+  factCheck: null,
+  productionState: 'READY_FOR_REVIEW',
+  repairAttempts: 0,
+  validation: { issues: [], warnings: [], wordCount: 2, passed: true },
+  peopleAlsoAsk: [],
+  keywordPlan: null,
+  linkedin: null,
+  lengthTarget: null,
+  cta: null,
+  facts: [],
+});
+
+test('a rewrite that fails after its new draft is saved resumes from that draft, with a new review', { skip: !hasDb }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const settings = await import('../lib/settings');
+  const { runDaily } = await import('../lib/strategy/autopilot');
+  const today = new Date().toISOString().slice(0, 10);
+  for (const k of ['last_rank_check', 'last_outreach_run', 'last_speed_run', 'last_site_check']) await settings.set(k, today);
+  const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'approved', plan_json: '{}' } });
+  // The slot has passed and the earlier version's review window was opened days ago.
+  const past = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  const row = await prisma.blog_schedule.create({
+    data: { strategy_id: s.id, publish_at: past, title: 'Test blog', main_keyword: `rewrite kw ${Date.now()}`, tags: '[]', status: 'rejected', reject_feedback: 'Shorter.', review_started: past, reminded_at: past },
+  });
+  let writes = 0;
+  const write = async () => {
+    writes++;
+    return written('Rewritten');
+  };
+  const verify = async () => {
+    throw new Error('The database went away.');
+  };
+  try {
+    await runDaily(new Date(), { write, verify });
+    assert.equal(writes, 1);
+    const after = await prisma.blog_schedule.findUnique({ where: { id: row.id } });
+    assert.equal(after!.status, 'paused');
+    assert.equal(after!.paused_from, 'planned', 'Resume opens the review of the new draft, it does not pay for another rewrite');
+    assert.ok(after!.draft_id);
+    assert.equal(after!.review_started, null, 'the old review window does not count for the new draft');
+    assert.equal(after!.reminded_at, null);
+    // Resumed: the new draft gets its review, never a publish without one.
+    assert.equal(scheduleAction({ ...after!, status: 'planned' } as any, new Date()), 'open_review');
+    // The failed fact check's saved steps are dropped, so Resume does not replay the same failure.
+    assert.equal(await prisma.ai_replay.count({ where: { scope: { startsWith: `factcheck-${after!.draft_id}-` } } }), 0);
+  } finally {
+    const kws = (await prisma.keywords.findMany({ where: { keyword: row.main_keyword }, select: { id: true } })).map((k) => k.id);
+    await prisma.drafts.deleteMany({ where: { keyword_id: { in: kws } } });
+    await prisma.keywords.deleteMany({ where: { id: { in: kws } } });
+    await prisma.blog_schedule.deleteMany({ where: { strategy_id: s.id } });
+    await prisma.seo_strategies.delete({ where: { id: s.id } });
+  }
+});
+
+test('a calendar draft that really failed drops its saved steps; one waiting for AI keeps them', { skip: !hasDb }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const settings = await import('../lib/settings');
+  const { runDaily } = await import('../lib/strategy/autopilot');
+  const { frozenInput } = await import('../lib/aiReplay');
+  const { CreditPausedError } = await import('../lib/aiCredits');
+  const today = new Date().toISOString().slice(0, 10);
+  for (const k of ['last_rank_check', 'last_outreach_run', 'last_speed_run', 'last_site_check']) await settings.set(k, today);
+  const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'approved', plan_json: '{}' } });
+  const soon = new Date(Date.now() + 24 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+  const row = await prisma.blog_schedule.create({ data: { strategy_id: s.id, publish_at: soon, title: 'Test blog', main_keyword: `replay kw ${Date.now()}`, tags: '[]', status: 'planned' } });
+  const scope = `blog-sched-${row.id}`;
+  let fail: Error = new CreditPausedError('AI work is paused.');
+  const write = async () => {
+    await frozenInput('writer-brief', async () => 'brief');
+    throw fail;
+  };
+  try {
+    await runDaily(new Date(), { write });
+    assert.equal(await prisma.ai_replay.count({ where: { scope } }), 1, 'kept for the run that continues after the pause');
+    fail = new Error('Could not parse a valid blog draft.');
+    await runDaily(new Date(), { write });
+    assert.equal(await prisma.ai_replay.count({ where: { scope } }), 0, 'a real failure starts fresh after Resume');
+  } finally {
+    await prisma.ai_replay.deleteMany({ where: { scope } });
+    await prisma.keywords.deleteMany({ where: { keyword: row.main_keyword } });
+    await prisma.blog_schedule.deleteMany({ where: { strategy_id: s.id } });
+    await prisma.seo_strategies.delete({ where: { id: s.id } });
+  }
+});
+
+test('a lead Smartlead keeps refusing is given up on and does not block the other tasks', { skip: !hasDb }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const { runOutreach } = await import('../lib/strategy/outreach');
+  const saved = { fetch: globalThis.fetch, key: process.env.SMARTLEAD_API_KEY, campaign: process.env.SMARTLEAD_CAMPAIGN_ID };
+  process.env.SMARTLEAD_API_KEY = 'test-key';
+  process.env.SMARTLEAD_CAMPAIGN_ID = '1';
+  const added: string[] = [];
+  // Stubbed: each site's home page shows its contact email; Smartlead refuses bad-site.com only.
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = new URL(String(url));
+    if (u.hostname === 'server.smartlead.ai') {
+      if (init?.method === 'GET') return new Response('', { status: 404 });
+      const email = JSON.parse(init.body).lead_list[0].email;
+      if (email.endsWith('@bad-site.com')) return new Response('{"error":"invalid lead"}', { status: 400 });
+      added.push(email);
+      return Response.json({ ok: true });
+    }
+    return new Response(`<title>${u.hostname}</title><p>contact@${u.hostname}</p>`, { status: 200 });
+  }) as any;
+  const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'approved', plan_json: '{}' } });
+  const base = { strategy_id: s.id, method: 'Resource page outreach', our_page: '/itin', send_date: '2020-01-01', tags: '[]' };
+  const bad = await prisma.backlink_tasks.create({ data: { ...base, target_site: 'bad-site.com' } });
+  const good = await prisma.backlink_tasks.create({ data: { ...base, target_site: 'good-site.com' } });
+  const line = async () => 'A line.';
+  try {
+    await runOutreach(new Date(), { checkLinks: false, line });
+    assert.deepEqual(added, ['contact@good-site.com'], 'the next task is still pushed');
+    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: bad.id } }))!.status, 'planned', 'one refusal: tried again next run');
+    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: good.id } }))!.status, 'sent');
+    await runOutreach(new Date(), { checkLinks: false, line });
+    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: bad.id } }))!.status, 'failed', 'refused twice: given up on');
+  } finally {
+    globalThis.fetch = saved.fetch;
+    process.env.SMARTLEAD_API_KEY = saved.key || '';
+    process.env.SMARTLEAD_CAMPAIGN_ID = saved.campaign || '';
+    await prisma.backlink_tasks.deleteMany({ where: { strategy_id: s.id } });
+    await prisma.seo_strategies.delete({ where: { id: s.id } });
+  }
+});
+
+test('onceADay clears only its own run marker', { skip: !hasDb }, async () => {
+  const settings = await import('../lib/settings');
+  const { onceADay } = await import('../lib/onceADay');
+  const key = `test_once_marker_${Date.now()}`;
+  const later = JSON.stringify({ day: '2026-11-01', at: 1, by: 'a later run' });
+  await onceADay(key, '2026-11-01', async () => {
+    // A later run took over (this one looked stale to it) while this one was still going.
+    await settings.set(`${key}_running`, later);
+  });
+  assert.equal(await settings.get(`${key}_running`), later);
+  const { default: prisma } = await import('../lib/prisma');
+  await prisma.settings.deleteMany({ where: { key: { startsWith: key } } });
+});
+
+test('a remembered Surfer editor that no longer exists is replaced, not retried for 7 days', { skip: !hasDb }, async () => {
+  const settings = await import('../lib/settings');
+  const { default: prisma } = await import('../lib/prisma');
+  const { getTermsForKeyword } = await import('../lib/surfer');
+  const kw = `surfer test ${Date.now()}`;
+  const saved = { fetch: globalThis.fetch, key: process.env.SURFER_API_KEY, ws: process.env.SURFER_WORKSPACE_ID };
+  process.env.SURFER_API_KEY = 'test';
+  process.env.SURFER_WORKSPACE_ID = '9';
+  await settings.set(`surfer-editor:${kw}`, JSON.stringify({ id: 111, at: Date.now() }));
+  let created = 0;
+  globalThis.fetch = (async (url: any, init: any) => {
+    const p = new URL(String(url)).pathname;
+    if (p.endsWith('/content_editors/111')) return Response.json({ error: 'not found' }, { status: 404 });
+    if (init?.method === 'POST') {
+      created++;
+      return Response.json({ id: 222, state: 'completed' });
+    }
+    if (p.endsWith('/content_editors/222/seo_guidelines/terms')) return Response.json({ terms: [{ term: 'itin' }] });
+    return Response.json({}, { status: 404 });
+  }) as any;
+  try {
+    const r: any = await getTermsForKeyword(kw);
+    assert.equal(created, 1);
+    assert.equal(r.editorId, 222);
+    assert.equal(await prisma.settings.count({ where: { key: `surfer-editor:${kw}` } }), 0, 'no empty row left behind');
+  } finally {
+    globalThis.fetch = saved.fetch;
+    process.env.SURFER_API_KEY = saved.key || '';
+    process.env.SURFER_WORKSPACE_ID = saved.ws || '';
+    await prisma.settings.deleteMany({ where: { key: { contains: kw } } });
+    await prisma.settings.deleteMany({ where: { key: { startsWith: 'apicache:surfer-terms' } } });
+  }
+});

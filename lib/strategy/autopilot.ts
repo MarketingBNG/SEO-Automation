@@ -10,6 +10,7 @@ import { researchAndWriteBlog, verifyAndCorrect } from '../anthropic';
 import { CreditPausedError, isCreditError, assertCredits } from '../aiCredits';
 import { aiMode, isAutomatic, TestingModeError } from '../aiQueue';
 import { withReplay, clearReplay } from '../aiReplay';
+import { claimPublish, publishingRows } from './publishLock';
 import { connectorOn, authorSlug } from '../siteConnector';
 import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia, freeSlug } from '../wordpress';
 import { listSites, getSiteRankings, addTrackedKeyword } from '../seranking';
@@ -83,6 +84,9 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog, bu
     // Never leave the keyword stuck as "generating"; the next scheduler run tries again.
     await prisma.keywords.update({ where: { id: kw.id }, data: { status: 'failed', error: String(err.message || err).slice(0, 1000), progress_stage: null, progress_percent: null } });
     await update(row.id, { status: 'planned' });
+    // A run that only waits for AI keeps its saved steps for the restart. A real failure drops them
+    // (as lib/blogJob.ts does), so Resume writes it again instead of replaying the same bad answers.
+    if (!waitsForAi(err)) await clearReplay(scope).catch(() => {});
     throw err;
   }
   const draft = await prisma.drafts.create({
@@ -123,6 +127,10 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog, bu
     keyword_id: kw.id,
     draft_id: draft.id,
     status: 'planned',
+    // A new draft gets its own review: a review window opened for an earlier (rejected) version does
+    // not count, so the new text never publishes without a person being able to see it.
+    review_started: null,
+    reminded_at: null,
     author: draftAuthor,
     cta: result.cta ? JSON.stringify(result.cta) : row.cta || null,
     fact_check: inlineClean ? JSON.stringify({ inlineStamp: draft.updated_at, inlineModel: result.factCheck.model, inlineClaims: result.factCheck.checks.length }) : null,
@@ -224,14 +232,21 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   const facts = await prisma.facts.findMany({ where: { draft_id: draft.id }, select: { fact_id: true, claim: true, source_url: true } });
   // Finished checks are saved per draft text, so a check cut off by a pause or restart is not paid twice.
   const scope = `factcheck-${draft.id}-${words}`;
-  const result = await timed(`factcheck-${draft.id}`, 'fact-check', `Fact check before publishing (${why}): ${draft.title}`, () =>
-    withReplay(scope, () =>
-      verify(
-        { title: draft.title, meta: draft.meta_description, content: draft.content_html || '', facts },
-        { mustCheckOf: (html) => extractClaims(html).map((c) => c.sentence), startClean }
+  let result;
+  try {
+    result = await timed(`factcheck-${draft.id}`, 'fact-check', `Fact check before publishing (${why}): ${draft.title}`, () =>
+      withReplay(scope, () =>
+        verify(
+          { title: draft.title, meta: draft.meta_description, content: draft.content_html || '', facts },
+          { mustCheckOf: (html) => extractClaims(html).map((c) => c.sentence), startClean }
+        )
       )
-    )
-  );
+    );
+  } catch (err) {
+    // Same rule as writeDraft: only a run waiting for AI keeps its saved steps.
+    if (!waitsForAi(err)) await clearReplay(scope).catch(() => {});
+    throw err;
+  }
   let saved = draft;
   const changed = result.draft.content !== draft.content_html || result.draft.title !== draft.title || result.draft.meta !== draft.meta_description;
   if (changed) {
@@ -251,19 +266,18 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   return { ...record, draft: saved };
 }
 
-// Rows being published right now in this server (scheduler, cron route and Publish now share it),
-// so two paths never publish the same blog at once.
-const gp = globalThis as unknown as { __schedulePublishing?: Set<number> };
-const publishing = (gp.__schedulePublishing ||= new Set<number>());
+// Rows being published right now in this server (scheduler, cron route, Publish now and Publish in
+// Drafts & Review share it, lib/strategy/publishLock.ts), so two paths never publish the same blog at once.
+const publishing = publishingRows;
 
 // Returns 'published', 'held', or 'busy' when another path is publishing this row right now.
 async function publishRow(row, now, verify = verifyAndCorrect) {
-  if (publishing.has(row.id)) return 'busy';
-  publishing.add(row.id);
+  const release = claimPublish(row.id, row.draft_id ?? null);
+  if (!release) return 'busy';
   try {
     return await publishRowOnce(row, now, verify);
   } finally {
-    publishing.delete(row.id);
+    release();
   }
 }
 
@@ -479,7 +493,12 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
       summary.drafted++;
     } catch (e: any) {
       summary.errors.push(`${rejected.title}: rewrite failed: ${e.message}`);
-      if (!waitsForAi(e)) await stopAfterFailure(rejected, { message: `rewrite failed: ${e.message}` }, 'rejected');
+      if (!waitsForAi(e)) {
+        // When the new draft was already saved (the row is 'planned' again) and a later step failed,
+        // Resume continues from that draft (its review opens) instead of paying for a new rewrite.
+        const cur = await prisma.blog_schedule.findUnique({ where: { id: rejected.id }, select: { status: true } }).catch(() => null);
+        await stopAfterFailure(rejected, { message: `rewrite failed: ${e.message}` }, cur?.status === 'planned' ? 'planned' : 'rejected');
+      }
     }
   }
 

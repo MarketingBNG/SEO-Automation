@@ -48,12 +48,29 @@ export async function frozenInput<T>(name: string, build: () => Promise<T>, { ea
     ctx.counts[name] = (ctx.counts[name] || 0) + 1;
     hash += `#${ctx.counts[name]}`;
   }
-  const saved = await savedStep(ctx.scope, hash);
-  if (saved && 'value' in saved) return saved.value;
+  // A blog's saved input older than FROZEN_MAX_DAYS is built again: a blog started again weeks later
+  // (after a Stop, or a failure left pending) works from today's brief and date, not the old ones.
+  // A strategy keeps its request for its whole run (its period is fixed, and it is paused on purpose).
+  const row = await prisma.ai_replay.findUnique({ where: { scope_hash: { scope: ctx.scope, hash } } }).catch(() => null);
+  if (row && (ctx.scope.startsWith('strategy-') || !isStale(row.created_at))) {
+    try {
+      const saved = JSON.parse(row.result);
+      if (saved && 'value' in saved) return saved.value;
+    } catch {}
+  }
   const value = await build();
-  if (value !== undefined) await saveStep(ctx.scope, hash, { run: ctx.run, value });
+  if (value !== undefined) {
+    const data = JSON.stringify({ run: ctx.run, value });
+    await prisma.ai_replay
+      .upsert({ where: { scope_hash: { scope: ctx.scope, hash } }, create: { scope: ctx.scope, hash, result: data }, update: { result: data, created_at: sqlNow() } })
+      .catch((e) => console.error('ai_replay save failed:', e.message));
+  }
   return value;
 }
+
+export const FROZEN_MAX_DAYS = 3;
+const isStale = (createdAt: string) => Date.now() - Date.parse(String(createdAt).replace(' ', 'T') + 'Z') > FROZEN_MAX_DAYS * 86400000;
+const sqlNow = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 
 // Today's date (UTC) as the run first saw it, so a run resumed after midnight asks the same questions.
 export const runToday = () => frozenInput('today', async () => new Date().toISOString().slice(0, 10));
@@ -62,17 +79,32 @@ export async function clearReplay(scope: string) {
   await prisma.ai_replay.deleteMany({ where: { scope } }).catch(() => {});
 }
 
-// Steps of runs nobody started again within 14 days. A run still waiting to resume (a blog left
-// pending, a strategy paused or generating) keeps its steps however long the wait.
+// Steps of runs nobody started again within 14 days. A run still waiting to resume keeps its steps
+// however long the wait: a blog left pending for credits, a pause or a restart (not one a person
+// stopped), a strategy paused or generating, and a calendar blog not yet written or published (its
+// writer steps and its fact checks).
 export async function pruneReplay() {
   const before = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
   try {
-    const [blogs, strategies] = await Promise.all([
-      prisma.keywords.findMany({ where: { status: { in: ['pending', 'generating'] } }, select: { id: true } }),
+    const waiting = ['credit', 'paused', 'cut off'].map((w) => ({ error: { contains: w, mode: 'insensitive' as const } }));
+    const [blogs, strategies, rows] = await Promise.all([
+      prisma.keywords.findMany({ where: { OR: [{ status: 'generating' }, { status: 'pending', OR: waiting }] }, select: { id: true } }),
       prisma.seo_strategies.findMany({ where: { status: { in: ['paused', 'generating'] } }, select: { id: true } }),
+      prisma.blog_schedule.findMany({ where: { status: { notIn: ['published', 'failed'] } }, select: { id: true, draft_id: true } }),
     ]);
-    const live = [...blogs.map((k) => `blog-${k.id}`), ...strategies.map((s) => `strategy-${s.id}`)];
-    await prisma.ai_replay.deleteMany({ where: { created_at: { lt: before }, scope: { notIn: live } } });
+    const live = [...blogs.map((k) => `blog-${k.id}`), ...strategies.map((s) => `strategy-${s.id}`), ...rows.map((r) => `blog-sched-${r.id}`)];
+    const checks = rows.filter((r) => r.draft_id).map((r) => ({ scope: { startsWith: `factcheck-${r.draft_id}-` } }));
+    await prisma.ai_replay.deleteMany({ where: { created_at: { lt: before }, scope: { notIn: live }, ...(checks.length ? { NOT: { OR: checks } } : {}) } });
+    // Batch ids saved by runBatchTurn whose request never came back (a batch is reused for a week).
+    const batches = await prisma.settings.findMany({ where: { key: { startsWith: 'batch_pending:' } } });
+    const old = batches.filter((b) => {
+      try {
+        return b.value.startsWith('{') && Date.now() - JSON.parse(b.value).at > 7 * 86400000;
+      } catch {
+        return false;
+      }
+    });
+    if (old.length) await prisma.settings.deleteMany({ where: { key: { in: old.map((b) => b.key) } } });
   } catch {}
 }
 

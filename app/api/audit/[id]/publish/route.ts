@@ -51,7 +51,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       } as any);
     }
 
-    await prisma.blog_audits.update({ where: { id: nid }, data: { rewrite_status: separateDraft ? 'sent_as_draft' : 'published' } });
+    // The separate draft's address and id are kept, so the audit page links to it after a reload.
+    await prisma.blog_audits.update({
+      where: { id: nid },
+      data: separateDraft ? { rewrite_status: 'sent_as_draft', rewrite_wp_draft_url: post.link || null, rewrite_wp_draft_id: post.id ?? null } : { rewrite_status: 'published' },
+    });
 
     await activity.log('audit.rewrite_published', {
       entityType: 'blog_audit',

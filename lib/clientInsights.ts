@@ -6,8 +6,8 @@
 import prisma from './prisma';
 import * as activity from './activity';
 import { sqlNow } from './time';
-import { callClaude } from './anthropic';
-import { CreditPausedError } from './aiCredits';
+import { callClaude, isTransient } from './anthropic';
+import { waitsForAi } from './onceADay';
 import { getRecentTranscripts } from './fireflies';
 
 // Money amounts and contact details that must never reach a blog via this route.
@@ -131,8 +131,9 @@ async function runSync({ limit = 20, cleaner = clean } = {}) {
       if (r?.status === 'approved') out.approved++;
       else out.held++;
     } catch (e: any) {
-      // Paused credits or Testing mode: stop, and clean it on a later run.
-      if (e instanceof CreditPausedError) throw e;
+      // Paused credits, Testing mode, Anthropic's own out-of-credit answer, or an outage that outlasted
+      // the retries (nothing useful was billed): stop, and clean it on a later run.
+      if (waitsForAi(e) || isTransient(e)) throw e;
       // Anything else (a refusal is billed before it throws): hold this row for a person, so one bad
       // row does not fail the whole sync and get paid for again on every scheduler tick.
       await activity.log('client_insight.needs_review', { entityType: 'client_insight', entityId: p.id, details: `Automatic cleaning failed: ${String(e?.message || e).slice(0, 300)}. Left for manual review.` });

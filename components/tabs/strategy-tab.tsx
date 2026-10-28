@@ -84,6 +84,7 @@ const TASK_STATUS: Record<string, string> = {
   sent: 'In Smartlead',
   duplicate: 'Already in Smartlead',
   no_contact: 'No contact found',
+  failed: 'Smartlead refused this lead',
   skipped: 'Skipped',
 };
 

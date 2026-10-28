@@ -78,12 +78,22 @@ async function getTermsForKeywordLive(mainKeyword, { maxWaitMs = 90000, pollMs =
   if (saved?.failedAt && Date.now() - saved.failedAt < FAILED_HOURS * 3600000) {
     throw new Error(`Surfer Content Editor failed for this keyword recently; not tried again until ${FAILED_HOURS} hours have passed`);
   }
+  // Removed (not set to ''), so no empty row is left in settings for every keyword ever checked.
+  const forget = () => import('./prisma').then((m) => m.default.settings.deleteMany({ where: { key } })).catch(() => {});
   let id;
   let state;
   if (saved?.id && Date.now() - saved.at < PENDING_DAYS * 86400000) {
-    id = saved.id;
-    state = (await getContentEditor(id)).state;
-  } else {
+    try {
+      state = (await getContentEditor(saved.id)).state;
+      id = saved.id;
+    } catch (e) {
+      // The saved editor is gone (deleted in Surfer, or another workspace): forgotten, and a new one is
+      // made below. A server error or timeout is passed on, so a working editor is not paid for twice.
+      if (!/Surfer API error \(4\d\d\)/.test(String(e?.message || ''))) throw e;
+      await forget();
+    }
+  }
+  if (!id) {
     const editor = await createContentEditor({ mainKeyword });
     id = editor.id;
     state = editor.state;
@@ -103,7 +113,7 @@ async function getTermsForKeywordLive(mainKeyword, { maxWaitMs = 90000, pollMs =
   }
 
   const { terms } = await getTerms(id);
-  if (settings) await settings.set(key, '').catch(() => {});
+  await forget();
   return { editorId: id, terms };
 }
 

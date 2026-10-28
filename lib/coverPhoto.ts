@@ -13,7 +13,9 @@ import { composeCover } from './cover';
 
 // A photo source that fails (wrong key, unknown model, size refused) is said in the server log and,
 // at most once a day per source, in the Activity Log, so a broken cover path does not go unseen.
-const failSaidAt: Record<string, number> = {};
+// Kept on globalThis: the scheduler and each route load their own copy of this module.
+const gc = globalThis as unknown as { __coverFailSaidAt?: Record<string, number>; __coverInFlight?: Map<number, Promise<string | null>> };
+const failSaidAt: Record<string, number> = (gc.__coverFailSaidAt ||= {});
 async function sourceFailed(source: string, res: Response | null) {
   const body = res ? await res.text().catch(() => '') : '';
   const what = res ? `HTTP ${res.status}: ${body.slice(0, 200)}` : 'no answer (network error or timeout)';
@@ -132,7 +134,7 @@ Return only JSON: {"main": "...", "cutout": "...", "queries": ["...", "...", "..
 // no photo source is set up or nothing worked (the branded cover is then used, as before).
 // A second call for a draft whose cover is already being made (the new-draft job, the scheduler and
 // a publish can overlap) waits for that one instead of paying for another banner.
-const inFlight = new Map<number, Promise<string | null>>();
+const inFlight: Map<number, Promise<string | null>> = (gc.__coverInFlight ||= new Map());
 export function ensurePhotoCover(draftId: number): Promise<string | null> {
   const running = inFlight.get(draftId);
   if (running) return running;
@@ -173,6 +175,11 @@ export async function fillMissingCovers(max = 2): Promise<number> {
   // Older entries are a bare timestamp (one try).
   const tried: Record<string, { at: number; n: number }> = {};
   for (const [k, v] of Object.entries(raw)) tried[k] = typeof v === 'number' ? { at: v, n: 1 } : v;
+  // Testing mode or paused AI work skips the paid sources on purpose, and with no photo source set up
+  // nothing can be made: neither counts as a try, so no draft is given up on (or logged) for it.
+  const { aiMode } = await import('./aiQueue');
+  if ((await aiMode()) === 'testing' || (await settings.get('ai_paused')) === '1') return 0;
+  if (!process.env.SOCIAL_SKILLS_SECRET && !process.env.PEXELS_API_KEY && !process.env.OPENAI_API_KEY) return 0;
   const now = Date.now();
   const rows = await prisma.drafts.findMany({
     where: { featured_image_path: null, wp_post_url: null, kind: { not: 'article' }, status: { notIn: ['in_progress', 'rejected', 'published'] } },

@@ -15,7 +15,8 @@ export async function onceADay<T>(key: string, day: string, fn: () => Promise<T>
     const r = JSON.parse((await settings.get(runKey)) || 'null');
     if (r?.day === day && Date.now() - r.at < staleMinutes * 60000) return null;
   } catch {}
-  await settings.set(runKey, JSON.stringify({ day, at: Date.now() }));
+  const mine = JSON.stringify({ day, at: Date.now() });
+  await settings.set(runKey, mine);
   try {
     const out = await fn();
     await settings.set(key, day);
@@ -24,6 +25,7 @@ export async function onceADay<T>(key: string, day: string, fn: () => Promise<T>
     if (!waitsForAi(e)) await settings.set(key, day);
     throw e;
   } finally {
-    await settings.set(runKey, '').catch(() => {});
+    // Only this run's own marker is cleared: a later run that started meanwhile keeps its own.
+    if ((await settings.get(runKey).catch(() => null)) === mine) await settings.set(runKey, '').catch(() => {});
   }
 }

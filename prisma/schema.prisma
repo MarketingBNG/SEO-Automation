@@ -149,6 +149,8 @@ model blog_audits {
   rewrite_title           String?
   rewrite_content_html    String?
   rewrite_status          String?
+  rewrite_wp_draft_url    String? // the separate WordPress draft a rewrite of a live post was sent as
+  rewrite_wp_draft_id     Int?
   created_at              String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
   rewrite_meta            String? // JSON
   people_also_ask         String? // JSON

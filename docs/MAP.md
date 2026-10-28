@@ -47,13 +47,18 @@ link to the Social dashboard (`/api/links`).
   2. `Authorization: Bearer DRAFT_EDIT_TOKEN` (>= 24 chars): only the allow-list in `lib/draftToken.ts`
      (GET `/api/drafts/list`, GET/PATCH `/api/drafts/<id>`, GET `/api/drafts/<id>/download`,
      GET `/api/ai-credits`, GET/POST `/api/agent`); anything else 403.
-  3. `Authorization: Bearer CRON_SECRET`: passes everything, no role check.
-  4. NextAuth JWT: blocked users get 403 on any non-GET API call; `actionFor(method, path)`
-     (`lib/permissions.ts`) names the action; non-admins need it in `token.access`/`token.grants`. No token:
+  3. `Authorization: Bearer CRON_SECRET`: only GET on `/api/cron/*`, `/api/skill/auto-check` and
+     `/api/strategy/auto-check` (`cronAllows` in `lib/cronSecret.ts`); anything else 403.
+  4. NextAuth JWT: role, block and access are read live from the database (`liveAccessFor` in
+     `lib/access.ts`, cached 30 s; the token's copy only when the database is down). Blocked users get 403
+     on any non-GET API call and on a GET that maps to settings.change; `actionFor(method, path)`
+     (`lib/permissions.ts`) names the action; non-admins need it in their access or grants. No token:
      401 for `/api/*`, redirect to `/login` for pages.
 - `actionFor` defaults: GET/HEAD -> `reports.download` (performance/download, audit/<id>/download),
   `reports.view` (performance, ga4, gsc, seranking, clarity, blog-analytics, zoho/leads|pipeline|business),
-  `credits.view` (ai-credits, agent), `team.view` (team), else **none (any signed-in member)**.
+  `credits.view` (ai-credits, agent), `team.view` (team), `reports.view` (client-insights), `settings.change`
+  (gbp|zoho auth-url and oauth-callback, fireflies/transcripts, serphouse/check, pagespeed/check), else
+  **none (any signed-in member)**.
   Writes -> settings.change (seranking/topup, settings, gsc, ga4, gbp, zoho, wordpress, fireflies, bing,
   surfer/test, serphouse/test, seranking/test), assistant.ask (assistant/chat|upload), website.change
   (assistant/decide|undo), manual.do (associate-training, strategy/manual, strategy/backlinks/*,
@@ -86,11 +91,11 @@ link to the Social dashboard (`/api/links`).
 | bing/test | GET,POST | Bing Webmaster connection test | GET signed-in; POST settings.change |
 | blog-analytics | GET | one blog / all blogs analytics | reports.view |
 | clarity/insights | any | Clarity live insights | GET reports.view |
-| client-insights | GET,POST,PUT | meeting insights; PUT pulls Fireflies now | GET signed-in; writes content.work |
+| client-insights | GET,POST,PUT | meeting insights; PUT pulls Fireflies now | GET reports.view; writes content.work |
 | client-insights/[id] | PATCH,DELETE | edit/delete insight | content.work |
-| cron/daily | GET | `runDaily()` via `runAutomatic` | **GET: any signed-in member** (no cron check) |
-| cron/weekly | GET | `runWeekly()` via `runAutomatic` | **GET: any signed-in member** |
-| cron/sweep | GET | reset stuck keywords/conversations/strategies | GET any signed-in member (comment says CRON_SECRET) |
+| cron/daily | GET | `runDaily()` via `runAutomatic` | CRON_SECRET only (`isCronRequest`, else 403) |
+| cron/weekly | GET | `runWeekly()` via `runAutomatic` | CRON_SECRET only (`isCronRequest`, else 403) |
+| cron/sweep | GET | reset stuck keywords/conversations/strategies | CRON_SECRET only (`isCronRequest`, else 403) |
 | drafts/list | GET | drafts list (admin/tester also get schedule) | signed-in or draft token |
 | drafts/[id] | GET,PATCH,DELETE | read / edit / delete draft | GET signed-in; writes content.work; draft token GET/PATCH |
 | drafts/[id]/cover | GET,POST | cover image (uploaded or generated) | GET signed-in; POST content.work |
@@ -103,9 +108,9 @@ link to the Social dashboard (`/api/links`).
 | drafts/[id]/recheck | POST | re-run open fact-check issues | content.work |
 | drafts/[id]/word | POST | parse uploaded .docx back into a blog | content.work |
 | facts/[id] | PATCH | review a fact | content.work |
-| fireflies/test, fireflies/transcripts | any | connection test / transcripts | GET signed-in; writes settings.change |
+| fireflies/test, fireflies/transcripts | any | connection test / transcripts | GET test signed-in, transcripts settings.change; writes settings.change |
 | ga4/summary, ga4/top-pages | any | GA4 data | GET reports.view |
-| gbp/auth-url, gbp/oauth-callback, gbp/test | any | Business Profile OAuth + test | GET signed-in; writes settings.change |
+| gbp/auth-url, gbp/oauth-callback, gbp/test | any | Business Profile OAuth + test | GET auth-url/oauth-callback settings.change, test signed-in; writes settings.change |
 | generate | POST | write next blog (streamed NDJSON) | content.work |
 | generate/stop | POST | stop blog generation(s) | content.work |
 | gsc/test, gsc/top-queries | any | Search Console | GET reports.view |
@@ -115,7 +120,7 @@ link to the Social dashboard (`/api/links`).
 | keywords/[id]/retry | POST | requeue failed keyword | content.work |
 | lessons | GET,POST | weekly lessons; POST runs now | GET signed-in; POST content.work |
 | links | GET | Social dashboard link | signed-in |
-| pagespeed/check | any | PageSpeed Insights for a URL | GET signed-in |
+| pagespeed/check | any | PageSpeed Insights for a URL | settings.change |
 | performance | GET | SEO/AEO/GEO report | reports.view |
 | performance/download | GET | report .docx | reports.download |
 | performance/explain | GET | AI "why it changed" paragraph (Claude) | reports.view |
@@ -123,7 +128,7 @@ link to the Social dashboard (`/api/links`).
 | seranking/ai-visibility | GET | live AI visibility (spends SE Ranking credits) | reports.view |
 | seranking/rankings, seranking/research, seranking/test | any | SE Ranking data | GET reports.view |
 | seranking/topup | GET,POST | tracked-keyword top-up status / start | GET reports.view; POST settings.change |
-| serphouse/check | GET | live SERP lookup (paid, 12h cache) | **GET: any signed-in member** |
+| serphouse/check | GET | live SERP lookup (paid, 12h cache) | settings.change |
 | serphouse/test | GET | connection test | signed-in |
 | settings | GET,POST | all settings / set keys | GET signed-in; POST settings.change |
 | site-content | GET,POST | custom-site pages/posts; POST saves + webhooks site | GET signed-in; POST content.work |
@@ -166,7 +171,7 @@ link to the Social dashboard (`/api/links`).
 | wordpress/posts | any | WP post list with audit/draft origin | GET signed-in; writes settings.change |
 | wordpress/test | any | WP connection test | GET signed-in |
 | wordpress/yoast-status | GET | Yoast REST snippet check | signed-in |
-| zoho/auth-url, zoho/oauth-callback, zoho/test | any | Zoho OAuth + test | GET signed-in; writes settings.change |
+| zoho/auth-url, zoho/oauth-callback, zoho/test | any | Zoho OAuth + test | GET auth-url/oauth-callback settings.change, test signed-in; writes settings.change |
 | zoho/leads, zoho/pipeline | any | CRM data | GET reports.view |
 | zoho/business | GET | leads/consults/clients by blog topic | reports.view |
 
@@ -329,8 +334,5 @@ link to the Social dashboard (`/api/links`).
 Other env: CRON_SECRET, DRAFT_EDIT_TOKEN, BUILTIN_SCHEDULER, DASHBOARD_URL, CLAUDE_IDLE_TIMEOUT_MS.
 
 ## Notes seen while mapping (for reviewers)
-- `/api/cron/daily`, `/api/cron/weekly`, `/api/cron/sweep`: GET has no cron-secret check in the route and
-  `actionFor` returns null for GET, so any signed-in member (including role `user`) can trigger them.
-- `/api/serphouse/check` (paid live SERP) and `/api/pagespeed/check` are GETs open to any signed-in member.
 - `/api/site-content` POST changes the live custom website but maps to `content.work`, not `website.change`.
 - Legacy "any method" routes accept writes on read endpoints (e.g. POST `/api/ga4/summary` needs settings.change).

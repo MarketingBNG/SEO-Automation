@@ -20,7 +20,8 @@ export async function runBlogJob(keyword: any, controller: AbortController, send
   const scope = `blog-${keyword.id}`;
   await withReplay(scope, () => runBlogJobOnce(keyword, controller, send));
   const after = await prisma.keywords.findUnique({ where: { id: keyword.id }, select: { status: true } }).catch(() => null);
-  if (after?.status !== 'pending' && after?.status !== 'generating') await clearReplay(scope);
+  // A run a person stopped starts fresh next time (the Stop is a decision, not a pause to resume).
+  if (controller.signal.aborted || (after?.status !== 'pending' && after?.status !== 'generating')) await clearReplay(scope);
 }
 
 async function runBlogJobOnce(keyword: any, controller: AbortController, send: (evt: any) => void) {

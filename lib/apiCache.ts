@@ -35,5 +35,9 @@ export async function cachedCall<T>(name: string, args: unknown, ttlHours: numbe
 // The saved value starts with {"at":<ms>, so the age is read without parsing the whole answer.
 export async function pruneApiCache(now = Date.now()) {
   const { default: prisma } = await import('./prisma');
-  return prisma.$executeRaw`DELETE FROM settings WHERE key LIKE 'apicache:%' AND substring(value from '^[{]"at":([0-9]+)')::bigint < ${now - 8 * 24 * 3600000}`;
+  const n = await prisma.$executeRaw`DELETE FROM settings WHERE key LIKE 'apicache:%' AND substring(value from '^[{]"at":([0-9]+)')::bigint < ${now - 8 * 24 * 3600000}`;
+  // Surfer Content Editors remembered per keyword (lib/surfer.ts): an empty row, or one older than the
+  // 7 days an editor is reused (or a failure older than that), is no longer read.
+  const m = await prisma.$executeRaw`DELETE FROM settings WHERE key LIKE 'surfer-editor:%' AND (value = '' OR coalesce(substring(value from '"(?:at|failedAt)":([0-9]+)')::bigint, 0) < ${now - 8 * 24 * 3600000})`;
+  return n + m;
 }

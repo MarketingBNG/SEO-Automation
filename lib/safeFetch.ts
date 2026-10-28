@@ -1,7 +1,15 @@
 // Fetches a page a person typed in (for example "Check a blog" by URL) without letting the server be
 // used to read its own network: only http(s), only public addresses (no localhost, private, link-local
 // or cloud metadata ranges), each redirect checked again, and the body capped in size.
+// The address is checked again at connect time (pinnedLookup): the name is resolved once more when
+// the connection is made, so a name that answers a public address to the check and a private one a
+// moment later (DNS rebinding) is refused.
 import { lookup } from 'node:dns/promises';
+import * as dns from 'node:dns';
+import * as http from 'node:http';
+import * as https from 'node:https';
+import * as zlib from 'node:zlib';
+import { Readable } from 'node:stream';
 import { isIP } from 'node:net';
 
 const MAX_REDIRECTS = 5;
@@ -25,6 +33,8 @@ export function isPrivateAddress(ip: string): boolean {
     const s = ip.toLowerCase();
     const mapped = s.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
     if (mapped) return isPrivateAddress(mapped[1]);
+    // IPv4-compatible (::a.b.c.d, which the URL parser writes as ::7f00:1) and IPv4-translated forms.
+    if (/^::[0-9a-f]{1,4}:[0-9a-f]{1,4}$/.test(s) || /^::\d+\.\d+\.\d+\.\d+$/.test(s)) return true;
     return s === '::' || s === '::1' || /^f[cd]/.test(s) || /^fe[89ab]/.test(s) || /^ff/.test(s) || s.startsWith('::ffff:') || s.startsWith('64:ff9b:');
   }
   return true;
@@ -57,12 +67,49 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
   return url;
 }
 
+// The lookup the connection uses: every address it resolves to must be public, or it fails.
+export function pinnedLookup(hostname: string, options: any, callback: any) {
+  if (typeof options === 'function') {
+    callback = options;
+    options = {};
+  }
+  dns.lookup(hostname, options, (err: any, address: any, family?: number) => {
+    if (err) return callback(err);
+    const list = Array.isArray(address) ? address : [{ address, family }];
+    if (!list.length || list.some((a: any) => isPrivateAddress(a.address))) {
+      return callback(Object.assign(new Error('That URL cannot be fetched: it points to a private or internal address.'), { status: 400, code: 'EPRIVATE' }));
+    }
+    callback(null, address, family);
+  });
+}
+
+// One GET with no redirect following, connected through pinnedLookup (an address typed as an IP is
+// not looked up; assertPublicUrl checked it). Returns a fetch-like Response.
+export function getOnce(url: URL, signal: AbortSignal): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const mod = url.protocol === 'https:' ? https : http;
+    const req = mod.request(url, { method: 'GET', lookup: pinnedLookup as any, signal, headers: { 'user-agent': 'node', accept: '*/*', 'accept-encoding': 'gzip, deflate, br' } }, (res) => {
+      const enc = String(res.headers['content-encoding'] || '').toLowerCase();
+      const body: Readable = enc === 'gzip' ? res.pipe(zlib.createGunzip()) : enc === 'deflate' ? res.pipe(zlib.createInflate()) : enc === 'br' ? res.pipe(zlib.createBrotliDecompress()) : res;
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(res.headers)) if (v != null) headers.set(k, Array.isArray(v) ? v.join(', ') : String(v));
+      const status = res.statusCode || 0;
+      // A body is not allowed on these statuses in a Response.
+      const noBody = status === 204 || status === 205 || status === 304;
+      if (noBody) res.resume();
+      resolve(new Response(noBody ? null : (Readable.toWeb(body) as any), { status: status < 200 || status > 599 ? 500 : status, headers }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 // Returns { ok, status, text } like the parts of fetch the callers use.
 export async function safeFetchText(raw: string, { timeoutMs = 20000 }: { timeoutMs?: number } = {}) {
   const signal = AbortSignal.timeout(timeoutMs);
   let url = await assertPublicUrl(raw);
   for (let hop = 0; ; hop++) {
-    const res = await fetch(url, { signal, redirect: 'manual' });
+    const res = await getOnce(url, signal);
     const next = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
     if (next) {
       if (hop >= MAX_REDIRECTS) throw Object.assign(new Error('That URL redirects too many times.'), { status: 400 });

@@ -103,8 +103,9 @@ Return ONLY JSON between ===JSON=== and ===END===:
 export async function prepareDay(email: string, day: string) {
   const p = await prisma.training_profiles.findUnique({ where: { email } });
   if (!p || !p.active) return;
-  // An earlier test left open counts as missed: its questions come back two days from now.
-  const stale = await prisma.training_tests.findMany({ where: { email, status: 'open', day: { lt: day } } });
+  // An earlier test left open counts as missed: its questions come back two days from now. So does one
+  // left 'marking' by a restart in the middle of its marking (it can no longer be submitted).
+  const stale = await prisma.training_tests.findMany({ where: { email, status: { in: ['open', 'marking'] }, day: { lt: day } } });
   for (const t of stale) {
     await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'missed', score: 0 } });
     for (const q of JSON.parse(t.questions) as Question[]) await addMiss(email, q, day);
@@ -194,13 +195,17 @@ export async function runTrainingDay(now = new Date()) {
     const people = await prisma.training_profiles.findMany({ where: { active: true, email: { notIn: watchers } } });
     // A person whose lessons stopped because AI work is paused gets them on a later run that day.
     let waiting = false;
+    // Only real failures are logged: lessons waiting for AI are made on a later tick that day, and a
+    // failure row on each 15-minute tick would only be noise.
+    const failed: string[] = [];
     for (const p of people)
       await prepareDay(p.email, day).catch((e) => {
         errors.push(`${p.email}: ${e.message}`);
         if (waitsForAi(e)) waiting = true;
+        else failed.push(`${p.email}: ${e.message}`);
       });
     await settings.set('training_last_run', JSON.stringify({ at: new Date().toISOString(), day, people: people.length, errors }));
-    if (errors.length) await activity.log('training.failed', { details: errors.join('; ').slice(0, 300) });
+    if (failed.length) await activity.log('training.failed', { details: failed.join('; ').slice(0, 300) });
     return { day, people: people.length, errors, waiting };
   } finally {
     g.__trainingRun = false;
