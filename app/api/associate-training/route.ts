@@ -27,7 +27,7 @@ async function personView(email: string) {
   if (!profile) return null;
   const lesson = profile.lesson_id ? await prisma.training_lessons.findUnique({ where: { id: profile.lesson_id } }) : null;
   const open = await prisma.training_tests.findFirst({ where: { email, status: 'open' }, orderBy: { day: 'desc' } });
-  const results = await prisma.training_tests.findMany({ where: { email, status: { not: 'open' } }, orderBy: { day: 'desc' }, take: 20, select: { id: true, day: true, level: true, score: true, total: true, status: true, lesson_id: true } });
+  const results = await prisma.training_tests.findMany({ where: { email, status: { notIn: ['open', 'marking'] } }, orderBy: { day: 'desc' }, take: 20, select: { id: true, day: true, level: true, score: true, total: true, status: true, lesson_id: true } });
   const pastIds = results.map((r) => r.lesson_id).filter((x): x is number => Boolean(x));
   const past = pastIds.length ? await prisma.training_lessons.findMany({ where: { id: { in: pastIds } }, orderBy: { day: 'desc' }, select: { id: true, day: true, level: true, title: true, content_html: true, sources: true } }) : [];
   return {
@@ -53,7 +53,9 @@ export async function GET(req: NextRequest) {
   if (testId) {
     const t = await prisma.training_tests.findUnique({ where: { id: testId } });
     if (!t || (t.email !== me.email && !viewer)) return NextResponse.json({ error: 'Test not found' }, { status: 404 });
-    if (t.status === 'open') return NextResponse.json({ error: 'Finish the test first' }, { status: 409 });
+    // 'marking' is unfinished too (it can go back to 'open', or stay there after a restart until the
+    // next day): its answer key is not shown yet.
+    if (t.status === 'open' || t.status === 'marking') return NextResponse.json({ error: 'Finish the test first' }, { status: 409 });
     return NextResponse.json({ test: { ...t, questions: testQuestions(t), answers: JSON.parse(t.answers || '{}'), percent: pct(t) } });
   }
   const base = { today: istDay(), passPercent: PASS_PERCENT, levels: LEVELS, viewer, canManage: me.role === 'admin' };
@@ -70,7 +72,7 @@ export async function GET(req: NextRequest) {
   const person = String(req.nextUrl.searchParams.get('person') || '').toLowerCase();
   const skip = await viewerEmails();
   const people = (await prisma.training_profiles.findMany({ orderBy: { email: 'asc' } })).filter((p) => !skip.has(p.email));
-  const tests = await prisma.training_tests.findMany({ where: { status: { not: 'open' } }, orderBy: { day: 'desc' }, take: 1000, select: { email: true, day: true, score: true, total: true, status: true, id: true } });
+  const tests = await prisma.training_tests.findMany({ where: { status: { notIn: ['open', 'marking'] } }, orderBy: { day: 'desc' }, take: 1000, select: { email: true, day: true, score: true, total: true, status: true, id: true } });
   const misses = await prisma.training_misses.groupBy({ by: ['email'], where: { cleared: false }, _count: { _all: true } });
   const everyone = people.map((p) => {
     const mine = tests.filter((t) => t.email === p.email);

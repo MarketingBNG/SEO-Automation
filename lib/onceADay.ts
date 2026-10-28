@@ -9,6 +9,10 @@ import { CreditPausedError, isCreditError } from './aiCredits';
 
 export const waitsForAi = (e: any) => e instanceof CreditPausedError || isCreditError(e);
 
+// Thrown by a job when its run was skipped because another run of it (a person's manual press) is
+// still going: that run may yet stop for paused AI work or a restart, so the day stays open.
+export class AnotherRunGoing extends Error {}
+
 export async function onceADay<T>(key: string, day: string, fn: () => Promise<T>, staleMinutes = 120): Promise<T | null> {
   if ((await settings.get(key)) === day) return null;
   const runKey = `${key}_running`;
@@ -23,7 +27,7 @@ export async function onceADay<T>(key: string, day: string, fn: () => Promise<T>
     await settings.set(key, day);
     return out;
   } catch (e) {
-    if (!waitsForAi(e)) await settings.set(key, day);
+    if (!waitsForAi(e) && !(e instanceof AnotherRunGoing)) await settings.set(key, day);
     throw e;
   } finally {
     // Only this run's own marker is cleared: a later run that started meanwhile keeps its own.

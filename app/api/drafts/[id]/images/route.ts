@@ -4,11 +4,22 @@ import sharp, { type Metadata } from 'sharp';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
-import { saveFile, mimeFor } from '@/lib/storage';
+import { saveFile, deleteFile, mimeFor } from '@/lib/storage';
 import { imageSlots, sectionHeadings, isFaqHeading, imageTag, placeAtSlot, placeAfterSection, removeNote } from '@/lib/blogImages';
 import { methodNotAllowed, toId } from '../../../_lib/http';
 
 export const runtime = 'nodejs';
+
+// The article is written only if it is still the one read at the start (no editor save or AI fix
+// landed during the upload), so a newer save is never replaced by the old text plus the image.
+const CHANGED = 'The article changed while this was saved. Reload the draft and try again.';
+async function writeIfUnchanged(draft: any, next: string) {
+  const r = await prisma.drafts.updateMany({
+    where: { id: draft.id, content_html: draft.content_html, title: draft.title, meta_description: draft.meta_description },
+    data: { content_html: next },
+  });
+  return r.count === 1;
+}
 
 const MAX_BYTES = 8 * 1024 * 1024;
 // The file's real format (from its bytes, not its name) decides the extension it is stored under.
@@ -38,7 +49,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (body.action !== 'remove_note' || !Number.isInteger(body.slot) || body.slot < 0) return NextResponse.json({ error: 'action must be remove_note with a slot' }, { status: 400 });
     const next = removeNote(html, body.slot);
     if (next === html) return NextResponse.json({ error: 'That suggestion is no longer in the article.' }, { status: 409 });
-    const updated = await prisma.drafts.update({ where: { id }, data: { content_html: next } });
+    if (!(await writeIfUnchanged(draft, next))) return NextResponse.json({ error: CHANGED }, { status: 409 });
+    const updated = await prisma.drafts.findUnique({ where: { id } });
     await markEditedAsChecked(id, 'a person (image)', { before: { textHash: wordsHash(draft), stamp: draft.updated_at } }).catch(() => {});
     await activity.log('draft.image_note_removed', { entityType: 'draft', entityId: id, details: `"${draft.title}": image suggestion ${body.slot + 1} removed`, actor });
     return NextResponse.json(updated);
@@ -83,10 +95,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   await saveFile(key, bytes);
+  if (!(await writeIfUnchanged(draft, next))) {
+    await deleteFile(key).catch(() => {});
+    return NextResponse.json({ error: CHANGED }, { status: 409 });
+  }
   // The image library keeps the file on record and links it to the draft.
   const img = await prisma.image_library.create({ data: { filename: file.name || key, path: key, mime_type: mimeFor(key), width: meta?.width ?? null, height: meta?.height ?? null, notes: alt } });
   await prisma.draft_images.create({ data: { draft_id: id, image_id: img.id } });
-  const updated = await prisma.drafts.update({ where: { id }, data: { content_html: next } });
+  const updated = await prisma.drafts.findUnique({ where: { id } });
   await markEditedAsChecked(id, 'a person (image)', { before: { textHash: wordsHash(draft), stamp: draft.updated_at } }).catch(() => {});
   await activity.log('draft.image_placed', { entityType: 'draft', entityId: id, details: `"${draft.title}": image added (${alt.slice(0, 80)})`, actor });
   return NextResponse.json({ ...updated, imageKey: key });

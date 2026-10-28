@@ -12,8 +12,13 @@ export const runtime = 'nodejs';
 // 'publish' REPLACES that post in place and 'draft' makes a separate draft post, so the live post
 // stays online and unchanged. Otherwise it creates a new post.
 // The separate draft saved earlier is still in WordPress and not live (not trashed, deleted or published).
+// Only a real 404 or 410 means it is gone: any other failure (timeout, 5xx, 401) is thrown, so the
+// save fails and can be retried instead of making a second draft and losing track of the first.
 async function draftStillThere(id: number): Promise<boolean> {
-  const r: any = await wpRequest('GET', `/wp/v2/posts/${id}`, { query: { context: 'edit', _fields: 'status' } }).catch(() => null);
+  const r: any = await wpRequest('GET', `/wp/v2/posts/${id}`, { query: { context: 'edit', _fields: 'status' } }).catch((e: any) => {
+    if (e?.status === 404 || e?.status === 410 || e?.code === 'rest_post_invalid_id') return null;
+    throw e;
+  });
   const st = r?.json?.status;
   return Boolean(st) && st !== 'trash' && st !== 'publish';
 }
@@ -71,10 +76,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       } as any);
     }
 
+    // The live post now carries the rewrite, so a separate draft sent earlier is moved to the trash
+    // (only while it is still a draft) and forgotten. A failure here keeps its id, and the publish stands.
+    let forgetDraft = {};
+    if (!separateDraft && audit.wp_post_id && audit.rewrite_wp_draft_id) {
+      try {
+        if (await draftStillThere(audit.rewrite_wp_draft_id)) await wpRequest('DELETE', `/wp/v2/posts/${audit.rewrite_wp_draft_id}`);
+        forgetDraft = { rewrite_wp_draft_id: null, rewrite_wp_draft_url: null };
+      } catch (e: any) {
+        console.error('Audit publish: the separate draft could not be trashed:', e?.message || e);
+      }
+    }
+
     // The separate draft's address and id are kept, so the audit page links to it after a reload.
     await prisma.blog_audits.update({
       where: { id: nid },
-      data: separateDraft ? { rewrite_status: 'sent_as_draft', rewrite_wp_draft_url: post.link || null, rewrite_wp_draft_id: post.id ?? null } : { rewrite_status: 'published' },
+      data: separateDraft ? { rewrite_status: 'sent_as_draft', rewrite_wp_draft_url: post.link || null, rewrite_wp_draft_id: post.id ?? null } : { rewrite_status: 'published', ...forgetDraft },
     });
 
     await activity.log('audit.rewrite_published', {

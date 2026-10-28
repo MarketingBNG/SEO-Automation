@@ -49,7 +49,9 @@ export async function canDo(me: { email: string; role: Role; blocked?: boolean }
 // is only rewritten when the browser reads the session, so a kept old cookie would otherwise carry
 // a role, an unblock or a grant the admin has since taken away (or a tester role past 48 hours).
 // Cached for 30 seconds per person so polling pages do not cost a query each.
-export type LiveAccess = { role: Role; blocked: boolean; access: Access | null; grants: Grant[] };
+// member: false for a person not on the Team list (removed, or never added): proxy.ts refuses every
+// API call for them, reads included.
+export type LiveAccess = { member: boolean; role: Role; blocked: boolean; access: Access | null; grants: Grant[] };
 const LIVE_MS = 30_000;
 const liveCache = new Map<string, { at: number; value: LiveAccess }>();
 
@@ -60,7 +62,7 @@ export async function liveAccessFor(email: string): Promise<LiveAccess> {
   const { memberFor } = await import('./team');
   const m = await memberFor(e);
   // Not on the team list: no access until the admin adds them (same as the session callback).
-  const value: LiveAccess = m ? { role: m.role, blocked: m.blocked, ...(await accessFor(m.email, m.role)) } : { role: 'user', blocked: true, access: null, grants: [] };
+  const value: LiveAccess = m ? { member: true, role: m.role, blocked: m.blocked, ...(await accessFor(m.email, m.role)) } : { member: false, role: 'user', blocked: true, access: null, grants: [] };
   liveCache.set(e, { at: Date.now(), value });
   if (liveCache.size > 500) liveCache.delete(liveCache.keys().next().value!);
   return value;

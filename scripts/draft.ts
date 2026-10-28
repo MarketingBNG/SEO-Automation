@@ -47,6 +47,8 @@ function save(id: string, d: any) {
     keyword: d.keyword,
     wp_post_url: d.wp_post_url || null,
     updated_at: d.updated_at,
+    // Also catches an image placed or an image note removed in the dashboard, which keep updated_at.
+    text_hash: d.text_hash || null,
     note: 'Edit title / meta_description here and the article in content.html, then: npx tsx scripts/draft.ts put ' + id,
   };
   fs.writeFileSync(f.json, JSON.stringify(info, null, 2) + '\n');
@@ -85,6 +87,7 @@ async function main() {
       const local = readLocal(arg);
       const live = await api('GET', `/api/drafts/${arg}`);
       if (live.updated_at !== local.info.updated_at) console.log(`Note: the dashboard copy was saved at ${live.updated_at}, after this local copy was read (${local.info.updated_at}).\n`);
+      else if (local.info.text_hash && live.text_hash !== local.info.text_hash) console.log('Note: the dashboard copy changed after this local copy was read (an image placed or an image note removed). Run get again and redo the edit.\n');
       for (const k of ['title', 'meta_description'] as const) {
         if ((live[k] || '') !== local.info[k]) console.log(`${k}:\n  - ${live[k] || ''}\n  + ${local.info[k]}\n`);
       }
@@ -104,7 +107,7 @@ async function main() {
       if (!arg) throw new Error('Usage: put <id>');
       const { info, html } = readLocal(arg);
       if (words(html) < 100) throw new Error(`content.html has only ${words(html)} words; refusing to save.`);
-      await api('PATCH', `/api/drafts/${arg}`, { title: info.title, meta_description: info.meta_description, content_html: html, if_updated_at: info.updated_at });
+      await api('PATCH', `/api/drafts/${arg}`, { title: info.title, meta_description: info.meta_description, content_html: html, if_updated_at: info.updated_at, ...(info.text_hash ? { if_text_hash: info.text_hash } : {}) });
       const fresh = save(arg, await api('GET', `/api/drafts/${arg}`));
       console.log(`Saved draft #${arg} to the dashboard (${words(html)} words, saved at ${fresh.updated_at}).`);
       if (fresh.wp_post_url) console.log(`Note: this blog is already on the website (${fresh.wp_post_url}); the live post is not changed.`);

@@ -5,7 +5,7 @@ import { rethrowFriendly } from './apiErrors';
 import { anthropicClient, clientKeyKind, secondaryKeyConfigured, switchedToSecondary } from './anthropicClient';
 import { replayScope, requestHash, savedStep, saveStep, frozenInput, runToday } from './aiReplay';
 import { aiMode, askQueue, isAutomatic, TestingModeError } from './aiQueue';
-import { assertCredits, recordUsage, onApiError, CreditPausedError } from './aiCredits';
+import { assertCredits, recordUsage, onApiError, CreditPausedError, isCreditError } from './aiCredits';
 import { validateDraft, markUsedQuestions } from './validation';
 import { getWriterPlaybook, getAuditGates } from './playbook';
 import { gatherBrief, formatBrief, aiOverviewSummary } from './researchBrief';
@@ -293,7 +293,13 @@ async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
     if (saved && saved.run !== ctx.run) return { ...saved, activity: { part: 0, searches: 0, chars: 0, retries: 0, lastEventAt: Date.now(), note: 'reused from the earlier run' } };
   }
   let result;
-  if ((await aiMode()) === 'testing') {
+  // A batch already sent and paid for in Live mode (its id saved by runBatchTurn) is collected in
+  // Testing mode too: reading its result costs nothing, and it would otherwise be dropped after 7 days
+  // and paid for again. Only that: a turn that needs a further part waits (collectOnly).
+  const testing = (await aiMode()) === 'testing';
+  if (testing && opts.batch && isAutomatic() && (await pendingBatchId(batchParamsFor(systemPrompt, [...userMessages], opts)))) {
+    result = await callClaudeLive(systemPrompt, userMessages, signal, { ...opts, collectOnly: true });
+  } else if (testing) {
     if (isAutomatic()) throw new TestingModeError();
     result = await askQueue(hash, systemPrompt, userMessages, signal, opts);
   } else {
@@ -306,7 +312,12 @@ async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
 // Haiku has only the basic web search tool; the dynamic-filtering version is Opus and Sonnet only.
 const searchTool = (model: string): any => (/haiku/.test(model) ? 'web_search_20250305' : 'web_search_20260209');
 
-async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40, onActivity, idleMs = IDLE_MS(), cache = false }: any = {}) {
+// The request one batch part sends (the same shape in callClaude's check and in callClaudeLive).
+function batchParamsFor(systemPrompt, messages, { maxUses = 8, effort = 'high', model = MODEL }: any = {}) {
+  return { model, max_tokens: 32000, output_config: { effort }, system: systemPrompt, tools: [{ type: searchTool(model), name: 'web_search', max_uses: maxUses }], messages };
+}
+
+async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8, effort = 'high', batch = false, model = MODEL, feature = 'other', maxParts = 40, onActivity, idleMs = IDLE_MS(), cache = false, collectOnly = false }: any = {}) {
   const client = getClient();
   const conversation = [...userMessages];
   const assistantMessages: any[] = [];
@@ -322,6 +333,11 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
   };
 
   let lastStop = '';
+  // The saved batch ids of this call's finished parts are kept until the whole call ends: a restart
+  // while a later part waits then gets the earlier parts back from their ended batches (free) and
+  // finds the later part by its id, instead of paying for every part again.
+  const keptBatches: string[] = [];
+  const dropKept = () => (keptBatches.length ? prisma.settings.deleteMany({ where: { key: { in: keptBatches.splice(0) } } }).catch(() => {}) : Promise.resolve());
   for (let part = 0; part < maxParts; part++) {
     activity.part = part;
     // Refuses to start when AI work is paused for low credits (see lib/aiCredits.ts). Only before the
@@ -329,17 +345,32 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
     // (a pause mid-call would drop them and the whole call would be paid again on resume).
     // A batch already sent and paid for (its id saved by runBatchTurn) is collected even while AI work
     // is paused: reading its result costs nothing.
-    const batchParams = batch
-      ? { model, max_tokens: 32000, output_config: { effort }, system: systemPrompt, tools: [{ type: searchTool(model), name: 'web_search', max_uses: maxUses }], messages: conversation }
-      : null;
-    if (part === 0 && !(batchParams && (await pendingBatchId(batchParams)))) await assertCredits();
+    const batchParams = batch ? batchParamsFor(systemPrompt, conversation, { maxUses, effort, model }) : null;
+    const pending = batchParams ? await pendingBatchId(batchParams) : null;
+    // Collecting a paid batch in Testing mode: a part not sent yet waits for Live mode (the parts
+    // read so far keep their ids, so nothing is paid twice then).
+    if (collectOnly && !pending) throw new TestingModeError();
+    if (part === 0 && !pending) await assertCredits();
     if (batch) {
-      const response = await runBatchTurn(client, batchParams, signal).catch(async (err: any) => {
-        await onApiError(err, 'secondary');
+      // Read now: the key names this part's request, before the conversation grows.
+      const pendingKey = `batch_pending:${requestHash(batchParams)}`;
+      let response;
+      try {
+        response = await runBatchTurn(client, batchParams, signal, { keep: true, collectOnly }).catch(async (err: any) => {
+          await onApiError(err, 'secondary');
+          throw err;
+        });
+      } catch (err: any) {
+        // A passing error or paused AI work keeps the earlier parts for the retry; a real failure drops them.
+        if (!isTransient(err) && !(err instanceof CreditPausedError || isCreditError(err))) await dropKept();
         throw err;
-      });
+      }
+      keptBatches.push(pendingKey);
       await recordUsage({ model, usage: response.usage, feature, batch: true });
-      if (response.stop_reason === 'refusal') throw new Error('The AI declined this request.');
+      if (response.stop_reason === 'refusal') {
+        await dropKept();
+        throw new Error('The AI declined this request.');
+      }
       const message = { role: 'assistant', content: response.content };
       assistantMessages.push(message);
       conversation.push(message);
@@ -440,6 +471,8 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
     lastStop = response.stop_reason;
     if (response.stop_reason !== 'pause_turn') break;
   }
+  // The whole call is done: its batches are read and not needed again.
+  await dropKept();
 
   const text = assistantMessages
     .flatMap((m) => m.content)
@@ -468,7 +501,10 @@ async function pendingBatchId(params): Promise<string | null> {
   }
 }
 
-async function runBatchTurn(client, params, signal) {
+// `keep`: a result read successfully leaves its saved id in place (callClaudeLive drops it when the
+// whole call ends), so a later part cut off by a restart does not make this part paid again.
+// `collectOnly` (Testing mode): only a batch already sent is read; none is sent.
+async function runBatchTurn(client, params, signal, { keep = false, collectOnly = false }: { keep?: boolean; collectOnly?: boolean } = {}) {
   const pendingKey = `batch_pending:${requestHash(params)}`;
   const forget = () => prisma.settings.deleteMany({ where: { key: pendingKey } }).catch(() => {});
   // Saved as {"id","at"} (at: when it was sent, so pruneReplay can drop a key whose request never came
@@ -485,6 +521,7 @@ async function runBatchTurn(client, params, signal) {
     : null;
   // Only a batch from the last week that was not cancelled (its results are kept 29 days).
   if (created && (created.cancel_initiated_at || Date.now() - Date.parse(created.created_at) > 7 * 86400000)) created = null;
+  if (!created && collectOnly) throw new TestingModeError();
   if (!created) {
     created = await client.messages.batches
       .create({ requests: [{ custom_id: 'turn', params }] })
@@ -511,14 +548,18 @@ async function runBatchTurn(client, params, signal) {
   // a retry picks up the same finished batch instead of paying for a new one.
   for await (const item of await client.messages.batches.results(created.id)) {
     if (item.custom_id !== 'turn') continue;
+    if (item.result.type === 'succeeded') {
+      if (!keep) await forget();
+      return item.result.message;
+    }
     await forget();
-    if (item.result.type === 'succeeded') return item.result.message;
     if (item.result.type === 'errored') {
       const why = item.result.error?.error?.message || item.result.error?.type || 'unknown error';
       // The main key ran out of credit while the batch waited: send it again on the secondary key.
       if (/credit balance is too low|out of credit/i.test(why) && clientKeyKind(client) === 'main' && secondaryKeyConfigured()) {
         switchedToSecondary();
-        return runBatchTurn(anthropicClient(), params, signal);
+        if (collectOnly) throw new TestingModeError();
+        return runBatchTurn(anthropicClient(), params, signal, { keep, collectOnly });
       }
       throw new Error(`Batch request failed: ${why}`);
     }
@@ -1530,22 +1571,25 @@ async function generateContentSkill({ batch = false }: any = {}) {
   // sends the same request the next day and picks up the batch already sent and paid for
   // (runBatchTurn finds it by the request), instead of paying for a second one with new numbers.
   const GA4_KEY = 'skill_refresh_ga4';
+  const SKILL_ASK = [{ role: 'user', content: "Research and produce this cycle's content-writing skill update." }];
+  const SKILL_OPTS = { maxUses: 10, batch, feature: 'training' };
   let ownPerformanceNote = 'No GA4 data available this cycle.';
   let frozenNote: string | null = null;
   try {
     const saved = JSON.parse((await settings.get(GA4_KEY)) || 'null');
     if (saved && typeof saved.note === 'string') {
-      // Also kept past 3 days while a batch sent with it is still unread (for example while AI work
-      // is paused or Testing mode is on), so that batch is picked up instead of a second one sent.
-      const unread = batch && (await prisma.settings.findMany({ where: { key: { startsWith: 'batch_pending:' } } })).some((b) => {
+      if (Date.now() - saved.at < 3 * 86400000) frozenNote = saved.note;
+      // Also kept past 3 days while the batch sent with this very note is still unread (for example
+      // while AI work is paused or Testing mode is on), so that batch is picked up instead of a second
+      // one sent. Another feature's pending batch does not count.
+      else if (batch) {
+        const raw = await settings.get(`batch_pending:${requestHash(batchParamsFor(skillPrompt(saved.note), [...SKILL_ASK], SKILL_OPTS))}`).catch(() => null);
+        let at = 0;
         try {
-          const at = b.value.startsWith('{') ? JSON.parse(b.value).at : 0;
-          return at >= saved.at && Date.now() - at < 7 * 86400000;
-        } catch {
-          return false;
-        }
-      });
-      if (Date.now() - saved.at < 3 * 86400000 || unread) frozenNote = saved.note;
+          at = raw?.startsWith('{') ? JSON.parse(raw).at || 0 : 0;
+        } catch {}
+        if (at && Date.now() - at < 7 * 86400000) frozenNote = saved.note;
+      }
     }
   } catch {}
   if (frozenNote != null) ownPerformanceNote = frozenNote;
@@ -1563,7 +1607,10 @@ async function generateContentSkill({ batch = false }: any = {}) {
     if (batch) await settings.set(GA4_KEY, JSON.stringify({ at: Date.now(), note: ownPerformanceNote })).catch(() => {});
   }
 
-  const systemPrompt = `You are a content-writing skill researcher. Your only job is to study how
+  const systemPrompt = skillPrompt(ownPerformanceNote);
+
+  function skillPrompt(perfNote: string) {
+    return `You are a content-writing skill researcher. Your only job is to study how
 genuinely high-engagement blogs are written - across any niche, not just finance - and distill
 concrete, reusable writing techniques from them. You are not writing a blog yourself.
 
@@ -1586,7 +1633,7 @@ what the new research or performance data suggests should change):\n${previous.s
   }
 
 OUR OWN RECENT PERFORMANCE (GA4, last 28 days, top landing pages by sessions):
-${ownPerformanceNote}
+${perfNote}
 
 Produce an updated, concrete writing skill: specific techniques a writer can actually apply, not
 vague advice like "be engaging". Every technique should be something you can point to a real
@@ -1606,13 +1653,9 @@ writer follows, not a report about the research.>
 ===SOURCES===
 <one per line, format: Title | URL>
 ===END===`;
+  }
 
-  const { text } = await callClaude(
-    systemPrompt,
-    [{ role: 'user', content: "Research and produce this cycle's content-writing skill update." }],
-    undefined,
-    { maxUses: 10, batch, feature: 'training' }
-  );
+  const { text } = await callClaude(systemPrompt, [...SKILL_ASK], undefined, SKILL_OPTS);
   // The cycle's answer is in: the next refresh reads fresh GA4 numbers.
   await prisma.settings.deleteMany({ where: { key: GA4_KEY } }).catch(() => {});
 

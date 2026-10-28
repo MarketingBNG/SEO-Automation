@@ -90,6 +90,28 @@ test('a once-a-day job stopped by paused AI work runs again; other failures clos
   assert.equal(await settings.get(key), '2026-11-02', 'a real failure is not retried every 15 minutes');
 });
 
+test('a once-a-day tick skipped because a manual run is going leaves the day open', { skip: !hasDb }, async () => {
+  const { onceADay, AnotherRunGoing } = await import('../lib/onceADay');
+  const { trainingTick } = await import('../lib/associateTraining');
+  const settings = await import('../lib/settings');
+  const key = `test_once_skip_${Date.now()}`;
+  await assert.rejects(onceADay(key, '2026-11-01', async () => { throw new AnotherRunGoing('Already running'); }));
+  assert.notEqual(await settings.get(key), '2026-11-01');
+  // The training tick while "Prepare today now" is going does not close the day.
+  const g = globalThis as any;
+  const saved = { run: g.__trainingRun, day: await settings.get('training_last_day') };
+  const now = new Date('2031-03-01T08:00:00Z'); // 13:30 IST
+  try {
+    await settings.set('training_last_day', '');
+    g.__trainingRun = true;
+    await trainingTick(now);
+    assert.notEqual(await settings.get('training_last_day'), '2031-03-01');
+  } finally {
+    g.__trainingRun = saved.run;
+    await settings.set('training_last_day', saved.day || '');
+  }
+});
+
 test('only a strategy waiting for review can be approved', { skip: !hasDb }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const { approveStrategy } = await import('../lib/strategy/service');
@@ -185,6 +207,72 @@ test('a rewrite that fails after its new draft is saved resumes from that draft,
     assert.equal(scheduleAction({ ...after!, status: 'planned' } as any, new Date()), 'open_review');
     // The failed fact check's saved steps are dropped, so Resume does not replay the same failure.
     assert.equal(await prisma.ai_replay.count({ where: { scope: { startsWith: `factcheck-${after!.draft_id}-` } } }), 0);
+  } finally {
+    const kws = (await prisma.keywords.findMany({ where: { keyword: row.main_keyword }, select: { id: true } })).map((k) => k.id);
+    await prisma.drafts.deleteMany({ where: { keyword_id: { in: kws } } });
+    await prisma.keywords.deleteMany({ where: { id: { in: kws } } });
+    await prisma.blog_schedule.deleteMany({ where: { strategy_id: s.id } });
+    await prisma.seo_strategies.delete({ where: { id: s.id } });
+  }
+});
+
+test('a draftless row past its slot that a restart left drafting, or that was already held, is written', { skip: !hasDb }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const settings = await import('../lib/settings');
+  const { runDaily } = await import('../lib/strategy/autopilot');
+  const today = new Date().toISOString().slice(0, 10);
+  for (const k of ['last_rank_check', 'last_outreach_run', 'last_speed_run', 'last_site_check']) await settings.set(k, today);
+  const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'approved', plan_json: '{}' } });
+  const n = Date.now();
+  // The oldest slots, so these two are the rows this run writes.
+  const base = { strategy_id: s.id, publish_at: '2000-01-01 00:00:00', title: 'Test blog', tags: '[]' };
+  const held = await prisma.blog_schedule.create({ data: { ...base, main_keyword: `held kw ${n}`, status: 'held', hold_reasons: JSON.stringify(['No draft was written in time.']) } });
+  const drafting = await prisma.blog_schedule.create({ data: { ...base, main_keyword: `drafting kw ${n}`, status: 'drafting' } });
+  const asked: string[] = [];
+  const write = async (keyword: string) => {
+    asked.push(keyword);
+    throw new Error('The AI declined this request.');
+  };
+  try {
+    await runDaily(new Date(), { write, maxDrafts: 2 });
+    assert.deepEqual(asked.sort(), [`drafting kw ${n}`, `held kw ${n}`].sort());
+    for (const id of [held.id, drafting.id]) {
+      const r = (await prisma.blog_schedule.findUnique({ where: { id } }))!;
+      assert.notEqual(r.status, 'held', 'not held again for having no draft');
+    }
+  } finally {
+    await prisma.keywords.deleteMany({ where: { keyword: { in: [held.main_keyword, drafting.main_keyword] } } });
+    await prisma.blog_schedule.deleteMany({ where: { strategy_id: s.id } });
+    await prisma.seo_strategies.delete({ where: { id: s.id } });
+  }
+});
+
+test('a draft finished after its strategy was replaced gets no fact check and no review', { skip: !hasDb }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const settings = await import('../lib/settings');
+  const { runDaily } = await import('../lib/strategy/autopilot');
+  const today = new Date().toISOString().slice(0, 10);
+  for (const k of ['last_rank_check', 'last_outreach_run', 'last_speed_run', 'last_site_check']) await settings.set(k, today);
+  const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'approved', plan_json: '{}' } });
+  const soon = new Date(Date.now() + 24 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
+  const row = await prisma.blog_schedule.create({ data: { strategy_id: s.id, publish_at: soon, title: 'Test blog', main_keyword: `replaced kw ${Date.now()}`, tags: '[]', status: 'planned' } });
+  let checks = 0;
+  const write = async () => {
+    // A manager approves a newer version of the month while this draft is written.
+    await prisma.seo_strategies.update({ where: { id: s.id }, data: { status: 'superseded' } });
+    return written('Written');
+  };
+  const verify = async () => {
+    checks++;
+    throw new Error('not expected');
+  };
+  try {
+    await runDaily(new Date(), { write, verify });
+    const after = (await prisma.blog_schedule.findUnique({ where: { id: row.id } }))!;
+    assert.ok(after.draft_id, 'the draft is kept');
+    assert.equal(checks, 0, 'no paid fact check');
+    assert.equal(after.status, 'planned', 'no review opened; the next run stops it');
+    assert.equal(after.review_started, null);
   } finally {
     const kws = (await prisma.keywords.findMany({ where: { keyword: row.main_keyword }, select: { id: true } })).map((k) => k.id);
     await prisma.drafts.deleteMany({ where: { keyword_id: { in: kws } } });
@@ -391,7 +479,7 @@ test('a topic whose finished blog was deleted before it was linked can be writte
   }
 });
 
-test('outreach waits for AI: a credit pause stops the run before any site, Smartlead or log work', { skip: !hasDb }, async () => {
+test('outreach waits for AI: tasks that need Claude wait (no site, Smartlead or log work), the rest still runs', { skip: !hasDb }, async () => {
   const { default: prisma } = await import('../lib/prisma');
   const settings = await import('../lib/settings');
   const { runOutreach } = await import('../lib/strategy/outreach');
@@ -409,11 +497,43 @@ test('outreach waits for AI: a credit pause stops the run before any site, Smart
   try {
     await settings.set('ai_paused', '1');
     let lines = 0;
-    await assert.rejects(runOutreach(new Date(), { checkLinks: false, line: async () => { lines++; return 'A line.'; } }), (e: any) => e instanceof CreditPausedError);
+    let finds = 0;
+    const r: any = await runOutreach(new Date(), { checkLinks: false, line: async () => { lines++; return 'A line.'; }, find: async () => { finds++; return []; } });
+    assert.equal(r.waitingForAi, true, 'the day stays open');
     assert.equal(calls, 0, 'no site crawl and no Smartlead lookup');
     assert.equal(lines, 0);
     assert.equal(await prisma.activity_log.count({ where: { action: 'backlink.failed', entity_id: t.id } }), 0);
     assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: t.id } }))!.status, 'planned');
+
+    // Work that needs no AI still goes ahead: a placeholder is skipped, a described target waits, and
+    // a lead whose opening line is already saved is pushed to Smartlead.
+    const base = { strategy_id: s.id, method: 'Resource page outreach', our_page: '/itin', tags: '[]' };
+    const placeholder = await prisma.backlink_tasks.create({ data: { ...base, send_date: '2099-01-01', target_site: 'Backlink gap data missing' } });
+    const described = await prisma.backlink_tasks.create({ data: { ...base, send_date: '2099-01-01', target_site: 'Pages linking to outdated ITIN guides' } });
+    const saved2 = await prisma.backlink_tasks.create({ data: { ...base, send_date: '2020-01-01', target_site: 'saved-line-site.com', email_body: 'A saved line.' } });
+    const added: string[] = [];
+    globalThis.fetch = (async (url: any, init: any) => {
+      calls++;
+      const u = new URL(String(url));
+      if (u.hostname === 'server.smartlead.ai') {
+        if (init?.method === 'GET') return new Response('', { status: 404 });
+        added.push(JSON.parse(init.body).lead_list[0].email);
+        return Response.json({ ok: true });
+      }
+      if (u.hostname !== 'saved-line-site.com') throw new Error(`unexpected lookup: ${u.hostname}`);
+      return new Response(`<p>contact@${u.hostname}</p>`, { status: 200 });
+    }) as any;
+    const r2: any = await runOutreach(new Date(), { checkLinks: false, line: async () => { lines++; return 'A line.'; }, find: async () => { finds++; return []; } });
+    assert.equal(r2.waitingForAi, true);
+    assert.equal(r2.pushed, 1);
+    assert.deepEqual(added, ['contact@saved-line-site.com']);
+    assert.equal(lines, 0);
+    assert.equal(finds, 0, 'no described target is resolved while AI is paused');
+    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: placeholder.id } }))!.status, 'skipped');
+    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: described.id } }))!.status, 'planned');
+    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: saved2.id } }))!.status, 'sent');
+    assert.equal((await prisma.backlink_tasks.findUnique({ where: { id: t.id } }))!.status, 'planned', 'the task with no line still waits');
+    await prisma.backlink_tasks.deleteMany({ where: { id: { in: [placeholder.id, described.id, saved2.id] } } });
     // An opening line that throws a credit error mid-run also stops the run instead of being logged.
     await settings.set('ai_paused', saved.paused || '0');
     globalThis.fetch = (async (url: any, init: any) => {

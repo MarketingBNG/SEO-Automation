@@ -12,7 +12,7 @@ import { CreditPausedError } from './aiCredits';
 import { parseJson } from './strategy/generate';
 import { getRecentTranscripts } from './fireflies';
 import { istDay, istHour } from './topics';
-import { onceADay, waitsForAi } from './onceADay';
+import { onceADay, waitsForAi, AnotherRunGoing } from './onceADay';
 
 export const TRAINING_HOUR_IST = 9;
 export const PASS_PERCENT = 80;
@@ -219,7 +219,11 @@ export async function trainingTick(now = new Date()) {
   // The day counts as done when the run ends; lessons stopped by paused AI work are made later.
   await onceADay('training_last_day', day, async () => {
     const r: any = await runTrainingDay(now);
+    // A manual "Prepare today now" is going: this tick did nothing, so the day stays open.
+    if (r?.skipped) throw new AnotherRunGoing(r.skipped);
     if (r?.waiting) throw new CreditPausedError('AI work is paused; the remaining lessons are made when it is possible again.');
     return r;
-  }).catch((e) => console.error('Training day failed:', e.message));
+  }).catch((e) => {
+    if (!(e instanceof AnotherRunGoing)) console.error('Training day failed:', e.message);
+  });
 }

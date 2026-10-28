@@ -76,3 +76,59 @@ test('pruneReplay keeps unwritten calendar blogs and their fact checks, not a bl
   await prisma.blog_schedule.delete({ where: { id: row.id } });
   await prisma.seo_strategies.delete({ where: { id: s.id } });
 });
+
+test('a batch turn continued after pause_turn keeps its first part for a restart, so it is not paid again', { skip: !db }, async () => {
+  const prisma = (await import('../lib/prisma')).default;
+  const { callClaude } = await import('../lib/anthropic');
+  const { aiMode, setAiMode, runAutomatic, TestingModeError } = await import('../lib/aiQueue');
+  const saved = { fetch: globalThis.fetch, key: process.env.ANTHROPIC_API_KEY, secondary: process.env.ANTHROPIC_API_KEY_SECONDARY, mode: await aiMode() };
+  process.env.ANTHROPIC_API_KEY = 'test-key';
+  delete process.env.ANTHROPIC_API_KEY_SECONDARY;
+  const batches = new Map<string, any>();
+  let creates = 0;
+  let failPart1 = true;
+  const msg = (text: string, stop: string) => ({ id: `msg_${text}`, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }], stop_reason: stop, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
+  const batchJson = (id: string) => ({ id, type: 'message_batch', processing_status: 'ended', created_at: new Date().toISOString(), cancel_initiated_at: null, ended_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(), request_counts: { processing: 0, succeeded: 1, errored: 0, canceled: 0, expired: 0 }, results_url: `https://api.anthropic.com/v1/messages/batches/${id}/results` });
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = new URL(String(url instanceof Request ? url.url : url));
+    if (u.hostname !== 'api.anthropic.com') throw new Error(`Network call in a test: ${u}`);
+    const m = u.pathname.match(/^\/v1\/messages\/batches(?:\/([^/]+))?(\/results)?$/);
+    if (!m) throw new Error(`Unexpected Anthropic call: ${u.pathname}`);
+    const method = init?.method || 'GET';
+    if (method === 'POST' && !m[1]) {
+      const params = JSON.parse(init.body).requests[0].params;
+      const part = params.messages.length === 1 ? 0 : 1;
+      if (part === 1 && failPart1) return Response.json({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, { status: 503 });
+      creates++;
+      const id = `msgbatch_test_${creates}_${Date.now()}`;
+      batches.set(id, part === 0 ? msg('first part', 'pause_turn') : msg('second part', 'end_turn'));
+      return Response.json(batchJson(id));
+    }
+    if (m[2]) return new Response(JSON.stringify({ custom_id: 'turn', result: { type: 'succeeded', message: batches.get(m[1]) } }) + '\n', { headers: { 'content-type': 'application/binary' } });
+    return Response.json(batchJson(m[1]));
+  }) as any;
+  const ask = [{ role: 'user', content: `batch test ${Date.now()}` }];
+  const opts = { batch: true, maxUses: 1, feature: 'other' };
+  try {
+    // The continuation cannot be sent (as if a restart cut it off): the first part's batch id stays.
+    await assert.rejects(callClaude('system', ask, undefined, opts));
+    assert.equal(creates, 1);
+    failPart1 = false;
+    // Testing mode: the scheduler's run collects the part already paid for, and sends nothing new.
+    await setAiMode('testing');
+    await assert.rejects(runAutomatic(() => callClaude('system', ask, undefined, opts)), (e: any) => e instanceof TestingModeError);
+    assert.equal(creates, 1, 'no new batch in Testing mode');
+    await setAiMode('live');
+    const r: any = await callClaude('system', ask, undefined, opts);
+    assert.equal(creates, 2, 'the first part is read from its batch again, only the second part is sent');
+    assert.match(r.text, /first part[\s\S]*second part/);
+    const left = await prisma.settings.count({ where: { key: { startsWith: 'batch_pending:' }, value: { contains: 'msgbatch_test_' } } });
+    assert.equal(left, 0, 'the saved ids are dropped once the whole call is done');
+  } finally {
+    globalThis.fetch = saved.fetch;
+    await setAiMode(saved.mode);
+    process.env.ANTHROPIC_API_KEY = saved.key || '';
+    if (saved.secondary) process.env.ANTHROPIC_API_KEY_SECONDARY = saved.secondary;
+    await prisma.settings.deleteMany({ where: { key: { startsWith: 'batch_pending:' }, value: { contains: 'msgbatch_test_' } } });
+  }
+});

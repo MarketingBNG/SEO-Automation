@@ -12,7 +12,7 @@ import * as activity from './activity';
 import { callClaude } from './anthropic';
 import { parseJson } from './strategy/generate';
 import { startTimer, endTimer } from './jobTimer';
-import { onceADay, waitsForAi } from './onceADay';
+import { onceADay, waitsForAi, AnotherRunGoing } from './onceADay';
 import { runBlogJob } from './blogJob';
 import { startAudit, startRewrite } from './auditJobs';
 import { plainText, words } from './originality';
@@ -77,7 +77,7 @@ function parseTopics(text: string, now: Date): Topic[] {
 // today's topics nobody has started on.
 export async function researchTopics(now = new Date(), { force = false } = {}) {
   const day = istDay(now);
-  if (g.__topicsRun) return { skipped: 'A topic research is already running.' };
+  if (g.__topicsRun) return { skipped: 'A topic research is already running.', running: true };
   if (!force && (await prisma.topics.count({ where: { day } }))) return { skipped: 'Already researched today.' };
   g.__topicsRun = true;
   const key = `topics-${day}`;
@@ -131,7 +131,14 @@ export async function topicsTick(now = new Date()) {
   if (istHour(now) < TOPICS_HOUR_IST) return;
   const day = istDay(now);
   // The day counts as done when the research ends; one stopped by paused AI work runs again later.
-  await onceADay('topics_last_day', day, () => researchTopics(now)).catch((e) => console.error('Topics research failed:', e.message));
+  // A tick skipped because a manual "Research now" is going leaves the day open too.
+  await onceADay('topics_last_day', day, async () => {
+    const r: any = await researchTopics(now);
+    if (r?.running) throw new AnotherRunGoing(r.skipped);
+    return r;
+  }).catch((e) => {
+    if (!(e instanceof AnotherRunGoing)) console.error('Topics research failed:', e.message);
+  });
 }
 
 // For a topic researched before the relevance note existed: why it matters to us, written on
@@ -164,9 +171,17 @@ export async function startTopicBlog(id: number) {
   if (!t) throw Object.assign(new Error('Topic not found'), { status: 404 });
   if (t.draft_id) throw Object.assign(new Error('A blog for this topic was already started.'), { status: 409 });
   if (t.status === 'blog') throw Object.assign(new Error('A blog for this topic is being written.'), { status: 409 });
+  // Claimed in one step before anything is paid for, so two presses at the same moment start one run.
+  const claim = await prisma.topics.updateMany({ where: { id, draft_id: null, status: { not: 'blog' } }, data: { status: 'blog' } });
+  if (claim.count !== 1) throw Object.assign(new Error('A blog for this topic is being written.'), { status: 409 });
   const kws: string[] = JSON.parse(t.keywords || '[]');
-  const kw = await prisma.keywords.create({ data: { keyword: kws[0] || t.title.toLowerCase().slice(0, 80), batch_name: 'Topics', notes: topicNotes(t), status: 'generating' } });
-  await prisma.topics.update({ where: { id }, data: { status: 'blog' } });
+  let kw;
+  try {
+    kw = await prisma.keywords.create({ data: { keyword: kws[0] || t.title.toLowerCase().slice(0, 80), batch_name: 'Topics', notes: topicNotes(t), status: 'generating' } });
+  } catch (e) {
+    await prisma.topics.update({ where: { id }, data: { status: t.status } }).catch(() => {});
+    throw e;
+  }
   const controller = new AbortController();
   void runBlogJob(kw, controller).then(async () => {
     const d = await prisma.drafts.findFirst({ where: { keyword_id: kw.id }, orderBy: { id: 'desc' }, select: { id: true } });

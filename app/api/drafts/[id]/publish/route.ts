@@ -71,7 +71,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (leftovers.length) return NextResponse.json({ error: `Remove the AI notes first. ${leftovers.join(' ')}` }, { status: 400 });
 
   const body: any = await req.json().catch(() => ({}));
-  const wpStatus = wpLive === 'publish' ? 'publish' : (body && body.wpStatus) || 'publish'; // 'publish' (live) or 'draft'
+  // Only these two: any other value ('future', 'private', 'Publish') would skip the checks below
+  // that look for 'publish' while WordPress or the site connector still puts the post live.
+  const asked = (body && body.wpStatus) || 'publish';
+  if (!['publish', 'draft'].includes(asked)) {
+    return NextResponse.json({ error: 'wpStatus must be "publish" or "draft".' }, { status: 400 });
+  }
+  const wpStatus = wpLive === 'publish' ? 'publish' : asked; // 'publish' (live) or 'draft'
   const reviewer = String(body?.reviewer || '').trim();
   const kw = (await prisma.keywords.findUnique({ where: { id: draft.keyword_id }, select: { keyword: true } }))?.keyword;
   // A calendar blog not yet published: going live here skips its slot, which needs blog.publish_now

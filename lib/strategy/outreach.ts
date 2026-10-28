@@ -138,7 +138,8 @@ const ADD_LEAD_FAILED = 'Smartlead add-lead failed';
 const LINE_FAILED = 'Opening line failed';
 
 export async function runOutreach(now = new Date(), { checkLinks = true, line: writeLine = openingLine, find = findSites }: any = {}) {
-  const out = { pushed: 0, duplicates: 0, verified: 0, noContact: 0, manual: 0, skipped: '' };
+  // waitingForAi: some work needed Claude while AI work was not possible, so the day stays open.
+  const out = { pushed: 0, duplicates: 0, verified: 0, noContact: 0, manual: 0, skipped: '', waitingForAi: false };
   const today = now.toISOString().slice(0, 10);
   const strategies = await prisma.seo_strategies.findMany({ where: { status: 'approved' }, select: { id: true } });
   const tasks = await prisma.backlink_tasks.findMany({ where: { strategy_id: { in: strategies.map((s) => s.id) }, status: { in: ['planned', 'sent'] } }, orderBy: { id: 'asc' } });
@@ -151,21 +152,47 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
     if (!internal) out.manual++;
   }
 
-  // A pass that needs Claude (a described target to resolve, or a due task with no opening line yet)
-  // stops here when AI work is not possible (Testing mode for automatic work, or AI paused for
-  // credits): runOutreach rejects, so the day stays open and the pass runs once AI is back, and no site
-  // is crawled, no Smartlead or SE Ranking lookup is made and no task is logged as failed meanwhile.
-  const dueEmail = (x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && (!isRealSite(x.target_site) || ((!x.send_date || x.send_date.slice(0, 10) <= today) && !x.email_body));
-  if (smartleadConfigured() && tasks.some(dueEmail)) await assertAiReady();
+  // Placeholder targets need no AI: they are skipped at once.
+  for (const t of tasks.filter((x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && !isRealSite(x.target_site) && /data missing/i.test(x.target_site))) {
+    await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'skipped', note: 'Placeholder, not a real target. Use "Update with latest changes" to add real backlink-gap sites.' } });
+    t.status = 'skipped';
+  }
+
+  // Link check: a target that now appears among our referring domains is done.
+  const sent = tasks.filter((t) => t.status === 'sent');
+  if (checkLinks && sent.length) {
+    const refs = new Set(await listReferringDomains(HOST(), 1000).catch(() => []));
+    for (const t of sent) {
+      if (refs.has(domainOf(t.target_site))) {
+        await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'done', verified_at: sqlNow(now) } });
+        await activity.log('backlink.live', { entityType: 'backlink_task', entityId: t.id, details: `Link from ${t.target_site} found in SE Ranking` });
+        out.verified++;
+      }
+    }
+  }
+
+  // Work that needs Claude (a described target to resolve, or a due task with no opening line yet)
+  // waits when AI work is not possible (Testing mode for automatic work, or AI paused for credits):
+  // those tasks are left as they are (no site crawl, no Smartlead lookup, nothing logged as failed)
+  // and the result says waitingForAi, so the day stays open and they run once AI is back. The link
+  // check above and leads whose opening line is already saved still go ahead. A pause found in the
+  // middle of a call still stops the run (it rejects).
+  const isDue = (x) => !x.send_date || x.send_date.slice(0, 10) <= today;
+  const needsAi = (x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && (!isRealSite(x.target_site) || (isDue(x) && !x.email_body));
+  let aiReady = true;
+  if (smartleadConfigured() && tasks.some(needsAi)) {
+    try {
+      await assertAiReady();
+    } catch (e: any) {
+      if (!(e instanceof CreditPausedError || isCreditError(e))) throw e;
+      aiReady = false;
+      out.waitingForAi = true;
+    }
+  }
 
   // Described targets become real websites (at most 3 tasks a day, to keep AI cost low).
-  let resolveBudget = smartleadConfigured() ? 3 : 0;
+  let resolveBudget = smartleadConfigured() && aiReady ? 3 : 0;
   for (const t of tasks.filter((x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && !isRealSite(x.target_site))) {
-    if (/data missing/i.test(t.target_site)) {
-      await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'skipped', note: 'Placeholder, not a real target. Use "Update with latest changes" to add real backlink-gap sites.' } });
-      t.status = 'skipped';
-      continue;
-    }
     if (resolveBudget-- <= 0) break;
     try {
       const sites = await find(t);
@@ -188,19 +215,6 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
     }
   }
 
-  // Link check: a target that now appears among our referring domains is done.
-  const sent = tasks.filter((t) => t.status === 'sent');
-  if (checkLinks && sent.length) {
-    const refs = new Set(await listReferringDomains(HOST(), 1000).catch(() => []));
-    for (const t of sent) {
-      if (refs.has(domainOf(t.target_site))) {
-        await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'done', verified_at: sqlNow(now) } });
-        await activity.log('backlink.live', { entityType: 'backlink_task', entityId: t.id, details: `Link from ${t.target_site} found in SE Ranking` });
-        out.verified++;
-      }
-    }
-  }
-
   if (!smartleadConfigured()) {
     out.skipped = 'Outreach is not set up: add SMARTLEAD_API_KEY and SMARTLEAD_CAMPAIGN_ID in Coolify.';
     return out;
@@ -211,8 +225,10 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
   // the problem (deleted or paused, bad key), so the run stops instead of paying for more opening lines.
   let refusedInARow = 0;
 
-  for (const t of tasks.filter((x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && isRealSite(x.target_site) && (!x.send_date || x.send_date.slice(0, 10) <= today))) {
+  for (const t of tasks.filter((x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && isRealSite(x.target_site) && isDue(x))) {
     if (budget <= 0) break;
+    // No opening line yet and AI is not possible: it waits (no contact lookup either).
+    if (!t.email_body && !aiReady) continue;
     try {
       const contact = await findContact(t.target_site);
       if (!contact) {

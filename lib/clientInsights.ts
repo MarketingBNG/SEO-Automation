@@ -70,8 +70,10 @@ export async function autoReview(id: number, { participants = [], cleaner = clea
   }
   const problems = [...new Set([...leftovers(cleaned.overview, ids), ...leftovers(cleaned.title, ids)])];
   const approved = problems.length === 0;
-  const updated = await prisma.client_insights.update({
-    where: { id },
+  // Written only while it still waits for review: a person who deleted (or decided) it during the
+  // cleaning call keeps that, so a deleted meeting's text never comes back or gets approved.
+  const done = await prisma.client_insights.updateMany({
+    where: { id, status: 'pending_review' },
     data: {
       title: cleaned.title || 'Client meeting themes',
       overview: cleaned.overview,
@@ -80,6 +82,8 @@ export async function autoReview(id: number, { participants = [], cleaner = clea
       ...(approved ? { status: 'approved', decided_at: sqlNow() } : {}),
     },
   });
+  if (done.count === 0) return prisma.client_insights.findUnique({ where: { id } });
+  const updated = (await prisma.client_insights.findUnique({ where: { id } }))!;
   await activity.log(approved ? 'client_insight.auto_approved' : 'client_insight.needs_review', {
     entityType: 'client_insight',
     entityId: id,

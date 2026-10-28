@@ -107,7 +107,12 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   if (!Object.keys(data).length) return NextResponse.json({ error: 'Nothing to change' }, { status: 400 });
   // The check above and the write are one step: a save (the issue fixer, a fact check) that lands in
   // between is not overwritten.
-  const guard = if_updated_at != null ? { updated_at: existing.updated_at } : if_text_hash != null ? { title: existing.title, meta_description: existing.meta_description, content_html: existing.content_html } : {};
+  // Both can be sent (scripts/draft.ts does): an image placed in the dashboard keeps updated_at but
+  // changes the words, so each guard applies.
+  const guard = {
+    ...(if_updated_at != null ? { updated_at: existing.updated_at } : {}),
+    ...(if_text_hash != null ? { title: existing.title, meta_description: existing.meta_description, content_html: existing.content_html } : {}),
+  };
   const { count } = await prisma.drafts.updateMany({ where: { id: nid, ...guard }, data });
   if (!count) return NextResponse.json(changedMeanwhile, { status: 409 });
   const updated: any = await prisma.drafts.findUnique({ where: { id: nid } });

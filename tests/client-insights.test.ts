@@ -47,3 +47,25 @@ test('a cleaning that returns no notes is held for a person, so it is not cleane
     await prisma.client_insights.delete({ where: { id: row.id } });
   }
 });
+
+test('a meeting deleted while it is being cleaned stays deleted, with no text and no approval', { skip: process.env.DATABASE_URL.includes('unused') }, async () => {
+  const { autoReview } = await load();
+  const prisma = (await import('../lib/prisma')).default;
+  const row = await prisma.client_insights.create({ data: { title: 'T', overview: 'raw', status: 'pending_review' } });
+  try {
+    await autoReview(row.id, {
+      cleaner: async () => {
+        // A person deletes it during the paid cleaning call (as the DELETE route does).
+        await prisma.client_insights.update({ where: { id: row.id }, data: { status: 'deleted', title: '', overview: '', keywords: '[]' } });
+        return { title: 'Founders and Ontario', overview: '- Founders asked about Ontario tax residency.' };
+      },
+    });
+    const after = await prisma.client_insights.findUnique({ where: { id: row.id } });
+    assert.equal(after?.status, 'deleted');
+    assert.equal(after?.overview, '');
+    assert.equal(await prisma.activity_log.count({ where: { action: 'client_insight.auto_approved', entity_id: row.id } }), 0);
+  } finally {
+    await prisma.activity_log.deleteMany({ where: { entity_id: row.id, action: { startsWith: 'client_insight.' } } });
+    await prisma.client_insights.delete({ where: { id: row.id } });
+  }
+});

@@ -40,6 +40,11 @@ export async function proxy(req: NextRequest) {
       // Role, block and access as they are now in the database (cached 30 s), not as they were when
       // the cookie was last refreshed. The token's copy is the fallback if the database is down.
       const live = token.email ? await import('@/lib/access').then((a) => a.liveAccessFor(String(token.email))).catch(() => null) : null;
+      // Removed from (or never on) the Team list: no API access at all, reads included, even with a
+      // session cookie that has not expired yet.
+      if (live && !live.member) {
+        return NextResponse.json({ error: 'You are not on the Team list. Ask an admin to add you.' }, { status: 403 });
+      }
       const role = live ? live.role : isRole(token.role) ? token.role : 'user';
       const blocked = live ? live.blocked : Boolean(token.blocked);
       const write = req.method !== 'GET' && req.method !== 'HEAD';

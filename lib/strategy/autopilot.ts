@@ -54,6 +54,14 @@ async function assertAiReady() {
   await assertCredits();
 }
 
+// Read again after a long write: a manager may have approved a newer version of the month meanwhile.
+// A row whose strategy is no longer approved gets no paid fact check and no review notice; the next
+// run stops it (lib/strategy/replaced.ts).
+async function strategyStillApproved(strategyId) {
+  const s = await prisma.seo_strategies.findUnique({ where: { id: strategyId }, select: { status: true } });
+  return s?.status === 'approved';
+}
+
 // Writes the draft for one calendar row (the same pipeline as the Keywords tab). `busy` is the row's
 // status while it is written ('revising' for a rewrite after a rejection).
 // The finished AI steps are saved per calendar row (lib/aiReplay.ts): a run cut off by a credit
@@ -422,6 +430,8 @@ async function reviseRow(row, verify = verifyAndCorrect, write = researchAndWrit
     await update(row.id, { status: 'rejected' });
     throw e;
   }
+  // Its strategy was replaced during the rewrite: no summary call, fact check or review notice.
+  if (!(await strategyStillApproved(row.strategy_id))) return draft;
   let note = [];
   try {
     const { text } = await callClaude(
@@ -536,7 +546,7 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
           summary.drafted++;
         }
         const fresh = await prisma.blog_schedule.findUnique({ where: { id: row.id } });
-        if (fresh.draft_id) {
+        if (fresh.draft_id && (await strategyStillApproved(fresh.strategy_id))) {
           // Fact-check before reviewers see it, so they review the corrected version.
           const d = await prisma.drafts.findUnique({ where: { id: fresh.draft_id } });
           if (d) await ensureFactChecked(fresh, d, verify);
@@ -544,10 +554,13 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
           await notify(`Blog ready for review: ${row.title}`, `Approve or reject it in Monthly Strategy within 48 hours. If nobody rejects it, it is approved and published automatically.`);
           summary.opened++;
         }
-      } else if (action === 'publish' && !row.draft_id && row.status === 'planned') {
+      } else if (action === 'publish' && !row.draft_id && ['planned', 'drafting', 'held'].includes(row.status)) {
         // Its slot passed with no draft (AI was unavailable, or a person deleted the draft to get a
         // fresh one): it is written now and then gets its review, instead of being held for good.
+        // Also a row left 'drafting' by a restart mid-write (no run is in progress here, the flag in
+        // runDaily) and a row already held for 'No draft was written in time'.
         if (summary.drafted < maxDrafts) {
+          if (row.hold_reasons) await update(row.id, { hold_reasons: null });
           await writeDraft(row, '', write);
           summary.drafted++;
         }
@@ -594,8 +607,12 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
   summary.fixes = await runFixes().catch((e) => ({ error: e.message }));
   // Backlink outreach (leads pushed to Smartlead) and link check, once per day.
   if ((await settings.get('last_outreach_run')) !== today) {
-    summary.outreach = await runOutreach(now).catch((e) => ({ error: e.message }));
-    if (!summary.outreach?.error) await settings.set('last_outreach_run', today);
+    // The SE Ranking link check runs once a day even while the pass repeats waiting for AI.
+    const checkLinks = (await settings.get('last_outreach_link_check')) !== today;
+    summary.outreach = await runOutreach(now, { checkLinks }).catch((e) => ({ error: e.message }));
+    if (!summary.outreach?.error && checkLinks) await settings.set('last_outreach_link_check', today);
+    // Tasks that need Claude while AI work is not possible keep the day open (the rest was done).
+    if (!summary.outreach?.error && !summary.outreach?.waitingForAi) await settings.set('last_outreach_run', today);
   }
   // Speed: page cache plugin and WebP images, once per day (only while a strategy is approved).
   if ((await settings.get('last_speed_run')) !== today && (await prisma.seo_strategies.count({ where: { status: 'approved' } }))) {
