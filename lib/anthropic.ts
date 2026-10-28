@@ -492,10 +492,12 @@ async function runBatchTurn(client, params, signal) {
     await new Promise((r) => setTimeout(r, BATCH_POLL_MS));
     status = (await client.messages.batches.retrieve(created.id)).processing_status;
   }
-  await forget();
 
+  // The saved id is dropped only once the result is read: if reading it fails (network, restart),
+  // a retry picks up the same finished batch instead of paying for a new one.
   for await (const item of await client.messages.batches.results(created.id)) {
     if (item.custom_id !== 'turn') continue;
+    await forget();
     if (item.result.type === 'succeeded') return item.result.message;
     if (item.result.type === 'errored') {
       const why = item.result.error?.error?.message || item.result.error?.type || 'unknown error';
@@ -508,6 +510,7 @@ async function runBatchTurn(client, params, signal) {
     }
     throw new Error(`Batch request ${item.result.type}.`);
   }
+  await forget();
   throw new Error(`Batch ${created.id} returned no result.`);
 }
 

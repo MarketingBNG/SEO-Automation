@@ -7,6 +7,7 @@ import { generateContentSkill } from '@/lib/anthropic';
 import * as activity from '@/lib/activity';
 import { isCronRequest, methodNotAllowed } from '../../_lib/http';
 import { runAutomatic } from '@/lib/aiQueue';
+import { CreditPausedError } from '@/lib/aiCredits';
 
 export const runtime = 'nodejs';
 
@@ -44,6 +45,12 @@ async function refresh() {
         result = await generateContentSkill({ batch: true });
         break;
       } catch (err: any) {
+        // AI work is paused (credits, or Testing mode for this automatic run): a wait, not a failure.
+        // The skill stays due, so the next daily run tries again.
+        if (err instanceof CreditPausedError) {
+          console.log('Skill auto-refresh waits:', err.message);
+          return;
+        }
         if (attempt >= MAX_ATTEMPTS) throw err;
         console.error(`Skill auto-refresh attempt ${attempt} failed, retrying:`, err.message);
       }

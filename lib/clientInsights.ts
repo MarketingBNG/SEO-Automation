@@ -90,11 +90,12 @@ export async function autoReview(id: number, { participants = [], cleaner = clea
 
 // Pulls recent Fireflies meetings, adds new ones, and auto-reviews everything still pending.
 // A sync started while one is running (the Sync button during the daily run) joins it, so one
-// meeting is not imported twice and cleaned twice.
-let running: Promise<any> | null = null;
+// meeting is not imported twice and cleaned twice. Kept on globalThis: the scheduler and each route
+// load their own copy of this module.
+const gm = globalThis as unknown as { __meetingSync?: Promise<any> | null };
 export function syncMeetings(opts: { limit?: number; cleaner?: any } = {}) {
-  if (!running) running = runSync(opts).finally(() => { running = null; });
-  return running;
+  if (!gm.__meetingSync) gm.__meetingSync = runSync(opts).finally(() => { gm.__meetingSync = null; });
+  return gm.__meetingSync;
 }
 
 async function runSync({ limit = 20, cleaner = clean } = {}) {

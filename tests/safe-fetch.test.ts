@@ -55,3 +55,25 @@ test('getOnce returns status, headers and the unzipped body, and does not follow
     server.close();
   }
 });
+
+test('a compressed body that stalls ends at the timeout instead of waiting forever', async () => {
+  const http = await import('node:http');
+  const zlib = await import('node:zlib');
+  const { getOnce } = await import('../lib/safeFetch');
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html', 'content-encoding': 'gzip' });
+    res.write(zlib.gzipSync('<h1>' + 'x'.repeat(5000) + '</h1>').subarray(0, 50)); // then nothing more
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  try {
+    const port = (server.address() as any).port;
+    const page = await getOnce(new URL(`http://127.0.0.1:${port}/`), AbortSignal.timeout(500));
+    const started = Date.now();
+    const result = await Promise.race([page.text().then(() => 'finished', () => 'failed'), new Promise((r) => setTimeout(() => r('hung'), 4000))]);
+    assert.equal(result, 'failed');
+    assert.ok(Date.now() - started < 3000);
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});

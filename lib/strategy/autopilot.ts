@@ -194,6 +194,17 @@ export async function afterPublish(link: string, title: string, keyword: string 
   return log;
 }
 
+// One line for the Activity Log: which steps after publishing failed, and which live posts got a link.
+export function afterPublishSummary(log: any): string {
+  if (!log) return 'the steps after publishing (indexing, tracking, internal links) could not run.';
+  const failed = Object.entries(log).filter(([, v]: any) => !v?.ok).map(([k, v]: any) => `${k} failed (${String(v?.error || '').slice(0, 120)})`);
+  const linked: string[] = Array.isArray(log.internalLinks?.result) ? log.internalLinks.result : [];
+  return [
+    failed.length ? failed.join('; ') : 'every step after publishing worked',
+    linked.length ? `internal links added in ${linked.join(', ')}` : '',
+  ].filter(Boolean).join('; ') + '.';
+}
+
 // Adds a link to the new post from 2 to 3 older related posts.
 async function addInternalLinks(newUrl, title, keyword) {
   const words = keyword.split(/\s+/).filter((w) => w.length > 3).slice(0, 3).join(' ');
@@ -310,7 +321,7 @@ async function publishRowOnce(row, now, verify) {
   const fc = humanApproved ? { ok: true, rounds: 0, draft } : await ensureFactChecked(row, draft, verify);
   const checked = fc.draft;
   if (/\[(PRACTITIONER NOTE NEEDED|VERIFY|AUTHOR NAME|REVIEWER NAME|VISUAL SUGGESTION)/i.test(checked.content_html || '')) reasons.push('Draft still has a reviewer placeholder.');
-  if (!fc.ok) reasons.push(`Fact check could not confirm every claim from a primary source after ${fc.rounds} rounds. Not published.`);
+  if (!fc.ok) reasons.push(`Fact check could not confirm every claim from a primary source after ${fc.rounds} rounds. Not published: correct the claims (the edited text is checked again) or approve the blog to publish it as it is.`);
   // A blog already held for another reason is not scored (each new Surfer Content Editor is paid).
   const score = reasons.length ? null : await surferScore(row.main_keyword, checked.content_html || '');
   for (const i of writingRuleIssues({ title: checked.title, meta: checked.meta_description, html: checked.content_html || '', surferScore: score, siteHost: HOST() })) reasons.push(i);

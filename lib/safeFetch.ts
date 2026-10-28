@@ -9,7 +9,7 @@ import * as dns from 'node:dns';
 import * as http from 'node:http';
 import * as https from 'node:https';
 import * as zlib from 'node:zlib';
-import { Readable } from 'node:stream';
+import { Readable, pipeline } from 'node:stream';
 import { isIP } from 'node:net';
 
 const MAX_REDIRECTS = 5;
@@ -90,7 +90,10 @@ export function getOnce(url: URL, signal: AbortSignal): Promise<Response> {
     const mod = url.protocol === 'https:' ? https : http;
     const req = mod.request(url, { method: 'GET', lookup: pinnedLookup as any, signal, headers: { 'user-agent': 'node', accept: '*/*', 'accept-encoding': 'gzip, deflate, br' } }, (res) => {
       const enc = String(res.headers['content-encoding'] || '').toLowerCase();
-      const body: Readable = enc === 'gzip' ? res.pipe(zlib.createGunzip()) : enc === 'deflate' ? res.pipe(zlib.createInflate()) : enc === 'br' ? res.pipe(zlib.createBrotliDecompress()) : res;
+      const decoder = enc === 'gzip' ? zlib.createGunzip() : enc === 'deflate' ? zlib.createInflate() : enc === 'br' ? zlib.createBrotliDecompress() : null;
+      // pipeline (not pipe) passes an abort or error of the response on to the decoder, so a compressed
+      // body that stalls still ends at the timeout instead of waiting forever.
+      const body: Readable = decoder ? pipeline(res, decoder, () => {}) : res;
       const headers = new Headers();
       for (const [k, v] of Object.entries(res.headers)) if (v != null) headers.set(k, Array.isArray(v) ? v.join(', ') : String(v));
       const status = res.statusCode || 0;
@@ -121,17 +124,33 @@ export async function safeFetchText(raw: string, { timeoutMs = 20000 }: { timeou
       await res.body?.cancel().catch(() => {});
       return { ok: false, status: res.status, text: '' };
     }
-    return { ok: true, status: res.status, text: await readCapped(res) };
+    return { ok: true, status: res.status, text: await readCapped(res, signal) };
   }
 }
 
-async function readCapped(res: Response) {
+async function readCapped(res: Response, signal?: AbortSignal) {
   if (!res.body) return '';
   const reader = res.body.getReader();
+  // The timeout always ends the read, whatever the stream underneath does.
+  const onAbort = () => reader.cancel(signal?.reason).catch(() => {});
+  if (signal?.aborted) {
+    await onAbort();
+    throw signal.reason;
+  }
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    return await readAll(reader, signal);
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+async function readAll(reader: ReadableStreamDefaultReader<Uint8Array>, signal?: AbortSignal) {
   const chunks: Uint8Array[] = [];
   let size = 0;
   for (;;) {
     const { done, value } = await reader.read();
+    if (signal?.aborted) throw signal.reason;
     if (done) break;
     size += value.byteLength;
     if (size > MAX_BYTES) {

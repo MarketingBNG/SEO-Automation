@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { updatePost, publishPost, seoSlug } from '@/lib/wordpress';
+import { updatePost, publishPost, seoSlug, wpRequest } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed, toId } from '../../../_lib/http';
@@ -11,6 +11,13 @@ export const runtime = 'nodejs';
 // Publishes an audit's rewrite. If the audit came from an existing WP post (wp_post_id set),
 // 'publish' REPLACES that post in place and 'draft' makes a separate draft post, so the live post
 // stays online and unchanged. Otherwise it creates a new post.
+// The separate draft saved earlier is still in WordPress and not live (not trashed, deleted or published).
+async function draftStillThere(id: number): Promise<boolean> {
+  const r: any = await wpRequest('GET', `/wp/v2/posts/${id}`, { query: { context: 'edit', _fields: 'status' } }).catch(() => null);
+  const st = r?.json?.status;
+  return Boolean(st) && st !== 'trash' && st !== 'publish';
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const nid = toId(id);
@@ -38,6 +45,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         contentHtml: faqAccordion(audit.rewrite_content_html),
         excerpt: audit.rewrite_meta || undefined,
         status: wpStatus,
+        metaDescription: audit.rewrite_meta,
+      } as any);
+    } else if (separateDraft && audit.rewrite_wp_draft_id && (await draftStillThere(audit.rewrite_wp_draft_id))) {
+      // Sent as a separate draft before: that draft is updated, so no second WordPress draft is made.
+      post = await updatePost(audit.rewrite_wp_draft_id, {
+        title: audit.rewrite_title,
+        contentHtml: faqAccordion(audit.rewrite_content_html),
+        excerpt: audit.rewrite_meta || undefined,
+        status: 'draft',
         metaDescription: audit.rewrite_meta,
       } as any);
     } else {

@@ -14,6 +14,7 @@ import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { parseJson } from './generate';
 import { callClaude } from '../anthropic';
+import { CreditPausedError, isCreditError } from '../aiCredits';
 import { listReferringDomains } from '../seranking';
 import { smartleadConfigured, leadExists, addLead } from '../smartlead';
 
@@ -128,6 +129,7 @@ const pageUrl = (p: string) => (p?.startsWith('http') ? p : `${SITE()}${p?.start
 
 // One pass: link check, then new leads for Smartlead within the daily cap. `line` is injectable for tests.
 const ADD_LEAD_FAILED = 'Smartlead add-lead failed';
+const LINE_FAILED = 'Opening line failed';
 
 export async function runOutreach(now = new Date(), { checkLinks = true, line: writeLine = openingLine, find = findSites }: any = {}) {
   const out = { pushed: 0, duplicates: 0, verified: 0, noContact: 0, manual: 0, skipped: '' };
@@ -213,7 +215,22 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
       }
       budget--; // counted per attempt, so failures cannot spend a Claude call on every due task
       // A line written on an earlier run whose add-lead failed is reused, so Claude is not paid again.
-      const line = t.email_body || (await writeLine(t, contact.company));
+      let line = t.email_body;
+      if (!line) {
+        try {
+          line = await writeLine(t, contact.company);
+        } catch (err: any) {
+          if (err instanceof CreditPausedError || isCreditError(err)) throw err;
+          // A line that fails twice (on two runs) is given up on, so the same site is not paid for
+          // again on every daily run.
+          const again = String(t.note || '').startsWith(LINE_FAILED);
+          const why = String(err.message || err).slice(0, 400);
+          await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: again ? 'failed' : 'planned', contact_email: contact.email, note: `${LINE_FAILED}: ${why}`.slice(0, 500) } });
+          t.note = `${LINE_FAILED}: ${why}`;
+          await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: `Opening line failed${again ? ' again, so this task is given up on' : ''}: ${why}` });
+          continue;
+        }
+      }
       if (!t.email_body) await prisma.backlink_tasks.update({ where: { id: t.id }, data: { email_body: line } });
       try {
         await addLead({

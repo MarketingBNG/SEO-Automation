@@ -55,7 +55,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 });
   // A blog sent to WordPress earlier as a draft (not live) can be sent again: the same post is
   // updated, so no second copy is made.
-  const wpLive = draft.wp_post_id ? await wpPostStatus(draft.wp_post_id) : null;
+  let wpLive = draft.wp_post_id ? await wpPostStatus(draft.wp_post_id) : null;
   // A live blog can be sent again too: that updates the same live post (for example after an edit).
   if (draft.status !== 'approved' && !(draft.status === 'published' && draft.wp_post_id)) {
     return NextResponse.json({ error: 'Draft must be approved before publishing' }, { status: 400 });
@@ -107,6 +107,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const latest = await prisma.drafts.findUnique({ where: { id: nid }, select: { status: true, wp_post_id: true, wp_post_url: true } });
       if (draft.status !== 'published' && latest?.status === 'published') {
         return NextResponse.json({ error: `It was published meanwhile at its calendar slot: ${latest.wp_post_url || ''}`.trim() }, { status: 409 });
+      }
+      // Sent to WordPress as a draft meanwhile (another tab): that post is updated, not a second one made.
+      if (latest?.wp_post_id && latest.wp_post_id !== draft.wp_post_id) {
+        draft.wp_post_id = latest.wp_post_id;
+        wpLive = await wpPostStatus(latest.wp_post_id);
       }
       const keyword = kw;
       // A refresh keeps the live page's author: no partner is picked for it (as the calendar does).
@@ -174,6 +179,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         details: `"${draft.title}" → ${post.link} (${wpStatus === 'publish' ? 'live on the website' : 'WordPress draft, NOT live yet'})`,
         actor: await getActor(),
       });
+      // A blog with no calendar row has nowhere else to keep what the steps after publishing did.
+      if (wpStatus === 'publish' && wpLive !== 'publish' && !row) {
+        await activity.log('wordpress.after_publish', { entityType: 'draft', entityId: nid, details: `"${draft.title}": ${(await import('@/lib/strategy/autopilot')).afterPublishSummary(log)}`.slice(0, 1000) }).catch(() => {});
+      }
 
       // Read the post back from WordPress, so the screen says what really happened.
       const check = await checkPost(post.id, fields.slug, Boolean(faqSchema(draft.content_html)));

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { markEditedAsChecked } from '@/lib/factCheckMark';
+import { markEditedAsChecked, wordsHash } from '@/lib/factCheckMark';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
@@ -50,13 +50,13 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     : null;
   const site = (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
   const planned_url = found.wp_post_url || `${site}/${seoSlug(sched?.main_keyword || row.keyword || found.title || '')}/`;
-  return NextResponse.json({ ...row, facts, schedule, planned_url, cover_alt_shown: coverAlt(found), author_options: await authorNames() }, { status: 200 });
+  return NextResponse.json({ ...row, text_hash: wordsHash(found), facts, schedule, planned_url, cover_alt_shown: coverAlt(found), author_options: await authorNames() }, { status: 200 });
 }
 
 export async function PATCH(req: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const nid = toId(id);
-  const { title, meta_description, content_html, status, cover_alt, author, if_updated_at }: any = (await req.json().catch(() => ({}))) || {};
+  const { title, meta_description, content_html, status, cover_alt, author, if_updated_at, if_text_hash }: any = (await req.json().catch(() => ({}))) || {};
   const existing = await prisma.drafts.findUnique({ where: { id: nid } });
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   // Claude Code edits words only; approving, rejecting and publishing stay with a signed-in person.
@@ -71,9 +71,11 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: 'This blog is already published; its review status cannot change here.' }, { status: 409 });
   }
   // Sent by scripts/draft.ts: refuse when someone saved the draft after it was read.
-  if (if_updated_at != null && String(if_updated_at) !== String(existing.updated_at)) {
-    return NextResponse.json({ error: `The draft was changed at ${existing.updated_at} (after it was read at ${if_updated_at}). Read it again and redo the edit.` }, { status: 409 });
-  }
+  const changedMeanwhile = { error: `The draft was changed at ${existing.updated_at} (after it was read). Read it again and redo the edit.` };
+  if (if_updated_at != null && String(if_updated_at) !== String(existing.updated_at)) return NextResponse.json(changedMeanwhile, { status: 409 });
+  // Sent by the Drafts editor: refuse only when the words changed after the boxes were loaded (a new
+  // cover or a status change meanwhile is not a conflict).
+  if (if_text_hash != null && String(if_text_hash) !== wordsHash(existing)) return NextResponse.json(changedMeanwhile, { status: 409 });
 
   // The partner the blog is published under: one of the names in the list, or "random" for a new
   // random pick. Set on the draft and on its calendar row, which both publish routes read.
@@ -102,7 +104,12 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   if (Object.keys(data).length) data.updated_at = sqlNow();
   if (cover_alt != null) data.cover_alt = String(cover_alt).trim().slice(0, 200) || null;
   if (!Object.keys(data).length) return NextResponse.json({ error: 'Nothing to change' }, { status: 400 });
-  const updated: any = await prisma.drafts.update({ where: { id: nid }, data });
+  // The check above and the write are one step: a save (the issue fixer, a fact check) that lands in
+  // between is not overwritten.
+  const guard = if_updated_at != null ? { updated_at: existing.updated_at } : if_text_hash != null ? { title: existing.title, meta_description: existing.meta_description, content_html: existing.content_html } : {};
+  const { count } = await prisma.drafts.updateMany({ where: { id: nid, ...guard }, data });
+  if (!count) return NextResponse.json(changedMeanwhile, { status: 409 });
+  const updated: any = await prisma.drafts.findUnique({ where: { id: nid } });
   // A person's edit (dashboard or Claude Code) does not start the paid fact check again by itself.
   if (title != null || meta_description != null || content_html != null) await markEditedAsChecked(nid, viaToken ? 'Claude Code' : await getActor());
 
@@ -139,7 +146,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
     });
   }
 
-  return NextResponse.json({ ...updated, calendar }, { status: 200 });
+  return NextResponse.json({ ...updated, text_hash: wordsHash(updated), calendar }, { status: 200 });
 }
 
 // Deletes a draft that will not be published. Its facts and image links go with it. A plain blog's
@@ -166,11 +173,14 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
         data: { status: 'pending', error: null },
       });
     }
-    // A topic whose blog or article is deleted can be written again from Topics & News.
-    await tx.topics.updateMany({ where: { draft_id: nid, status: 'blog' }, data: { status: 'new' } });
-    await tx.topics.updateMany({ where: { draft_id: nid }, data: { draft_id: null } });
-    await tx.topics.updateMany({ where: { article_draft_id: nid, status: 'article' }, data: { status: 'new' } });
-    await tx.topics.updateMany({ where: { article_draft_id: nid }, data: { article_draft_id: null } });
+    // A topic whose blog or article is deleted can be written again from Topics & News. Not when the
+    // piece is already on the website: the topic stays linked, so it is not written (and paid) twice.
+    if (!existing.wp_post_url) {
+      await tx.topics.updateMany({ where: { draft_id: nid, status: 'blog' }, data: { status: 'new' } });
+      await tx.topics.updateMany({ where: { draft_id: nid }, data: { draft_id: null } });
+      await tx.topics.updateMany({ where: { article_draft_id: nid, status: 'article' }, data: { status: 'new' } });
+      await tx.topics.updateMany({ where: { article_draft_id: nid }, data: { article_draft_id: null } });
+    }
   });
   await activity.log('draft.deleted', {
     entityType: 'draft',

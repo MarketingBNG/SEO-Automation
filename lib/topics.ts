@@ -176,8 +176,8 @@ export async function startTopicBlog(id: number) {
 }
 
 // Topics whose blog run ended without the in-memory link above (a restart, a resumed run): the draft
-// is found through the topic's keyword (same notes) and linked. A run that failed puts the topic back
-// to 'new', so "Write blog" can be pressed again. Returns the topics that changed.
+// is found through the topic's keyword (same notes) and linked. A run that failed, or whose draft was
+// deleted before it was linked, puts the topic back to 'new', so "Write blog" can be pressed again. Returns the topics that changed.
 export async function linkTopicBlogs(rows: any[]) {
   const changed = new Map<number, any>();
   for (const t of rows.filter((r) => r.status === 'blog' && !r.draft_id)) {
@@ -185,7 +185,8 @@ export async function linkTopicBlogs(rows: any[]) {
     if (!kw) continue;
     const d = await prisma.drafts.findFirst({ where: { keyword_id: kw.id }, orderBy: { id: 'desc' }, select: { id: true } });
     if (d) changed.set(t.id, await prisma.topics.update({ where: { id: t.id }, data: { draft_id: d.id } }));
-    else if (kw.status === 'failed') changed.set(t.id, await prisma.topics.update({ where: { id: t.id }, data: { status: 'new' } }));
+    // No draft: the run failed, or it finished ('drafted') and its draft was deleted before it was linked.
+    else if (kw.status === 'failed' || kw.status === 'drafted') changed.set(t.id, await prisma.topics.update({ where: { id: t.id }, data: { status: 'new' } }));
   }
   return changed;
 }

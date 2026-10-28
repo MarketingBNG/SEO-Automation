@@ -37,6 +37,10 @@ export async function POST(req: NextRequest) {
       if (body.create) {
         if (!String(body.item?.slug || '').trim()) return NextResponse.json({ error: 'Enter the URL path of the new item.' }, { status: 400 });
         const slug = normalizeSlug(body.item.slug);
+        // A post needs its own path: the prefilled '/blog/' left as it is would land on the blog index.
+        if (type === 'post' && (slug === '/' || slug === '/blog')) {
+          return NextResponse.json({ error: "Enter the post's own URL path, for example /blog/itin-guide." }, { status: 400 });
+        }
         if (await prisma.site_content.findUnique({ where: { slug }, select: { slug: true } })) {
           return NextResponse.json({ error: `${slug} already exists. Open it from the list to edit it, or pick another URL path.` }, { status: 409 });
         }

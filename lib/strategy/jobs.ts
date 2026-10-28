@@ -132,7 +132,9 @@ export async function controlStrategyJob(id: number, action: 'pause' | 'resume' 
     if (!running.has(id)) {
       const window = { start: row.start_date, end: row.end_date, label: row.period } as StrategyWindow;
       await prisma.seo_strategies.update({ where: { id }, data: { progress_stage: 'Restarting', progress_percent: 1 } });
-      run(id, window.start ? window : strategyWindow(), actor);
+      // Checked again right before starting, with no await in between: two resumes at the same time
+      // (Resume pressed twice, or Resume during the scheduler's resume) start only one run.
+      if (!running.has(id)) run(id, window.start ? window : strategyWindow(), actor);
     }
   } else {
     await prisma.seo_strategies.update({ where: { id }, data: { status: 'stopping', progress_stage: 'Stopping' } });

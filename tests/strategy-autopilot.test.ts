@@ -46,16 +46,24 @@ test('the rank check keeps the best engine per keyword', () => {
   assert.equal(best.find((r) => r.keyword === 'ein')!.position, 12);
 });
 
-test('an edit never turns a failed fact check into a pass', { skip: !hasDb }, async () => {
+test('an edit never turns a failed or missing fact check into a pass', { skip: !hasDb }, async () => {
   const { editedFactCheck } = await import('../lib/factCheckMark');
   const args = { stamp: '2026-11-01 10:00:00', textHash: 'h2', by: 'a@b.c', at: '2026-11-01 10:00:00' };
-  const failed = editedFactCheck({ ok: false, rounds: 3, stamp: 'old', textHash: 'h1' }, args);
-  assert.equal(failed.ok, false);
-  assert.equal(failed.rounds, 3);
-  assert.equal(failed.stamp, args.stamp);
+  // A failed check keeps its old stamp and hash, so the edited text is checked once more.
+  const failedPrev = { ok: false, rounds: 3, stamp: 'old', textHash: 'h1' };
+  assert.equal(editedFactCheck(failedPrev, args), failedPrev);
+  // No full check yet (inline check only, or none): the edit does not count as checked.
+  const inline = { inlineStamp: 'S1', inlineModel: 'm', inlineClaims: 5 };
+  assert.equal(editedFactCheck(inline, args), inline);
+  const empty = {};
+  assert.equal(editedFactCheck(empty, args), empty);
+  // A person's edit to a blog that passed is recorded as checked.
   const passed = editedFactCheck({ ok: true, rounds: 1 }, args);
   assert.equal(passed.ok, true);
   assert.equal(passed.textHash, 'h2');
+  // An AI edit (the Assistant, the issue fixer) is never recorded as checked.
+  const okPrev = { ok: true, rounds: 1, stamp: 'old', textHash: 'h1' };
+  assert.equal(editedFactCheck(okPrev, { ...args, byPerson: false }), okPrev);
 });
 
 test('a once-a-day job stopped by paused AI work runs again; other failures close the day', { skip: !hasDb }, async () => {
@@ -250,6 +258,44 @@ test('a lead Smartlead keeps refusing is given up on and does not block the othe
   }
 });
 
+test('an opening line that keeps failing is given up on after two runs', { skip: !hasDb }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const { runOutreach } = await import('../lib/strategy/outreach');
+  const saved = { fetch: globalThis.fetch, key: process.env.SMARTLEAD_API_KEY, campaign: process.env.SMARTLEAD_CAMPAIGN_ID };
+  process.env.SMARTLEAD_API_KEY = 'test-key';
+  process.env.SMARTLEAD_CAMPAIGN_ID = '1';
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = new URL(String(url));
+    if (u.hostname === 'server.smartlead.ai') return init?.method === 'GET' ? new Response('', { status: 404 }) : Response.json({ ok: true });
+    return new Response(`<title>${u.hostname}</title><p>contact@${u.hostname}</p>`, { status: 200 });
+  }) as any;
+  const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'approved', plan_json: '{}' } });
+  const t = await prisma.backlink_tasks.create({ data: { strategy_id: s.id, method: 'Resource page outreach', our_page: '/itin', send_date: '2020-01-01', tags: '[]', target_site: 'no-line-site.com' } });
+  let calls = 0;
+  const line = async (task: any) => {
+    if (task.id !== t.id) return 'A line.';
+    calls++;
+    throw new Error('Opening line: Claude did not return a marked line.');
+  };
+  try {
+    await runOutreach(new Date(), { checkLinks: false, line });
+    let row = (await prisma.backlink_tasks.findUnique({ where: { id: t.id } }))!;
+    assert.equal(row.status, 'planned', 'one failure: tried again next run');
+    assert.match(row.note || '', /^Opening line failed/);
+    await runOutreach(new Date(), { checkLinks: false, line });
+    row = (await prisma.backlink_tasks.findUnique({ where: { id: t.id } }))!;
+    assert.equal(row.status, 'failed', 'failed twice: given up on');
+    await runOutreach(new Date(), { checkLinks: false, line });
+    assert.equal(calls, 2, 'not paid for again after giving up');
+  } finally {
+    globalThis.fetch = saved.fetch;
+    process.env.SMARTLEAD_API_KEY = saved.key || '';
+    process.env.SMARTLEAD_CAMPAIGN_ID = saved.campaign || '';
+    await prisma.backlink_tasks.deleteMany({ where: { strategy_id: s.id } });
+    await prisma.seo_strategies.delete({ where: { id: s.id } });
+  }
+});
+
 test('onceADay clears only its own run marker', { skip: !hasDb }, async () => {
   const settings = await import('../lib/settings');
   const { onceADay } = await import('../lib/onceADay');
@@ -260,6 +306,21 @@ test('onceADay clears only its own run marker', { skip: !hasDb }, async () => {
     await settings.set(`${key}_running`, later);
   });
   assert.equal(await settings.get(`${key}_running`), later);
+  const { default: prisma } = await import('../lib/prisma');
+  await prisma.settings.deleteMany({ where: { key: { startsWith: key } } });
+});
+
+test('a fresh run marker from the day before blocks the next day; a stale one does not', { skip: !hasDb }, async () => {
+  const settings = await import('../lib/settings');
+  const { onceADay } = await import('../lib/onceADay');
+  const key = `test_once_nextday_${Date.now()}`;
+  let ran = 0;
+  await settings.set(`${key}_running`, JSON.stringify({ day: '2026-11-01', at: Date.now() - 25 * 3600000 }));
+  assert.equal(await onceADay(key, '2026-11-02', async () => { ran++; }, 26 * 60), null);
+  assert.equal(ran, 0, 'a batch run of the day before that is still waiting is not joined');
+  await settings.set(`${key}_running`, JSON.stringify({ day: '2026-11-01', at: Date.now() - 27 * 3600000 }));
+  await onceADay(key, '2026-11-02', async () => { ran++; }, 26 * 60);
+  assert.equal(ran, 1, 'a stale marker left by a restart does not block');
   const { default: prisma } = await import('../lib/prisma');
   await prisma.settings.deleteMany({ where: { key: { startsWith: key } } });
 });
@@ -295,5 +356,29 @@ test('a remembered Surfer editor that no longer exists is replaced, not retried 
     process.env.SURFER_WORKSPACE_ID = saved.ws || '';
     await prisma.settings.deleteMany({ where: { key: { contains: kw } } });
     await prisma.settings.deleteMany({ where: { key: { startsWith: 'apicache:surfer-terms' } } });
+  }
+});
+
+test('the steps after publishing are summed up for the Activity Log', { skip: !hasDb }, async () => {
+  const { afterPublishSummary } = await import('../lib/strategy/autopilot');
+  const s = afterPublishSummary({ indexNow: { ok: true }, seRankingTracking: { ok: false, error: 'quota' }, internalLinks: { ok: true, result: ['https://x.test/a'] } });
+  assert.match(s, /seRankingTracking failed \(quota\)/);
+  assert.match(s, /internal links added in https:\/\/x\.test\/a/);
+  assert.match(afterPublishSummary({ indexNow: { ok: true } }), /every step after publishing worked/);
+  assert.match(afterPublishSummary(null), /could not run/);
+});
+
+test('a topic whose finished blog was deleted before it was linked can be written again', { skip: !hasDb }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const { linkTopicBlogs } = await import('../lib/topics');
+  const t = await prisma.topics.create({ data: { day: '2026-11-01', title: `Test topic ${Date.now()}`, keywords: '["test kw"]', sources: '[]', status: 'blog' } });
+  const notes = `Topic from the daily research (${t.day}): ${t.title}. Why now: . Keywords to use: test kw. Sources: .`;
+  const kw = await prisma.keywords.create({ data: { keyword: 'test kw', batch_name: 'Topics', notes, status: 'drafted' } });
+  try {
+    const changed = await linkTopicBlogs([t]);
+    assert.equal(changed.get(t.id)?.status, 'new');
+  } finally {
+    await prisma.topics.delete({ where: { id: t.id } });
+    await prisma.keywords.delete({ where: { id: kw.id } });
   }
 });

@@ -34,16 +34,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const results = await recheckIssues(d, issues);
     let open = results.filter((r) => r.open).map((r) => String(r.text || r.issue));
     let fixed = false;
+    // Only the words count: a new cover or a status change meanwhile does not throw the fix away.
+    const sameWords = { id, title: d.title, meta_description: d.meta_description, content_html: d.content_html };
+    const savedMeanwhile = { error: 'The draft was saved by someone while the fix ran, so the fix was not saved (nothing was overwritten). Press Check and fix again to fix the saved version.' };
     if (fix && open.length) {
+      // Saved while the check ran: the paid fix is not started on the old text.
+      if (!(await prisma.drafts.count({ where: sameWords }))) return NextResponse.json(savedMeanwhile, { status: 409 });
       const out = await fixIssues(d, open);
       const words = String(out.content || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
-      // Saved only when nobody saved the draft while the fix ran: a person's save is never overwritten.
-      const { count } = await prisma.drafts.updateMany({ where: { id, updated_at: d.updated_at }, data: { title: out.title, meta_description: out.meta, content_html: out.content, word_count: words, updated_at: sqlNow() } });
-      if (!count) {
-        return NextResponse.json({ error: 'The draft was saved by someone while the fix ran, so the fix was not saved (nothing was overwritten). Press Check and fix again to fix the saved version.' }, { status: 409 });
-      }
+      // Saved only when nobody changed the words while the fix ran: a person's save is never overwritten.
+      const { count } = await prisma.drafts.updateMany({ where: sameWords, data: { title: out.title, meta_description: out.meta, content_html: out.content, word_count: words, updated_at: sqlNow() } });
+      if (!count) return NextResponse.json(savedMeanwhile, { status: 409 });
       const saved = (await prisma.drafts.findUnique({ where: { id } }))!;
-      await markEditedAsChecked(id, 'the issue fixer');
+      await markEditedAsChecked(id, 'the issue fixer', { byPerson: false });
       fixed = true;
       const again = await recheckIssues(saved, open);
       open = again.filter((r) => r.open).map((r) => String(r.text || r.issue));

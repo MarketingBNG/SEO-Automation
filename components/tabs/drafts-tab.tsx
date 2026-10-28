@@ -170,9 +170,10 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
   const [meta, setMeta] = useState('');
   const [content, setContent] = useState('');
   const canPublishNow = useRole().can('blog.publish_now');
-  // The saved version the Title / Meta / Content boxes started from. Save sends its updated_at, so a
-  // save never writes old text over a newer one (the issue fixer, Claude Code, another reviewer).
-  const baseRef = useRef<{ updated_at: any; title: string; meta: string; content: string } | null>(null);
+  // The saved version the Title / Meta / Content boxes started from. Save sends the hash of its words,
+  // so a save never writes old text over a newer one (the issue fixer, Claude Code, another reviewer);
+  // a new cover meanwhile is not a conflict.
+  const baseRef = useRef<{ updated_at: any; text_hash?: string; title: string; meta: string; content: string } | null>(null);
   const boxesRef = useRef({ title, meta, content });
   useEffect(() => {
     boxesRef.current = { title, meta, content };
@@ -211,7 +212,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
     }
     setLoadError('');
     setDraft(json);
-    const saved = { updated_at: json.updated_at, title: json.title || '', meta: json.meta_description || '', content: json.content_html || '' };
+    const saved = { updated_at: json.updated_at, text_hash: json.text_hash, title: json.title || '', meta: json.meta_description || '', content: json.content_html || '' };
     const base = baseRef.current;
     const boxes = boxesRef.current;
     const untouched = base && boxes.title === base.title && boxes.meta === base.meta && boxes.content === base.content;
@@ -297,7 +298,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
       const res = await fetch(`/api/drafts/${draft.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, meta_description: meta, content_html: content, status, if_updated_at: baseRef.current?.updated_at }),
+        body: JSON.stringify({ title, meta_description: meta, content_html: content, status, if_text_hash: baseRef.current?.text_hash }),
       });
       const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (res.status === 409) {
@@ -310,7 +311,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
         return;
       }
       if (!res.ok) throw new Error(json.error);
-      baseRef.current = { updated_at: json.updated_at, ...sent };
+      baseRef.current = { updated_at: json.updated_at, text_hash: json.text_hash, ...sent };
       onChange();
       // The server now holds what was sent, so keep the boxes (anything typed meanwhile stays).
       const fresh = await loadDraft(false);
