@@ -134,6 +134,10 @@ export function actionFor(method: string, path: string): Action | null {
     if (/^\/api\/(performance|ga4|gsc|seranking|clarity|blog-analytics|zoho\/leads|zoho\/pipeline|zoho\/business)/.test(p)) return 'reports.view';
     if (/^\/api\/(ai-credits|agent)/.test(p)) return 'credits.view';
     if (/^\/api\/team/.test(p)) return 'team.view';
+    // Client meeting notes (Meeting insights page).
+    if (/^\/api\/client-insights/.test(p)) return 'reports.view';
+    // Connecting an account (OAuth), raw Fireflies transcripts and paid live lookups from Settings.
+    if (/^\/api\/(gbp|zoho)\/(auth-url|oauth-callback)|^\/api\/fireflies\/transcripts|^\/api\/(serphouse|pagespeed)\/check/.test(p)) return 'settings.change';
     return null;
   }
 
@@ -174,3 +178,14 @@ export function deniedMessage(action: Action): string {
   };
   return what[action];
 }
+
+// Settings a person may read and change through /api/settings (Writing rules, Blog rules and the
+// keys typed in Settings). Everything else in the settings table belongs to its own route or job:
+// role_access (Team & Roles, team.roles), ai_mode / ai_paused / credit_* (AI credits, admin only),
+// run guards, caches and learned lessons. Writing those here would skip their checks.
+export const EDITABLE_SETTINGS = [
+  'max_words', 'voice_guidelines', 'byline_author', 'byline_reviewer', 'cta_text', 'cta_url', 'service_ctas',
+  'tracked_keyword_target', 'seranking_keyword_limit', 'seranking_keyword_buffer', 'seranking_reserve_units',
+  'focus_services', 'posting_days', 'posting_time_ist', 'blog_authors', 'competitor_domains',
+];
+export const isEditableSetting = (key: string) => EDITABLE_SETTINGS.includes(key);

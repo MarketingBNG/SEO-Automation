@@ -18,7 +18,7 @@ const ALLOWED: { method: string; path: RegExp }[] = [
 
 export const DRAFT_TOKEN_ACTOR = 'Claude Code (edit token)';
 
-function sameText(a: string, b: string) {
+export function sameText(a: string, b: string) {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);

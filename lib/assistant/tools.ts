@@ -12,6 +12,7 @@ import { getLeadSourceBreakdown } from '@/lib/zoho';
 import { recordQuestions, summary as questionBankSummary } from '@/lib/questionBank';
 import { createAudit } from '@/lib/audits';
 import { sqlNow } from '@/lib/time';
+import type { Action } from '@/lib/permissions';
 
 // Every tool is either 'read' (runs immediately) or 'write' (only runs after the human approves
 // it in the dashboard). A write tool's run() returns { result, change } where change describes how
@@ -252,14 +253,14 @@ defineTool({
   input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
   summarize: () => 'Read dashboard overview',
   // PORT NOTE: SELECT status, COUNT(*) ... GROUP BY status -> groupBy ordered by status (SQLite's GROUP BY order).
-  run: async () => ({
+  run: async (_input, ctx) => ({
     keywords: (await (prisma.keywords as any).groupBy({ by: ['status'], _count: { _all: true }, orderBy: { status: 'asc' } })).map((r: any) => ({ status: r.status, count: r._count._all })),
     drafts: (await (prisma.drafts as any).groupBy({ by: ['status'], _count: { _all: true }, orderBy: { status: 'asc' } })).map((r: any) => ({ status: r.status, count: r._count._all })),
     audits: await prisma.blog_audits.count(),
     meetingInsightsPendingReview: await prisma.client_insights.count({ where: { status: 'pending_review' } }),
     latestStrategy: (await prisma.seo_strategies.findFirst({ select: { id: true, period: true, status: true, created_at: true }, orderBy: { id: 'desc' } })) || null,
     activeWritingSkill: (await prisma.writing_skills.findFirst({ where: { status: 'active' }, select: { id: true, created_at: true }, orderBy: { id: 'desc' } })) || null,
-    recentActivity: await prisma.activity_log.findMany({ select: { action: true, details: true, actor: true, created_at: true }, orderBy: { id: 'desc' }, take: 10 }),
+    recentActivity: await prisma.activity_log.findMany({ where: activityWhere(ctx?.me), select: { action: true, details: true, actor: true, created_at: true }, orderBy: { id: 'desc' }, take: 10 }),
   }),
 });
 
@@ -514,8 +515,9 @@ defineTool({
   description: 'Recent dashboard activity log entries (drafts generated, approvals, publishes, audits, assistant website changes).',
   input_schema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 200 } }, required: [], additionalProperties: false },
   summarize: () => 'Read activity log',
-  run: async ({ limit = 30 }) =>
+  run: async ({ limit = 30 }, ctx) =>
     prisma.activity_log.findMany({
+      where: activityWhere(ctx?.me),
       select: { action: true, entity_type: true, entity_id: true, details: true, actor: true, created_at: true },
       orderBy: { id: 'desc' },
       take: limit,
@@ -1987,6 +1989,30 @@ function getTool(name) {
   return TOOLS.find((t) => t.name === name);
 }
 
+// Read tools that show what the asker's role may not open directly: the same action the matching
+// dashboard route needs (reports, paid SE Ranking / SerpHouse lookups). The engine refuses them
+// for a person without it.
+const READ_NEEDS: Record<string, Action> = {
+  search_console_queries: 'reports.view',
+  search_console_pages: 'reports.view',
+  ga4_overview: 'reports.view',
+  rank_tracking: 'reports.view',
+  keyword_research: 'reports.view',
+  serp_top_results: 'reports.view',
+  clarity_overview: 'reports.view',
+  pagespeed_check: 'reports.view',
+  zoho_leads: 'reports.view',
+};
+function toolNeeds(name: string): Action | null {
+  return READ_NEEDS[name] || null;
+}
+
+// Like the Activity Log page: an admin sees everyone's work, everyone else their own.
+function activityWhere(me: { email: string; role: string } | null | undefined) {
+  if (me?.role === 'admin') return undefined;
+  return { actor_email: me?.email || '' };
+}
+
 function riskOf(tool, input) {
   return tool.riskFor ? tool.riskFor(input) : tool.risk;
 }
@@ -2001,4 +2027,4 @@ const API_TOOLS: any[] = [
   { type: 'web_search_20260209', name: 'web_search', max_uses: 5 },
 ];
 
-export { TOOLS, API_TOOLS, getTool, validate, riskOf, serializeResult, undoChange };
+export { TOOLS, API_TOOLS, getTool, toolNeeds, validate, riskOf, serializeResult, undoChange };

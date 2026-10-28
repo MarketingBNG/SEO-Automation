@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { ensurePhotoCover } from '@/lib/coverPhoto';
-import { uploadMedia, publishPost, updatePost, seoSlug, freeSlug } from '@/lib/wordpress';
+import { uploadMedia, publishPost, updatePost, seoSlug, freeSlug, wpRequest } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
-import { getActor } from '@/lib/auth';
+import { getActor, getMe } from '@/lib/auth';
+import { canDo } from '@/lib/access';
 import { sqlNow } from '@/lib/time';
 import { methodNotAllowed, toId } from '../../../_lib/http';
 import { aiLeftovers, needsExpertReview, faqSchema, faqAccordion } from '@/lib/strategy/core';
@@ -26,11 +27,13 @@ async function wpPostStatus(id: number): Promise<string | null> {
 }
 
 // What WordPress holds now: live or not, the address, and whether the FAQ is in the box format.
-async function checkPost(id: number, wantSlug: string, hasFaq: boolean) {
+async function checkPost(id: number, wantSlug: string | undefined, hasFaq: boolean) {
   const { wpRequest } = await import('@/lib/wordpress');
   const r: any = await wpRequest('GET', `/wp/v2/posts/${id}`, { query: { context: 'edit', _fields: 'status,link,slug,content' } }).catch(() => null);
   if (!r?.json) return null;
   const p = r.json;
+  // No planned address (a live post or a refresh keeps its own): the current one is right.
+  wantSlug = wantSlug || p.slug;
   const raw = String(p.content?.raw || p.content?.rendered || '');
   return {
     live: p.status === 'publish',
@@ -70,6 +73,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const wpStatus = wpLive === 'publish' ? 'publish' : (body && body.wpStatus) || 'publish'; // 'publish' (live) or 'draft'
   const reviewer = String(body?.reviewer || '').trim();
   const kw = (await prisma.keywords.findUnique({ where: { id: draft.keyword_id }, select: { keyword: true } }))?.keyword;
+  // A calendar blog not yet published: going live here skips its slot, which needs blog.publish_now
+  // (as Publish now on the calendar does). Sending it to WordPress as a draft does not.
+  const row = await prisma.blog_schedule.findFirst({ where: { draft_id: nid, status: { not: 'published' } }, select: { id: true, refresh_url: true } });
+  if (row && wpStatus === 'publish' && wpLive !== 'publish') {
+    const me = await getMe();
+    if (!me || (me.role !== 'admin' && !(await canDo(me, 'blog.publish_now')))) {
+      return NextResponse.json({ error: 'This blog has a slot on the calendar. Only an admin or a manager can publish it straight away; it goes live at its slot otherwise.' }, { status: 403 });
+    }
+  }
+  // A refresh of a live page updates that page (its address, author and cover stay), never a new post.
+  const refreshUrl: string | null = row?.refresh_url || null;
+  if (refreshUrl && wpStatus !== 'publish') {
+    return NextResponse.json({ error: 'This blog refreshes a live page, so it cannot go to WordPress as a draft (that would take the page offline). Publish it live, or let it publish at its slot.' }, { status: 400 });
+  }
   if (wpStatus === 'publish' && (await requireExpert()) && needsExpertReview(kw, draft.title)) {
     const known = await expertReviewers();
     if (!reviewer || (!known.includes(reviewer) && !CREDENTIAL.test(reviewer))) {
@@ -81,12 +98,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const keyword = kw;
     const author = draft.author || pickAuthor(await authorNames());
     if (!draft.author) await prisma.drafts.update({ where: { id: nid }, data: { author } });
-    const authorId = await wpAuthorId(author).catch(() => null);
+    const authorId = refreshUrl ? null : await wpAuthorId(author).catch(() => null);
 
     // The cover: the uploaded one, or the branded cover made from the title and author (the same
     // one the preview and the Word file show).
-    let imageKey = draft.featured_image_path || (await ensurePhotoCover(nid).catch(() => null));
-    if (!imageKey) {
+    let imageKey = refreshUrl ? null : draft.featured_image_path || (await ensurePhotoCover(nid).catch(() => null));
+    if (!imageKey && !refreshUrl) {
       imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(keyword || draft.title)}.png`, await makeCover(draft.title, author), 'image/png').catch(() => null);
       if (imageKey) await prisma.drafts.update({ where: { id: nid }, data: { featured_image_path: imageKey } });
     }
@@ -96,23 +113,32 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Images a person placed in the article move to the WordPress Media Library first.
     const inline = await publishDraftImages(nid, draft.content_html || '');
     const contentHtml = `${withByline(faqAccordion(inline.html), author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null, image: cover?.url || null }) || ''}`;
+    // The address is set only on a new post: a live post (or the page a refresh replaces) keeps its URL.
+    const keepAddress = Boolean(refreshUrl) || wpLive === 'publish';
     const fields = {
       title: draft.title,
       contentHtml,
       author: authorId || undefined,
-      authorName: author,
+      authorName: refreshUrl ? undefined : author,
       excerpt: draft.meta_description,
       featuredMediaId: cover?.id,
       status: wpStatus,
-      slug: seoSlug(keyword || draft.title),
+      slug: keepAddress ? undefined : seoSlug(keyword || draft.title),
       metaDescription: draft.meta_description,
       focusKeyphrase: keyword,
     };
     // The planned address must be free: a copy that was never live is moved to the trash.
-    const freed = wpStatus === 'publish' ? await freeSlug(fields.slug, draft.wp_post_id).catch(() => null) : null;
+    const freed = wpStatus === 'publish' && fields.slug ? await freeSlug(fields.slug, draft.wp_post_id).catch(() => null) : null;
     if (freed?.trashed.length) await activity.log('wordpress.duplicate_trashed', { entityType: 'draft', entityId: nid, details: `"${draft.title}": moved WordPress post(s) ${freed.trashed.map((x) => `#${x}`).join(', ')} (never live) to the trash to free /${fields.slug}/`, actor: await getActor() });
-    // Already on WordPress (as a draft): update that post instead of making another one.
-    const post: any = draft.wp_post_id && wpLive ? await updatePost(draft.wp_post_id, fields) : await publishPost(fields);
+    // A refresh updates the live page it refreshes (found from its address, as the calendar does).
+    let target: number | null = draft.wp_post_id && wpLive ? draft.wp_post_id : null;
+    if (refreshUrl && !target) {
+      const { json: found } = await wpRequest('GET', '/wp/v2/posts', { query: { slug: new URL(refreshUrl).pathname.split('/').filter(Boolean).pop(), _fields: 'id,link' } });
+      if (!found?.[0]) throw new Error(`The page this blog refreshes was not found: ${refreshUrl}`);
+      target = found[0].id;
+    }
+    // Already on WordPress (as a draft, or the refreshed page): update that post instead of making another one.
+    const post: any = target ? await updatePost(target, fields) : await publishPost(fields);
     const yoastSaved = Boolean(post.meta && post.meta._yoast_wpseo_metadesc);
 
     await prisma.drafts.update({
@@ -121,9 +147,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // approved (so it can be published live later), with the post id kept to update that post.
       data: wpStatus === 'publish' ? { status: 'published', wp_post_id: post.id, wp_post_url: post.link, updated_at: sqlNow() } : { status: 'approved', wp_post_id: post.id, wp_post_url: null, updated_at: sqlNow() },
     });
+    // Newly live: indexing, SE Ranking tracking and internal links, as a calendar publish does.
+    const log = wpStatus === 'publish' && wpLive !== 'publish' ? await import('@/lib/strategy/autopilot').then((m) => m.afterPublish(post.link, draft.title, keyword)).catch(() => null) : null;
     // A calendar blog published here counts as published on the calendar too (it does not publish again).
     if (wpStatus === 'publish') {
-      await prisma.blog_schedule.updateMany({ where: { draft_id: nid, status: { not: 'published' } }, data: { status: 'published', wp_post_url: post.link, hold_reasons: null, updated_at: sqlNow() } }).catch(() => {});
+      await prisma.blog_schedule.updateMany({ where: { draft_id: nid, status: { not: 'published' } }, data: { status: 'published', approval_mode: 'reviewed', wp_post_url: post.link, hold_reasons: null, ...(log ? { post_publish_log: JSON.stringify(log) } : {}), updated_at: sqlNow() } }).catch(() => {});
     }
 
     await activity.log('wordpress.published', {

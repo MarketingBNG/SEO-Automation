@@ -7,7 +7,9 @@ import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { readFile } from '@/lib/storage';
 import { sqlNow } from '@/lib/time';
-import { API_TOOLS, getTool, validate, riskOf, serializeResult } from './tools';
+import { API_TOOLS, getTool, toolNeeds, validate, riskOf, serializeResult } from './tools';
+import { canDo } from '@/lib/access';
+import { deniedMessage } from '@/lib/permissions';
 import { SYSTEM_PROMPT } from './prompt';
 
 const MODEL = process.env.ASSISTANT_MODEL || 'claude-opus-5-5';
@@ -107,11 +109,14 @@ async function recordChange(conv, toolName, change) {
   return Number(r.id);
 }
 
-async function runTool(conv, name, input, emit, toolUseId) {
+// me: the person asking (getMe), so a tool shows only what their role may see.
+async function runTool(conv, name, input, emit, toolUseId, me) {
   const tool = getTool(name);
   emit({ type: 'tool_start', toolUseId, name, summary: tool.summarize(input) });
   try {
-    const out = await tool.run(input, { conversationId: conv.id, emit });
+    const needs = toolNeeds(name);
+    if (needs && !(me && (me.role === 'admin' || (await canDo(me, needs))))) throw new Error(`${deniedMessage(needs)} Tell the user this tool is not open to their role.`);
+    const out = await tool.run(input, { conversationId: conv.id, emit, me });
     let result = tool.kind === 'write' ? out.result : out;
     let changeId: number | null = null;
     if (tool.kind === 'write' && out.change) {
@@ -126,7 +131,7 @@ async function runTool(conv, name, input, emit, toolUseId) {
   }
 }
 
-async function runLoop(conv, emit, signal) {
+async function runLoop(conv, emit, signal, me) {
   const client = getClient();
   conv.status = 'running';
   await saveConversation(conv);
@@ -216,7 +221,7 @@ async function runLoop(conv, emit, signal) {
           continue;
         }
         if (tool.kind === 'read') {
-          readResults.push(await runTool(conv, tu.name, tu.input, emit, tu.id));
+          readResults.push(await runTool(conv, tu.name, tu.input, emit, tu.id, me));
           continue;
         }
         let preview: any = null;
@@ -253,7 +258,7 @@ async function runLoop(conv, emit, signal) {
 
 // A new user message. If actions were waiting for approval, they are declined first (the user
 // moved on), all inside one user turn so the history stays valid.
-async function sendMessage({ conversationId, text, imageIds = [], actor = null }: any, emit, signal) {
+async function sendMessage({ conversationId, text, imageIds = [], actor = null, me = null }: any, emit, signal) {
   let conv = conversationId ? await loadConversation(conversationId) : null;
   if (conversationId && !conv) throw new Error('Conversation not found');
   if (conv && conv.status === 'running') throw new Error('The assistant is still working on the previous message. Stop it first.');
@@ -285,12 +290,12 @@ async function sendMessage({ conversationId, text, imageIds = [], actor = null }
   conv.messages.push({ role: 'user', content });
   await saveConversation(conv);
 
-  await runLoop(conv, emit, signal);
+  await runLoop(conv, emit, signal, me);
   return conv.id;
 }
 
 // The user approved and/or rejected the pending actions.
-async function decide({ conversationId, decisions }, emit, signal) {
+async function decide({ conversationId, decisions, me = null }: any, emit, signal) {
   const conv = await loadConversation(conversationId);
   if (!conv) throw new Error('Conversation not found');
   if (conv.status !== 'awaiting_approval' || !conv.pending) throw new Error('Nothing is waiting for approval in this conversation.');
@@ -316,12 +321,12 @@ async function decide({ conversationId, decisions }, emit, signal) {
       });
       continue;
     }
-    results.push(await runTool(conv, action.name, action.input, emit, action.toolUseId));
+    results.push(await runTool(conv, action.name, action.input, emit, action.toolUseId, me));
   }
   conv.messages.push({ role: 'user', content: results });
   await saveConversation(conv);
 
-  await runLoop(conv, emit, signal);
+  await runLoop(conv, emit, signal, me);
 }
 
 export { sendMessage, decide, loadConversation, IMAGE_MARKER, MODEL };
