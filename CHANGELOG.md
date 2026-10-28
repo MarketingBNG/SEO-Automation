@@ -4,6 +4,21 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-10-28
+- (ops) Security audit: Settings can no longer change role access, Testing/Live mode or credit switches (a tester could make itself admin that way); cron routes (daily, weekly, sweep, skill and strategy auto-checks) need the cron secret; meeting transcripts, client insights, account connections, paid live lookups and connection tests are limited to the right roles; private assistant files stay private; 'Check a blog' and site checks no longer fetch private network addresses; audit rewrite and lesson HTML are sanitised.
+- (ops) Testing mode and Pause now hold everywhere: calendar blogs, fact checks, topics, training, outreach, covers, reports and the skill refresh wait instead of failing, and pick up from their saved steps when work can run again; tests always run in Live mode and never hang on the queue.
+- (ops) No credit spent twice: calendar blog writing and fact checks reuse saved steps after a pause or restart; a failed rewrite of a rejected blog is paused once instead of being paid for again every 15 minutes; Surfer reuses its Content Editor; batch results are not re-sent or re-counted; the autopilot, cron and Publish now can no longer run the same blog at the same time.
+- (publisher) Refresh blogs published from Drafts & Review update the page they refresh (address, author and cover kept) instead of creating a new post; 'Save as a separate draft' in Check a blog no longer takes the live post offline; one blog cannot be published twice by two paths at once; publishing without a website connection stops before saving anything and is logged.
+- (publisher) Drafts & Review publish also runs IndexNow, sitemap resubmit, Bing, rank tracking and internal links like the calendar does; an analyst cannot publish a calendar blog before its slot; the paid originality check runs only after the free checks pass.
+- (writer) The publish gate and the writer's checks now use the same rules (title length, internal links, question answers), so a draft that passes writing is not held at publishing for a rule it was never told.
+- (fact-check) An edit by a person, the Assistant or the issue fixer no longer turns a failed fact check into a pass; 'Check and fix' cannot overwrite a save made while it ran.
+- (seo) Approving a new strategy stops the old calendar from drafting and publishing, and its remaining blogs stay visible; a strategy cannot be approved twice; rank-drop alerts compare the same search engine; Screaming Frog counts only HTML pages; blog analytics no longer repeats posts or shows a false -100% position change.
+- (ops) Data kept tidy: old paid-API cache rows, saved AI steps, progress rows and Surfer editor ids are cleaned up on a schedule; activity log areas, stop actions, sign-in refusals, deletes and publish failures are now logged with the right person.
+- (ops) Deletes do what they say: deleting a draft no longer requeues strategy, LinkedIn or live blogs, frees its topic, and stops endless 'Blog held' alerts.
+- (ops) Pages: Website Content 'New page' can no longer replace the home page; the Blog rules card loads saved values before saving; draft saves warn instead of overwriting newer edits; pages show an error instead of loading forever; each page fails on its own instead of blanking the dashboard; buttons are shown only to roles that can use them.
+- (social) Outreach opening lines are the line itself (no preamble), and one refused lead no longer stops outreach for good.
+- (ops) Associate Training: the 09:00 lesson is made later the same day when AI work was paused; a test cannot be scored twice.
+
 ## 2026-10-27
 - (social) The AI photo for the older photo banner uses gpt-image-2.5-sunburst (gpt-image-1 was shut down on 23 Oct 2026); COVER_IMAGE_MODEL still overrides it.
 - (social) Blog banners use the house banner design from the Social Media dashboard, with the author's name; the art direction picks the bold main title and the cut-out picture. The older photo banner is made here only when that link fails.
