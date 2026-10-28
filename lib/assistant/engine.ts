@@ -230,7 +230,7 @@ async function runLoop(conv, emit, signal, me) {
         let preview: any = null;
         if (tool.preview) {
           try {
-            preview = await tool.preview(tu.input);
+            preview = await tool.preview(tu.input, { conversationId: conv.id, me });
           } catch (err: any) {
             preview = { problem: `Could not build a preview: ${err.message}` };
           }

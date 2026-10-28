@@ -550,6 +550,61 @@ test('two bad leads first in line do not stop outreach for good, and a lone refu
   }
 });
 
+test('leads refused before do not use up a small daily limit, so the next lead is still tried', { skip: !hasDb }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const settings = await import('../lib/settings');
+  const { runOutreach } = await import('../lib/strategy/outreach');
+  const saved = { fetch: globalThis.fetch, key: process.env.SMARTLEAD_API_KEY, campaign: process.env.SMARTLEAD_CAMPAIGN_ID, limit: process.env.OUTREACH_DAILY_LIMIT, stopped: await settings.get('outreach_stopped_day'), since: await settings.get('outreach_stopped_since') };
+  process.env.SMARTLEAD_API_KEY = 'test-key';
+  process.env.SMARTLEAD_CAMPAIGN_ID = '1';
+  process.env.OUTREACH_DAILY_LIMIT = '2';
+  const added: string[] = [];
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = new URL(String(url));
+    if (u.hostname === 'server.smartlead.ai') {
+      if (init?.method === 'GET') return new Response('', { status: 404 });
+      const email = JSON.parse(init.body).lead_list[0].email;
+      if (email.includes('@bad-')) return new Response('{"error":"invalid lead"}', { status: 400 });
+      added.push(email);
+      return Response.json({ ok: true });
+    }
+    return new Response(`<p>contact@${u.hostname}</p>`, { status: 200 });
+  }) as any;
+  const s = await prisma.seo_strategies.create({ data: { period: `test ${Date.now()}`, status: 'approved', plan_json: '{}' } });
+  const base = { strategy_id: s.id, method: 'Resource page outreach', our_page: '/itin', send_date: '2020-01-01', tags: '[]' };
+  const a = await prisma.backlink_tasks.create({ data: { ...base, target_site: 'bad-a.com' } });
+  const b = await prisma.backlink_tasks.create({ data: { ...base, target_site: 'bad-b.com' } });
+  await prisma.backlink_tasks.create({ data: { ...base, target_site: 'fine-c.com' } });
+  let lines = 0;
+  const line = async () => {
+    lines++;
+    return 'A line.';
+  };
+  const status = async (id: number) => (await prisma.backlink_tasks.findUnique({ where: { id } }))!.status;
+  try {
+    await settings.set('outreach_stopped_day', '');
+    const r1: any = await runOutreach(new Date('2032-01-01T10:00:00Z'), { checkLinks: false, line });
+    assert.equal(r1.stoppedForToday, true, 'day 1: two fresh refusals stop the run');
+    assert.equal(lines, 2);
+    const r2: any = await runOutreach(new Date('2032-01-02T10:00:00Z'), { checkLinks: false, line });
+    assert.equal(r2.pushed, 1, 'the retries with saved lines do not use up the limit of 2');
+    assert.deepEqual(added, ['contact@fine-c.com']);
+    assert.equal(lines, 3, 'the retries reuse their saved lines');
+    assert.equal(await status(a.id), 'failed');
+    assert.equal(await status(b.id), 'failed');
+  } finally {
+    await settings.set('outreach_stopped_day', saved.stopped || '');
+    await settings.set('outreach_stopped_since', saved.since || '');
+    globalThis.fetch = saved.fetch;
+    process.env.SMARTLEAD_API_KEY = saved.key || '';
+    process.env.SMARTLEAD_CAMPAIGN_ID = saved.campaign || '';
+    if (saved.limit === undefined) delete process.env.OUTREACH_DAILY_LIMIT;
+    else process.env.OUTREACH_DAILY_LIMIT = saved.limit;
+    await prisma.backlink_tasks.deleteMany({ where: { strategy_id: s.id } });
+    await prisma.seo_strategies.delete({ where: { id: s.id } });
+  }
+});
+
 test('onceADay clears only its own run marker', { skip: !hasDb }, async () => {
   const settings = await import('../lib/settings');
   const { onceADay } = await import('../lib/onceADay');

@@ -359,7 +359,7 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
     if (collectOnly && !pending) throw new TestingModeError();
     // The first part this call sends checks credits, also when the parts before it were only collected
     // from their kept batches (free) after a restart or in Testing mode. A kept batch that turns out
-    // to be gone (cancelled, too old, not reachable with this key) is sent again: runBatchTurn calls
+    // to be gone (cancelled, too old, not found with the key that sent it) is sent again: runBatchTurn calls
     // beforeSend then, so that send checks credits too.
     if (!pending) await beforeSend();
     if (batch) {
@@ -502,11 +502,18 @@ const BATCH_MAX_WAIT_MS = 25 * 60 * 60 * 1000; // batches expire after 24h
 // up the batch already sent (and paid for) instead of sending a new one.
 // The id of the batch already sent for this request (null when none).
 async function pendingBatchId(params): Promise<string | null> {
+  return (await pendingBatch(params))?.id || null;
+}
+
+// The saved batch with the key that sent it ('main' or 'secondary'; none on an id saved before the
+// key was recorded).
+async function pendingBatch(params): Promise<{ id: string; key?: 'main' | 'secondary' } | null> {
   const savedRaw = await settings.get(`batch_pending:${requestHash(params)}`).catch(() => null);
   if (!savedRaw) return null;
-  if (!savedRaw.startsWith('{')) return savedRaw;
+  if (!savedRaw.startsWith('{')) return { id: savedRaw };
   try {
-    return JSON.parse(savedRaw).id || null;
+    const saved = JSON.parse(savedRaw);
+    return saved.id ? { id: saved.id, key: saved.key === 'secondary' ? 'secondary' : saved.key === 'main' ? 'main' : undefined } : null;
   } catch {
     return null;
   }
@@ -536,18 +543,32 @@ async function recordBatchUsageOnce(pendingKey: string, { model, usage, feature 
 async function runBatchTurn(client, params, signal, { keep = false, collectOnly = false, beforeSend }: { keep?: boolean; collectOnly?: boolean; beforeSend?: () => Promise<void> } = {}) {
   const pendingKey = `batch_pending:${requestHash(params)}`;
   const forget = () => prisma.settings.deleteMany({ where: { key: pendingKey } }).catch(() => {});
-  // Saved as {"id","at"} (at: when it was sent, so pruneReplay can drop a key whose request never came
-  // back); a plain id from before is still read.
-  const savedId = await pendingBatchId(params);
-  // Only a batch that is gone (not found, or not reachable with this key) is sent again. A passing
-  // error (timeout, dropped connection, 5xx) is thrown, so the saved id is kept and the next run
-  // picks up the batch already paid for instead of paying for a second one.
-  let created: any = savedId
-    ? await client.messages.batches.retrieve(savedId).catch((err: any) => {
+  // Saved as {"id","at","key"} (at: when it was sent, so pruneReplay can drop a key whose request never
+  // came back; key: which API key sent it); a plain id from before is still read.
+  const saved = await pendingBatch(params);
+  const savedId = saved?.id || null;
+  // Only a batch that is gone is sent again. It belongs to the account of the key that sent it, so it
+  // is read with that key (an id saved before the key was recorded: this client's key, then the
+  // other one), not with whichever key is in use now. A passing error (timeout, dropped connection,
+  // 5xx) is thrown, so the saved id is kept and the next run picks up the batch already paid for
+  // instead of paying for a second one.
+  let created: any = null;
+  if (savedId) {
+    const both = Boolean(process.env.ANTHROPIC_API_KEY) && secondaryKeyConfigured();
+    const first = (both && saved?.key) || clientKeyKind(client);
+    const kinds: ('main' | 'secondary')[] = saved?.key || !both ? [first] : [first, first === 'main' ? 'secondary' : 'main'];
+    for (const kind of kinds) {
+      const c = kind === clientKeyKind(client) ? client : anthropicClient(kind);
+      created = await c.messages.batches.retrieve(savedId).catch((err: any) => {
         if (isTransient(err)) throw err;
         return null;
-      })
-    : null;
+      });
+      if (created) {
+        client = c; // polled and read with the key that can reach it
+        break;
+      }
+    }
+  }
   // Only a batch from the last week that was not cancelled (its results are kept 29 days).
   if (created && (created.cancel_initiated_at || Date.now() - Date.parse(created.created_at) > 7 * 86400000)) created = null;
   if (!created && collectOnly) throw new TestingModeError();
@@ -556,7 +577,7 @@ async function runBatchTurn(client, params, signal, { keep = false, collectOnly 
     created = await client.messages.batches
       .create({ requests: [{ custom_id: 'turn', params }] })
       .catch((err: any) => rethrowFriendly(err, signal, clientKeyKind(client)));
-    await settings.set(pendingKey, JSON.stringify({ id: created.id, at: Date.now() })).catch(() => {});
+    await settings.set(pendingKey, JSON.stringify({ id: created.id, at: Date.now(), key: clientKeyKind(client) })).catch(() => {});
   }
   const started = Date.now();
   let status = created.processing_status;

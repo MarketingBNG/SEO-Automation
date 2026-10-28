@@ -203,3 +203,79 @@ test('a kept batch that is gone is not sent again while AI work is paused', { sk
     await prisma.ai_usage.deleteMany({ where: { feature } });
   }
 });
+
+test('a kept batch is read with the key that sent it, so it is not paid again after a switch to the secondary key', { skip: !db }, async () => {
+  const prisma = (await import('../lib/prisma')).default;
+  const { callClaude } = await import('../lib/anthropic');
+  const { switchedToSecondary, retryMainKey, keyInUse } = await import('../lib/anthropicClient');
+  const saved = { fetch: globalThis.fetch, key: process.env.ANTHROPIC_API_KEY, secondary: process.env.ANTHROPIC_API_KEY_SECONDARY, slack: process.env.SLACK_WEBHOOK_URL };
+  process.env.ANTHROPIC_API_KEY = 'test-main-key';
+  process.env.ANTHROPIC_API_KEY_SECONDARY = 'test-secondary-key';
+  delete process.env.SLACK_WEBHOOK_URL;
+  retryMainKey();
+  // Batches belong to the account of the key that made them: the other key gets a 404.
+  const batches = new Map<string, { owner: string; message: any }>();
+  const created: string[] = [];
+  let failPart1 = true;
+  const msg = (text: string, stop: string) => ({ id: `msg_${text}`, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }], stop_reason: stop, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
+  const batchJson = (id: string) => ({ id, type: 'message_batch', processing_status: 'ended', created_at: new Date().toISOString(), cancel_initiated_at: null, ended_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(), request_counts: { processing: 0, succeeded: 1, errored: 0, canceled: 0, expired: 0 }, results_url: `https://api.anthropic.com/v1/messages/batches/${id}/results` });
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = new URL(String(url instanceof Request ? url.url : url));
+    if (u.hostname !== 'api.anthropic.com') throw new Error(`Network call in a test: ${u}`);
+    const m = u.pathname.match(/^\/v1\/messages\/batches(?:\/([^/]+))?(\/results)?$/);
+    if (!m) throw new Error(`Unexpected Anthropic call: ${u.pathname}`);
+    const key = new Headers(init?.headers).get('x-api-key') || '';
+    const method = init?.method || 'GET';
+    if (method === 'POST' && !m[1]) {
+      const params = JSON.parse(init.body).requests[0].params;
+      const part = params.messages.length === 1 ? 0 : 1;
+      if (part === 1 && failPart1) return Response.json({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, { status: 503 });
+      const id = `msgbatch_test_keys_${created.length}_${Date.now()}`;
+      created.push(`${part}:${key}`);
+      batches.set(id, { owner: key, message: part === 0 ? msg('first part', 'pause_turn') : msg('second part', 'end_turn') });
+      return Response.json(batchJson(id));
+    }
+    const b = batches.get(m[1]);
+    if (!b || b.owner !== key) return Response.json({ type: 'error', error: { type: 'not_found_error', message: 'Not found' } }, { status: 404 });
+    if (m[2]) return new Response(JSON.stringify({ custom_id: 'turn', result: { type: 'succeeded', message: b.message } }) + '\n', { headers: { 'content-type': 'application/binary' } });
+    return Response.json(batchJson(m[1]));
+  }) as any;
+  const ask = [{ role: 'user', content: `batch keys test ${Date.now()}` }];
+  const feature = `test-batch-keys-${Date.now()}`;
+  const opts = { batch: true, maxUses: 1, feature };
+  try {
+    // Part 0 is sent and paid on the main key; the continuation hits a passing error, so it is kept.
+    await assert.rejects(callClaude('system', ask, undefined, opts));
+    assert.deepEqual(created, ['0:test-main-key']);
+    const kept = await prisma.settings.findFirst({ where: { key: { startsWith: 'batch_pending:' }, value: { contains: 'msgbatch_test_keys_' } } });
+    assert.equal(JSON.parse(kept!.value!).key, 'main', 'the key that sent the batch is saved with it');
+    // The main key ran out of credit: new requests use the secondary key for an hour.
+    switchedToSecondary();
+    assert.equal(keyInUse(), 'secondary');
+    failPart1 = false;
+    const r: any = await callClaude('system', ask, undefined, opts);
+    assert.deepEqual(created, ['0:test-main-key', '1:test-secondary-key'], 'part 0 is read on the main key, not sent again on the secondary one');
+    assert.match(r.text, /first part[\s\S]*second part/);
+
+    // An id saved before the key was recorded: this client's key, then the other one.
+    failPart1 = true;
+    const ask2 = [{ role: 'user', content: `batch keys legacy test ${Date.now()}` }];
+    retryMainKey();
+    await assert.rejects(callClaude('system', ask2, undefined, opts));
+    const k2 = await prisma.settings.findFirst({ where: { key: { startsWith: 'batch_pending:' }, value: { contains: 'msgbatch_test_keys_' } } });
+    await prisma.settings.update({ where: { key: k2!.key }, data: { value: JSON.stringify({ id: JSON.parse(k2!.value!).id, at: Date.now() }) } });
+    switchedToSecondary();
+    failPart1 = false;
+    await callClaude('system', ask2, undefined, opts);
+    assert.equal(created.filter((c) => c.startsWith('0:')).length, 2, 'the legacy kept part is found on the other key, not paid again');
+  } finally {
+    globalThis.fetch = saved.fetch;
+    retryMainKey();
+    process.env.ANTHROPIC_API_KEY = saved.key || '';
+    if (saved.secondary) process.env.ANTHROPIC_API_KEY_SECONDARY = saved.secondary;
+    else delete process.env.ANTHROPIC_API_KEY_SECONDARY;
+    if (saved.slack) process.env.SLACK_WEBHOOK_URL = saved.slack;
+    await prisma.settings.deleteMany({ where: { key: { startsWith: 'batch_pending:' }, value: { contains: 'msgbatch_test_keys_' } } });
+    await prisma.ai_usage.deleteMany({ where: { feature } });
+  }
+});

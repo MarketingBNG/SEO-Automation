@@ -16,6 +16,7 @@ import { makeCover, coverAlt } from '@/lib/cover';
 import { saveFile } from '@/lib/storage';
 import { ensureOriginality, originalityReason } from '@/lib/originality';
 import { claimPublish } from '@/lib/strategy/publishLock';
+import { wordsHash } from '@/lib/factCheckMark';
 
 export const runtime = 'nodejs';
 
@@ -110,9 +111,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     try {
       // Published meanwhile by the calendar (its slot came while this was being checked): not sent again.
-      const latest = await prisma.drafts.findUnique({ where: { id: nid }, select: { status: true, wp_post_id: true, wp_post_url: true } });
-      if (draft.status !== 'published' && latest?.status === 'published') {
+      const latest = await prisma.drafts.findUnique({ where: { id: nid }, select: { status: true, wp_post_id: true, wp_post_url: true, title: true, meta_description: true, content_html: true } });
+      if (!latest) return NextResponse.json({ error: 'The draft was deleted while it was being checked, so it was not published.' }, { status: 409 });
+      if (draft.status !== 'published' && latest.status === 'published') {
         return NextResponse.json({ error: `It was published meanwhile at its calendar slot: ${latest.wp_post_url || ''}`.trim() }, { status: 409 });
+      }
+      // Rejected, or its words edited, by someone else while the checks above ran: the words checked
+      // are not what the draft holds now, so nothing is sent. Pressing Publish again checks the new state.
+      if (latest.status !== draft.status) {
+        return NextResponse.json({ error: `The draft was moved to "${latest.status}" while it was being checked, so it was not published.` }, { status: 409 });
+      }
+      if (wordsHash(latest) !== wordsHash(draft)) {
+        return NextResponse.json({ error: 'The draft was edited while it was being checked, so it was not published. Refresh and press Publish again to send the saved version.' }, { status: 409 });
       }
       // Sent to WordPress as a draft meanwhile (another tab): that post is updated, not a second one made.
       if (latest?.wp_post_id && latest.wp_post_id !== draft.wp_post_id) {
@@ -166,7 +176,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const post: any = target ? await updatePost(target, fields) : await publishPost(fields);
       const yoastSaved = Boolean(post.meta && post.meta._yoast_wpseo_metadesc);
 
-      await prisma.drafts.update({
+      // updateMany: a draft deleted during the WordPress calls does not turn a post that went out into
+      // a "publish failed" answer.
+      await prisma.drafts.updateMany({
         where: { id: nid },
         // Live: published, with its address. A WordPress draft is not on the website: the blog stays
         // approved (so it can be published live later), with the post id kept to update that post.

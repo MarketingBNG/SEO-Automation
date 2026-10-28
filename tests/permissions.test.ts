@@ -162,6 +162,17 @@ test('an image attached in a private assistant chat is read and sent to Claude o
     assert.deepEqual(await ownImageIds(a, [img.id]), [img.id]);
     assert.deepEqual(await ownImageIds(b, [img.id, old.id]), [], "someone else's image (or one with no owner) is not sent");
     assert.deepEqual(await ownImageIds(admin, [img.id]), [img.id]);
+    // The assistant's wp_upload_image takes only an image the asker attached: another member cannot
+    // publish it to the Media Library (nor see its file name in the preview). No WordPress call is made.
+    const { getTool } = await import('../lib/assistant/tools');
+    const upload = getTool('wp_upload_image');
+    const input = { image_id: img.id, alt_text: 'x' };
+    assert.equal((await upload.preview(input, { me: a })).file, 'secret.png');
+    assert.equal((await upload.preview(input, { me: admin })).file, 'secret.png');
+    const seen = await upload.preview(input, { me: b });
+    assert.ok(seen.problem && !seen.file, "someone else's image reads as not found");
+    await assert.rejects(upload.run(input, { me: b }), /not found/);
+    await assert.rejects(upload.run(input, {}), /not found/);
   } finally {
     await prisma.assistant_files.delete({ where: { id: file.id } });
     await prisma.image_library.deleteMany({ where: { id: { in: [img.id, old.id] } } });

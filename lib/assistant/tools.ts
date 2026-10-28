@@ -12,6 +12,7 @@ import { getLeadSourceBreakdown } from '@/lib/zoho';
 import { recordQuestions, summary as questionBankSummary } from '@/lib/questionBank';
 import { createAudit } from '@/lib/audits';
 import { sqlNow } from '@/lib/time';
+import { ownImageIds } from './fileAccess';
 import type { Action } from '@/lib/permissions';
 
 // Every tool is either 'read' (runs immediately) or 'write' (only runs after the human approves
@@ -1195,12 +1196,16 @@ defineTool({
     additionalProperties: false,
   },
   summarize: (i) => `Upload attached image #${i.image_id} to Media Library (alt: "${snippet(i.alt_text, 60)}")`,
-  preview: async (i) => {
-    const img = await prisma.image_library.findUnique({ where: { id: i.image_id }, select: { id: true, filename: true, width: true, height: true } });
+  // Only an image the asker attached themselves (an admin: any), so a member cannot publish an image
+  // someone else attached in a private chat; another person's image reads as not found.
+  preview: async (i, ctx) => {
+    const img = (await ownImageIds(ctx?.me, [i.image_id])).length
+      ? await prisma.image_library.findUnique({ where: { id: i.image_id }, select: { id: true, filename: true, width: true, height: true } })
+      : null;
     return img ? { file: img.filename, dimensions: img.width ? `${img.width}x${img.height}` : 'unknown', alt_text: i.alt_text } : { problem: `Attached image ${i.image_id} not found.` };
   },
-  run: async (i) => {
-    const img = await prisma.image_library.findUnique({ where: { id: i.image_id } });
+  run: async (i, ctx) => {
+    const img = (await ownImageIds(ctx?.me, [i.image_id])).length ? await prisma.image_library.findUnique({ where: { id: i.image_id } }) : null;
     if (!img) throw new Error(`Attached image ${i.image_id} not found`);
     // PORT NOTE: img.path is now a storage key (lib/storage); lib/wordpress reads it via readFile.
     const media = await uploadMedia(img.path, { altText: i.alt_text, title: i.title, caption: i.caption });

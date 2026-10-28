@@ -43,12 +43,15 @@ function withKey(init: RequestInit | undefined, key: string): RequestInit {
   return { ...init, headers };
 }
 
-export function anthropicClient(): Anthropic {
+// `pin`: start on that key (when it is set) instead of the one in use now, for reading a batch that
+// key sent (batches belong to the account of the key that made them).
+export function anthropicClient(pin?: 'main' | 'secondary'): Anthropic {
   const main = process.env.ANTHROPIC_API_KEY || '';
   const secondary = process.env.ANTHROPIC_API_KEY_SECONDARY || '';
   if (!main && !secondary) throw new Error('ANTHROPIC_API_KEY is not set in .env');
   // Kept per client: a batch made with one key is polled with the same key.
-  let key = keyInUse() === 'secondary' && secondary ? secondary : main;
+  const kind = pin === 'main' && main ? 'main' : pin === 'secondary' && secondary ? 'secondary' : keyInUse();
+  let key = kind === 'secondary' && secondary ? secondary : main;
 
   const fetchWithBackup = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const res = await fetch(url, withKey(init, key));

@@ -245,6 +245,7 @@ export async function runOutreach(now = new Date(), { checkLinks = true, push = 
   let againInStreak: number[] = [];
   const giveUp: number[] = [];
   let stopped = false;
+  let freeRetries = 0;
   const lastStopped = await settings.get(STOPPED_DAY);
   if (lastStopped === today) {
     out.stoppedForToday = true;
@@ -272,7 +273,15 @@ export async function runOutreach(now = new Date(), { checkLinks = true, push = 
         out.duplicates++;
         continue;
       }
-      budget--; // counted per attempt, so failures cannot spend a Claude call on every due task
+      // Counted per attempt, so failures cannot spend a Claude call on every due task. A retry of a lead
+      // refused before, with its saved line, costs no Claude call: it is not charged up front (capped
+      // apart), so a few such leads first in line cannot use up the day and keep fresh leads from ever
+      // being tried. It counts toward the daily limit only when it is added.
+      const freeRetry = Boolean(t.email_body) && String(t.note || '').startsWith(ADD_LEAD_FAILED);
+      if (freeRetry) {
+        if (freeRetries >= DAILY_LIMIT()) continue;
+        freeRetries++;
+      } else budget--;
       // A line written on an earlier run whose add-lead failed is reused, so Claude is not paid again.
       let line = t.email_body;
       if (!line) {
@@ -331,6 +340,7 @@ export async function runOutreach(now = new Date(), { checkLinks = true, push = 
         if (stop) break;
         continue;
       }
+      if (freeRetry) budget--;
       refusedInARow = 0;
       freshInStreak = false;
       giveUp.push(...againInStreak);

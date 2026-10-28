@@ -958,7 +958,16 @@ function RecheckIssues({ id, count, onDone, compact = false, fixBlocked = '' }: 
     try {
       const res = await fetch(`/api/drafts/${id}/recheck`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fix }) });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'The check failed.');
+      if (!res.ok) {
+        // The fix was saved but its result could not be written (the words changed meanwhile): the
+        // list and the editor still reload, so they show the saved version.
+        if (j.fixed) {
+          setMsg(j.error || 'The fix was saved, but the check result could not be written.');
+          onDone(true);
+          return;
+        }
+        throw new Error(j.error || 'The check failed.');
+      }
       setMsg(j.open ? `${j.resolved} of ${j.checked} resolved${j.fixed ? ' (blog fixed and saved)' : ''}; ${j.open} still open.` : `All ${j.checked} issues are resolved${j.fixed ? ' and the blog is saved' : ''}. The draft is now ready for review.`);
       onDone(Boolean(j.fixed));
     } catch (e: any) {
