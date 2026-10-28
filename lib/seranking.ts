@@ -85,26 +85,25 @@ async function getSiteRankings(siteId, { signal }: any = {}) {
     }
   }
 
-  // Unranked (pos 0, meaning not found in top 100) sort last; otherwise best position first.
-  rows.sort((a, b) => {
-    const posA = a.position === 0 ? Infinity : a.position;
-    const posB = b.position === 0 ? Infinity : b.position;
-    return posA - posB;
-  });
+  // Unranked (pos 0, meaning not found in top 100, or no position yet) sort last; otherwise best
+  // position first.
+  rows.sort((a, b) => rankOf(a.position) - rankOf(b.position));
 
   return rows;
 }
 
-// One row per keyword, at its best position across engines, for totals and the top-10 distribution
-// (getSiteRankings returns rows best first, so the first row of each keyword is its best).
+const rankOf = (p: any) => (typeof p === 'number' && p > 0 ? p : Infinity);
+
+// One row per keyword, at its best position across engines, for totals and the top-10 distribution.
+// A keyword ranked on one engine and not (yet) on another keeps its ranked row.
 function oneRowPerKeyword(rows: any[]) {
-  const seen = new Set();
-  return rows.filter((r) => {
+  const best = new Map<string, any>();
+  for (const r of rows) {
     const k = String(r.keyword || '').toLowerCase();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+    const seen = best.get(k);
+    if (!seen || rankOf(r.position) < rankOf(seen.position)) best.set(k, r);
+  }
+  return [...best.values()];
 }
 
 async function researchKeywords(type, seed, { source = 'us', limit = 30 }: any = {}) {

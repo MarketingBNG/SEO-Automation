@@ -191,6 +191,17 @@ export async function linkTopicBlogs(rows: any[]) {
   return changed;
 }
 
+// A live blog's draft is deleted: a topic it was never linked to (a restart lost the link) is linked
+// now, so linkTopicBlogs does not put it back to 'new' and "Write blog" cannot pay for a duplicate of
+// a post already on the website. db: the Prisma client or a transaction.
+export async function linkLiveTopic(db: any, draftId: number, keywordNotes: string | null | undefined) {
+  if (!keywordNotes) return 0;
+  const open = await db.topics.findMany({ where: { status: 'blog', draft_id: null } });
+  const match = open.filter((t: any) => topicNotes(t) === keywordNotes);
+  for (const t of match) await db.topics.update({ where: { id: t.id }, data: { draft_id: draftId } });
+  return match.length;
+}
+
 // Writes a LinkedIn article for the topic in the background.
 export async function startTopicArticle(id: number) {
   const t = await prisma.topics.findUnique({ where: { id } });

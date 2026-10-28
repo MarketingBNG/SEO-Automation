@@ -33,6 +33,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const body: any = await req.json().catch(() => ({}));
   const wpStatus = (body && body.wpStatus) || 'publish';
+  // Only these two: 'pending', 'private' or 'future' on a live post would take it off the website.
+  if (!['publish', 'draft'].includes(wpStatus)) {
+    return NextResponse.json({ error: 'wpStatus must be "publish" or "draft".' }, { status: 400 });
+  }
 
   try {
     let post: any;

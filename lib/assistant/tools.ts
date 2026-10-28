@@ -1992,7 +1992,7 @@ function getTool(name) {
 }
 
 // Read tools that show what the asker's role may not open directly: the same action the matching
-// dashboard route needs (reports, paid SE Ranking / SerpHouse lookups). The engine refuses them
+// dashboard route or page needs (reports, paid SE Ranking / SerpHouse lookups, content work). The engine refuses them
 // for a person without it.
 const READ_NEEDS: Record<string, Action> = {
   search_console_queries: 'reports.view',
@@ -2004,6 +2004,14 @@ const READ_NEEDS: Record<string, Action> = {
   clarity_overview: 'reports.view',
   pagespeed_check: 'reports.view',
   zoho_leads: 'reports.view',
+  // Content work (unpublished drafts, audits, the keyword pipeline, site changes): hidden pages for a
+  // role without content work.
+  list_drafts: 'content.work',
+  get_draft: 'content.work',
+  list_audits: 'content.work',
+  list_keywords: 'content.work',
+  list_site_changes: 'content.work',
+  latest_technical_crawl: 'reports.view',
 };
 function toolNeeds(name: string): Action | null {
   return READ_NEEDS[name] || null;

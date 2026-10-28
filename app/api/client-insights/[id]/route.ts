@@ -14,7 +14,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   const nid = toId(id);
   const { status, overview }: any = (await req.json().catch(() => ({}))) || {};
   const existing = await prisma.client_insights.findUnique({ where: { id: nid } });
-  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!existing || existing.status === 'deleted') return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   if (status && !['approved', 'rejected', 'pending_review'].includes(status)) {
     return NextResponse.json({ error: 'invalid status' }, { status: 400 });
@@ -49,14 +49,17 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
   const nid = toId(id);
   const row = await prisma.client_insights.findUnique({ where: { id: nid } });
   if (!row) return NextResponse.json({ ok: true }, { status: 200 });
-  // A Fireflies meeting is kept as 'rejected' instead of removed: the daily sync finds meetings by
-  // transcript_id, and would import, clean (paid) and maybe approve a removed one again.
-  if (row.transcript_id) await prisma.client_insights.update({ where: { id: nid }, data: { status: 'rejected', decided_at: sqlNow() } });
+  // A Fireflies meeting is kept as an empty 'deleted' marker instead of removed: the daily sync finds
+  // meetings by transcript_id, and would import, clean (paid) and maybe approve a removed one again.
+  // Its text (which may hold client figures or contact details) is removed, and the list hides it.
+  if (row.transcript_id) {
+    await prisma.client_insights.update({ where: { id: nid }, data: { status: 'deleted', decided_at: sqlNow(), title: '', overview: '', action_items: '', keywords: '[]' } });
+  }
   else await prisma.client_insights.deleteMany({ where: { id: nid } });
   await activity.log('client_insight.deleted', {
     entityType: 'client_insight',
     entityId: nid,
-    details: `${row.title || '(untitled meeting)'}${row.transcript_id ? ' (kept as rejected so the sync does not bring it back)' : ''}`,
+    details: `${row.title || '(untitled meeting)'}${row.transcript_id ? ' (its text removed; kept as a marker so the sync does not bring it back)' : ''}`,
     actor: await getActor(),
   });
   return NextResponse.json({ ok: true }, { status: 200 });

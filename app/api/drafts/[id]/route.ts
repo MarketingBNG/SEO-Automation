@@ -12,6 +12,7 @@ import { coverAlt } from '@/lib/cover';
 import { DRAFT_TOKEN_ACTOR, hasDraftToken } from '@/lib/draftToken';
 import { authorNames, pickAuthor } from '@/lib/authors';
 import { requeueAfterDelete } from '@/lib/draftDelete';
+import { linkLiveTopic } from '@/lib/topics';
 
 export const runtime = 'nodejs';
 
@@ -111,7 +112,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   if (!count) return NextResponse.json(changedMeanwhile, { status: 409 });
   const updated: any = await prisma.drafts.findUnique({ where: { id: nid } });
   // A person's edit (dashboard or Claude Code) does not start the paid fact check again by itself.
-  if (title != null || meta_description != null || content_html != null) await markEditedAsChecked(nid, viaToken ? 'Claude Code' : await getActor());
+  if (title != null || meta_description != null || content_html != null) await markEditedAsChecked(nid, viaToken ? 'Claude Code' : await getActor(), { before: { textHash: wordsHash(existing), stamp: existing.updated_at } });
 
   // Approving here counts for the monthly calendar too, so the blog publishes at its slot instead
   // of waiting out the 48 hours. Tax, legal and compliance blogs still need the named CA/CPA, which
@@ -158,14 +159,17 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
   const nid = toId(id);
   const existing: any = await prisma.drafts.findUnique({ where: { id: nid } });
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  const kw = await prisma.keywords.findUnique({ where: { id: existing.keyword_id }, select: { batch_name: true } });
+  const kw = await prisma.keywords.findUnique({ where: { id: existing.keyword_id }, select: { batch_name: true, notes: true } });
   const requeue = requeueAfterDelete(existing, kw?.batch_name);
   await prisma.$transaction(async (tx: any) => {
     await tx.facts.deleteMany({ where: { draft_id: nid } });
     await tx.draft_images.deleteMany({ where: { draft_id: nid } });
     await tx.drafts.deleteMany({ where: { id: nid } });
-    // A strategy blog whose draft is deleted goes back to planned, so the autopilot writes it again.
-    await tx.blog_schedule.updateMany({ where: { draft_id: nid, status: { in: ['drafting', 'in_review'] } }, data: { status: 'planned', review_started: null, reviewed_at: null, fact_check: null } });
+    // A strategy blog whose draft is deleted goes back to planned, so the autopilot writes it again
+    // (also a held one: left 'held' with no draft, it would only be held again and never written).
+    // A paused one goes back to planned when it is resumed.
+    await tx.blog_schedule.updateMany({ where: { draft_id: nid, status: { in: ['drafting', 'in_review', 'held'] } }, data: { status: 'planned', review_started: null, reviewed_at: null, fact_check: null, hold_reasons: null } });
+    await tx.blog_schedule.updateMany({ where: { draft_id: nid, status: 'paused', paused_from: { in: ['drafting', 'in_review', 'held'] } }, data: { paused_from: 'planned', review_started: null, reviewed_at: null, fact_check: null } });
     await tx.blog_schedule.updateMany({ where: { draft_id: nid }, data: { draft_id: null } });
     if (requeue) {
       await tx.keywords.updateMany({
@@ -180,6 +184,8 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
       await tx.topics.updateMany({ where: { draft_id: nid }, data: { draft_id: null } });
       await tx.topics.updateMany({ where: { article_draft_id: nid, status: 'article' }, data: { status: 'new' } });
       await tx.topics.updateMany({ where: { article_draft_id: nid }, data: { article_draft_id: null } });
+    } else if (kw?.batch_name === 'Topics') {
+      await linkLiveTopic(tx, nid, kw.notes);
     }
   });
   await activity.log('draft.deleted', {

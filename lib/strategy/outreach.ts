@@ -14,7 +14,8 @@ import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { parseJson } from './generate';
 import { callClaude } from '../anthropic';
-import { CreditPausedError, isCreditError } from '../aiCredits';
+import { CreditPausedError, isCreditError, assertCredits } from '../aiCredits';
+import { aiMode, isAutomatic, TestingModeError } from '../aiQueue';
 import { listReferringDomains } from '../seranking';
 import { smartleadConfigured, leadExists, addLead } from '../smartlead';
 
@@ -127,6 +128,11 @@ Return ONLY ===JSON===[{"domain":"example.com","why":"one line"}]===END===`,
 
 const pageUrl = (p: string) => (p?.startsWith('http') ? p : `${SITE()}${p?.startsWith('/') ? '' : '/'}${p || ''}`);
 
+async function assertAiReady() {
+  if (isAutomatic() && (await aiMode()) === 'testing') throw new TestingModeError();
+  await assertCredits();
+}
+
 // One pass: link check, then new leads for Smartlead within the daily cap. `line` is injectable for tests.
 const ADD_LEAD_FAILED = 'Smartlead add-lead failed';
 const LINE_FAILED = 'Opening line failed';
@@ -144,6 +150,13 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
     t.status = internal ? 'done' : 'manual';
     if (!internal) out.manual++;
   }
+
+  // A pass that needs Claude (a described target to resolve, or a due task with no opening line yet)
+  // stops here when AI work is not possible (Testing mode for automatic work, or AI paused for
+  // credits): runOutreach rejects, so the day stays open and the pass runs once AI is back, and no site
+  // is crawled, no Smartlead or SE Ranking lookup is made and no task is logged as failed meanwhile.
+  const dueEmail = (x) => x.status === 'planned' && outreachMethod(x.method) === 'email' && (!isRealSite(x.target_site) || ((!x.send_date || x.send_date.slice(0, 10) <= today) && !x.email_body));
+  if (smartleadConfigured() && tasks.some(dueEmail)) await assertAiReady();
 
   // Described targets become real websites (at most 3 tasks a day, to keep AI cost low).
   let resolveBudget = smartleadConfigured() ? 3 : 0;
@@ -170,6 +183,7 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
       await activity.log('backlink.targets_found', { entityType: 'backlink_task', entityId: t.id, details: `${t.target_site} -> ${sites.join(', ')}` });
       t.target_site = first;
     } catch (e: any) {
+      if (e instanceof CreditPausedError || isCreditError(e)) throw e;
       await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: String(e.message || e).slice(0, 300) });
     }
   }
@@ -258,6 +272,9 @@ export async function runOutreach(now = new Date(), { checkLinks = true, line: w
       await activity.log('backlink.sent', { entityType: 'backlink_task', entityId: t.id, details: `Added ${contact.email} (${t.target_site}) to the Smartlead campaign` });
       out.pushed++;
     } catch (err: any) {
+      // A credit pause or Testing mode stops the whole run (runOutreach rejects), so the day is not
+      // marked as done and the due tasks are not logged as failures.
+      if (err instanceof CreditPausedError || isCreditError(err)) throw err;
       await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: String(err.message || err).slice(0, 500) });
     }
   }

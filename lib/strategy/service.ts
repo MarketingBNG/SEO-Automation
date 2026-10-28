@@ -10,6 +10,7 @@ import { parseScreamingFrogCsv } from '../technicalAudit';
 import { validatePlan, approvalBlockers, keywordKey, EDITABLE_SECTIONS, crawlIsFresh, priorityScore, STRATEGY_DAYS } from './core';
 import { technicalFixesFromCrawl, calendarSlots } from './generate';
 import { fixKind } from './fixer';
+import { stopReplacedRows } from './replaced';
 import * as settings from '../settings';
 
 // SE Ranking tracks what the strategy targets: its keywords are added in the background right after
@@ -214,29 +215,47 @@ export async function approveStrategy(id: number, approver: string) {
       data: { status: 'approved', approved_by: approver, approved_at: now, approved_version: row.version, decided_at: now, validation: JSON.stringify(validation) },
     });
     if (claimed.count !== 1) throw Object.assign(new Error('Already approved.'), { status: 409 });
-    // Only one approved strategy per month. The replaced plan's work stops: blogs not written yet
-    // are removed (their keywords freed), started ones are paused for a person to decide, and its
-    // planned backlink and fix tasks are skipped.
+    // Only one approved strategy per month. The replaced plan's work stops: a started blog whose
+    // keyword is also in the new calendar moves to the new version (its draft, review and status are
+    // kept, so it is not written and paid for twice); other blogs not written yet are removed (their
+    // keywords freed), other started ones are paused for a person to decide, and its planned backlink
+    // and fix tasks are skipped.
     const old = await tx.seo_strategies.findMany({ where: { period: row.period, status: 'approved', id: { not: id } }, select: { id: true } });
+    const moved = new Set<string>();
     if (old.length) {
       const oldIds = old.map((o) => o.id);
       await tx.seo_strategies.updateMany({ where: { id: { in: oldIds } }, data: { status: 'superseded' } });
-      const unwritten = await tx.blog_schedule.findMany({ where: { strategy_id: { in: oldIds }, status: 'planned', draft_id: null }, select: { main_keyword: true } });
-      if (unwritten.length) await tx.strategy_keywords.deleteMany({ where: { strategy_id: { in: oldIds }, keyword_key: { in: unwritten.map((r) => keywordKey(r.main_keyword)) } } });
-      await tx.blog_schedule.deleteMany({ where: { strategy_id: { in: oldIds }, status: 'planned', draft_id: null } });
-      const reason = JSON.stringify([`Its strategy was replaced by the newly approved ${row.period} version ${row.version}, so the autopilot no longer publishes it. To keep it, publish its draft from Drafts & Review.`]);
-      for (const r of await tx.blog_schedule.findMany({ where: { strategy_id: { in: oldIds }, status: { in: ['planned', 'in_review', 'held', 'rejected'] } }, select: { id: true, status: true } })) {
-        await tx.blog_schedule.update({ where: { id: r.id }, data: { status: 'paused', paused_from: r.status, paused_by: 'Automatic (strategy replaced)', hold_reasons: reason, updated_at: now } });
+      const startedOld = await tx.blog_schedule.findMany({
+        where: { strategy_id: { in: oldIds }, status: { notIn: ['published'] }, OR: [{ draft_id: { not: null } }, { status: { not: 'planned' } }] },
+        orderBy: { id: 'asc' },
+      });
+      for (const b of plan.blogPlan?.calendar || []) {
+        const key = keywordKey(b.mainKeyword);
+        if (moved.has(key)) continue;
+        const match = startedOld.find((r) => keywordKey(r.main_keyword) === key);
+        if (!match) continue;
+        moved.add(key);
+        await tx.blog_schedule.update({
+          where: { id: match.id },
+          data: { strategy_id: id, publish_at: b.publishDate, title: b.title, cluster: b.cluster || null, tags: JSON.stringify(b.tags || []), refresh_url: b.refreshUrl || null, updated_at: now },
+        });
       }
+      await stopReplacedRows(tx, oldIds, `Its strategy was replaced by the newly approved ${row.period} version ${row.version}, so the autopilot no longer publishes it. To keep it, publish its draft from Drafts & Review.`, now);
       await tx.backlink_tasks.updateMany({ where: { strategy_id: { in: oldIds }, status: 'planned' }, data: { status: 'skipped', note: 'Skipped: its strategy was replaced by a newer approved version.' } });
       await tx.technical_fix_tasks.updateMany({ where: { strategy_id: { in: oldIds }, status: 'planned' }, data: { status: 'skipped', result: 'Skipped: its strategy was replaced by a newer approved version.' } });
     }
     for (const b of plan.blogPlan?.calendar || []) {
+      const key = keywordKey(b.mainKeyword);
+      // Reserved for this version (a reservation of the replaced version of the same month moves here).
       await tx.strategy_keywords.upsert({
-        where: { keyword_key: keywordKey(b.mainKeyword) },
-        create: { keyword_key: keywordKey(b.mainKeyword), keyword: b.mainKeyword, period: row.period, strategy_id: id },
-        update: {},
+        where: { keyword_key: key },
+        create: { keyword_key: key, keyword: b.mainKeyword, period: row.period, strategy_id: id },
+        update: old.length ? { period: row.period, strategy_id: id } : {},
       });
+      if (moved.has(key)) {
+        moved.delete(key); // a second calendar entry with the same keyword still gets its own row
+        continue;
+      }
       await tx.blog_schedule.create({
         data: {
           strategy_id: id,

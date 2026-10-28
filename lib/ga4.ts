@@ -20,14 +20,14 @@ async function runReport(requestBody, { signal }: any = {}) {
   const res = await fetch(
     `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
     {
-      signal: AbortSignal.timeout(60000),
+      // The caller's signal (when given) and a 60-second timeout, whichever fires first.
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000),
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestBody),
-      signal,
     }
   );
   const json = await res.json();

@@ -327,16 +327,14 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
     // Refuses to start when AI work is paused for low credits (see lib/aiCredits.ts). Only before the
     // first part: a call already under way finishes its continuations, so its paid parts are saved
     // (a pause mid-call would drop them and the whole call would be paid again on resume).
-    if (part === 0) await assertCredits();
+    // A batch already sent and paid for (its id saved by runBatchTurn) is collected even while AI work
+    // is paused: reading its result costs nothing.
+    const batchParams = batch
+      ? { model, max_tokens: 32000, output_config: { effort }, system: systemPrompt, tools: [{ type: searchTool(model), name: 'web_search', max_uses: maxUses }], messages: conversation }
+      : null;
+    if (part === 0 && !(batchParams && (await pendingBatchId(batchParams)))) await assertCredits();
     if (batch) {
-      const response = await runBatchTurn(client, {
-        model,
-        max_tokens: 32000,
-        output_config: { effort },
-        system: systemPrompt,
-        tools: [{ type: searchTool(model), name: 'web_search', max_uses: maxUses }],
-        messages: conversation,
-      }, signal).catch(async (err: any) => {
+      const response = await runBatchTurn(client, batchParams, signal).catch(async (err: any) => {
         await onApiError(err, 'secondary');
         throw err;
       });
@@ -458,17 +456,33 @@ const BATCH_MAX_WAIT_MS = 25 * 60 * 60 * 1000; // batches expire after 24h
 // Submits one request as a single-item batch, waits for it to end and returns its message.
 // The batch id is kept in settings until its result is read: after a restart the same request picks
 // up the batch already sent (and paid for) instead of sending a new one.
+// The id of the batch already sent for this request (null when none).
+async function pendingBatchId(params): Promise<string | null> {
+  const savedRaw = await settings.get(`batch_pending:${requestHash(params)}`).catch(() => null);
+  if (!savedRaw) return null;
+  if (!savedRaw.startsWith('{')) return savedRaw;
+  try {
+    return JSON.parse(savedRaw).id || null;
+  } catch {
+    return null;
+  }
+}
+
 async function runBatchTurn(client, params, signal) {
   const pendingKey = `batch_pending:${requestHash(params)}`;
   const forget = () => prisma.settings.deleteMany({ where: { key: pendingKey } }).catch(() => {});
   // Saved as {"id","at"} (at: when it was sent, so pruneReplay can drop a key whose request never came
   // back); a plain id from before is still read.
-  const savedRaw = await settings.get(pendingKey).catch(() => null);
-  let savedId: string | null = savedRaw || null;
-  try {
-    if (savedRaw && savedRaw.startsWith('{')) savedId = JSON.parse(savedRaw).id || null;
-  } catch {}
-  let created: any = savedId ? await client.messages.batches.retrieve(savedId).catch(() => null) : null;
+  const savedId = await pendingBatchId(params);
+  // Only a batch that is gone (not found, or not reachable with this key) is sent again. A passing
+  // error (timeout, dropped connection, 5xx) is thrown, so the saved id is kept and the next run
+  // picks up the batch already paid for instead of paying for a second one.
+  let created: any = savedId
+    ? await client.messages.batches.retrieve(savedId).catch((err: any) => {
+        if (isTransient(err)) throw err;
+        return null;
+      })
+    : null;
   // Only a batch from the last week that was not cancelled (its results are kept 29 days).
   if (created && (created.cancel_initiated_at || Date.now() - Date.parse(created.created_at) > 7 * 86400000)) created = null;
   if (!created) {
@@ -1520,7 +1534,19 @@ async function generateContentSkill({ batch = false }: any = {}) {
   let frozenNote: string | null = null;
   try {
     const saved = JSON.parse((await settings.get(GA4_KEY)) || 'null');
-    if (saved && typeof saved.note === 'string' && Date.now() - saved.at < 3 * 86400000) frozenNote = saved.note;
+    if (saved && typeof saved.note === 'string') {
+      // Also kept past 3 days while a batch sent with it is still unread (for example while AI work
+      // is paused or Testing mode is on), so that batch is picked up instead of a second one sent.
+      const unread = batch && (await prisma.settings.findMany({ where: { key: { startsWith: 'batch_pending:' } } })).some((b) => {
+        try {
+          const at = b.value.startsWith('{') ? JSON.parse(b.value).at : 0;
+          return at >= saved.at && Date.now() - at < 7 * 86400000;
+        } catch {
+          return false;
+        }
+      });
+      if (Date.now() - saved.at < 3 * 86400000 || unread) frozenNote = saved.note;
+    }
   } catch {}
   if (frozenNote != null) ownPerformanceNote = frozenNote;
   else {

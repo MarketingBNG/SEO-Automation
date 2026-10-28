@@ -9,7 +9,7 @@ import { sqlNow } from '../time';
 import { researchAndWriteBlog, verifyAndCorrect } from '../anthropic';
 import { CreditPausedError, isCreditError, assertCredits } from '../aiCredits';
 import { aiMode, isAutomatic, TestingModeError } from '../aiQueue';
-import { withReplay, clearReplay } from '../aiReplay';
+import { withReplay, clearReplay, markAiWait } from '../aiReplay';
 import { claimPublish, publishingRows } from './publishLock';
 import { connectorOn, authorSlug } from '../siteConnector';
 import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia, freeSlug } from '../wordpress';
@@ -23,6 +23,7 @@ import { gatherAiVisibility } from '../aiVisibility';
 import { syncMeetings } from '../clientInsights';
 import { runFixes } from './fixer';
 import { runOutreach } from './outreach';
+import { stopSupersededRows } from './replaced';
 import { runSpeedFixes } from './speed';
 import { authorNames, pickAuthor, wpAuthorId } from '../authors';
 import { makeCover, coverAlt } from '../cover';
@@ -87,6 +88,7 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog, bu
     // A run that only waits for AI keeps its saved steps for the restart. A real failure drops them
     // (as lib/blogJob.ts does), so Resume writes it again instead of replaying the same bad answers.
     if (!waitsForAi(err)) await clearReplay(scope).catch(() => {});
+    else await markAiWait(scope);
     throw err;
   }
   const draft = await prisma.drafts.create({
@@ -256,6 +258,7 @@ async function ensureFactChecked(row, draft, verify = verifyAndCorrect) {
   } catch (err) {
     // Same rule as writeDraft: only a run waiting for AI keeps its saved steps.
     if (!waitsForAi(err)) await clearReplay(scope).catch(() => {});
+    else await markAiWait(scope);
     throw err;
   }
   let saved = draft;
@@ -494,6 +497,16 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
   // No run is in progress (the flag above), so a row still 'revising' was cut off by a restart: it
   // is rewritten again, reusing the finished AI steps.
   await prisma.blog_schedule.updateMany({ where: { status: 'revising' }, data: { status: 'rejected', updated_at: sqlNow() } });
+  // Blogs of a replaced strategy stop visibly (paused with the reason, or removed when not written),
+  // also for a strategy replaced before this rule existed and for a draft that was still being
+  // written when its strategy was replaced.
+  try {
+    const stopped = await stopSupersededRows(sqlNow());
+    for (const r of stopped.paused) await activity.log('schedule.paused', { entityType: 'blog_schedule', entityId: r.id, details: `"${r.title}" paused: its strategy was replaced by a newer approved version` });
+    if (stopped.removed.length) await activity.log('schedule.removed', { entityType: 'blog_schedule', details: `${stopped.removed.length} unwritten blog(s) of a replaced strategy removed and their keywords freed` });
+  } catch (e: any) {
+    summary.errors.push(`Replaced strategy clean-up failed: ${e.message}`);
+  }
   const rows = await prisma.blog_schedule.findMany({ where: { status: { in: ['planned', 'drafting', 'in_review', 'held'] }, strategy_id: { in: approvedIds } }, orderBy: { publish_at: 'asc' } });
 
   // Rejected blogs are rewritten first (one per run; a full rewrite takes a while).
@@ -530,6 +543,13 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
           await update(row.id, { status: 'in_review', review_started: sqlNow(now) });
           await notify(`Blog ready for review: ${row.title}`, `Approve or reject it in Monthly Strategy within 48 hours. If nobody rejects it, it is approved and published automatically.`);
           summary.opened++;
+        }
+      } else if (action === 'publish' && !row.draft_id && row.status === 'planned') {
+        // Its slot passed with no draft (AI was unavailable, or a person deleted the draft to get a
+        // fresh one): it is written now and then gets its review, instead of being held for good.
+        if (summary.drafted < maxDrafts) {
+          await writeDraft(row, '', write);
+          summary.drafted++;
         }
       } else if (action === 'publish') {
         const r = await publishRow(row, now, verify);

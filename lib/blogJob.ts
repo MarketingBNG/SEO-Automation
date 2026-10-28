@@ -11,7 +11,7 @@ import { progressWriter } from './strategy/jobs';
 import { blogRuns } from './blogRuns';
 import { authorNames, pickAuthor } from './authors';
 import { startedAt } from './jobTimer';
-import { withReplay, clearReplay } from './aiReplay';
+import { withReplay, clearReplay, markAiWait } from './aiReplay';
 import { CreditPausedError, isCreditError } from './aiCredits';
 
 // The run's finished AI steps are saved (lib/aiReplay.ts): if it stops for credits or a restart, the
@@ -146,6 +146,8 @@ async function runBlogJobOnce(keyword: any, controller: AbortController, send: (
       // Also Testing mode (TestingModeError) for a run the scheduler restarted.
       // Not the keyword's fault: keep it in the queue so it runs again after a top-up.
       await prisma.keywords.update({ where: { id: keyword.id }, data: { status: 'pending', error: err.message, progress_stage: null, progress_percent: null } }).catch((e) => console.error(e));
+      // Its saved inputs are kept for the resume however long the wait (lib/aiReplay.ts).
+      await markAiWait(`blog-${keyword.id}`);
       send({ status: 'error', stage: 'Paused', error: `${err.message} The keyword stays in the queue.` });
     } else {
       console.error(err);

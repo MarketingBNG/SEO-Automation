@@ -9,7 +9,8 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 export async function GET() {
-  const rows = await prisma.client_insights.findMany({ orderBy: { id: 'desc' } });
+  // A deleted Fireflies meeting stays only as an empty marker for the sync (see [id]/route.ts).
+  const rows = await prisma.client_insights.findMany({ where: { status: { not: 'deleted' } }, orderBy: { id: 'desc' } });
   return NextResponse.json(rows, { status: 200 });
 }
 

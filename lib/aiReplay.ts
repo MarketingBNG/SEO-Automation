@@ -50,9 +50,11 @@ export async function frozenInput<T>(name: string, build: () => Promise<T>, { ea
   }
   // A blog's saved input older than FROZEN_MAX_DAYS is built again: a blog started again weeks later
   // (after a Stop, or a failure left pending) works from today's brief and date, not the old ones.
-  // A strategy keeps its request for its whole run (its period is fixed, and it is paused on purpose).
+  // A strategy keeps its request for its whole run (its period is fixed, and it is paused on purpose),
+  // and so does a blog whose last attempt stopped to wait for AI (credits, Testing mode): rebuilt, the
+  // inputs would change every prompt and its saved research and fact checks would be paid for again.
   const row = await prisma.ai_replay.findUnique({ where: { scope_hash: { scope: ctx.scope, hash } } }).catch(() => null);
-  if (row && (ctx.scope.startsWith('strategy-') || !isStale(row.created_at))) {
+  if (row && (ctx.scope.startsWith('strategy-') || !isStale(row.created_at) || (await waitedForAi(ctx.scope)))) {
     try {
       const saved = JSON.parse(row.result);
       if (saved && 'value' in saved) return saved.value;
@@ -67,6 +69,18 @@ export async function frozenInput<T>(name: string, build: () => Promise<T>, { ea
   }
   return value;
 }
+
+// Marks a run's scope as stopped to wait for AI (credit pause, Testing mode), so its frozen inputs are
+// kept however long the wait (see frozenInput). The mark goes with the scope's other saved steps when
+// the run finishes, fails or is stopped (clearReplay).
+const AI_WAIT = 'meta:ai-wait';
+export async function markAiWait(scope: string) {
+  const data = JSON.stringify({ at: sqlNow() });
+  await prisma.ai_replay
+    .upsert({ where: { scope_hash: { scope, hash: AI_WAIT } }, create: { scope, hash: AI_WAIT, result: data }, update: { result: data } })
+    .catch((e) => console.error('ai_replay save failed:', e.message));
+}
+const waitedForAi = async (scope: string) => Boolean(await prisma.ai_replay.findUnique({ where: { scope_hash: { scope, hash: AI_WAIT } } }).catch(() => null));
 
 export const FROZEN_MAX_DAYS = 3;
 const isStale = (createdAt: string) => Date.now() - Date.parse(String(createdAt).replace(' ', 'T') + 'Z') > FROZEN_MAX_DAYS * 86400000;
