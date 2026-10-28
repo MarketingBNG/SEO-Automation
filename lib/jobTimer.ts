@@ -5,7 +5,7 @@
 import * as settings from './settings';
 import { etaSeconds, blendEta } from './strategy/core';
 
-export type JobKind = 'blog' | 'strategy' | 'fact-check' | 'rewrite' | 'audit' | 'article' | 'guide' | 'refresh' | 'competitors' | 'keywords' | 'lessons';
+export type JobKind = 'blog' | 'strategy' | 'fact-check' | 'rewrite' | 'audit' | 'article' | 'guide' | 'refresh' | 'competitors' | 'keywords' | 'lessons' | 'recheck' | 'skill';
 
 // First-run estimates (seconds) until the dashboard has measured its own.
 const DEFAULT_SECONDS: Record<string, number> = {
@@ -20,6 +20,8 @@ const DEFAULT_SECONDS: Record<string, number> = {
   competitors: 4 * 60,
   keywords: 3 * 60,
   lessons: 2 * 60,
+  recheck: 5 * 60,
+  skill: 5 * 60,
 };
 
 // The steps of a blog run, in order, with first-run estimates. A repair round repeats write and

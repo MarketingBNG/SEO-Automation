@@ -1,6 +1,7 @@
 import { readFile, mimeFor, toKey } from '@/lib/storage';
 import prisma from '@/lib/prisma';
 import { getMe } from '@/lib/auth';
+import { ownedBy } from '@/lib/assistant/conversations';
 
 export const runtime = 'nodejs';
 
@@ -18,7 +19,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
   // Documents attached in an assistant chat are private like the chat: the uploader or the admin.
   if (key.startsWith('assistant/docs/')) {
     const me = await getMe();
-    const own = me && (me.role === 'admin' || (await prisma.assistant_files.count({ where: { path: key, uploaded_by: { in: [me.name, me.email].filter(Boolean) } } })) > 0);
+    const own = me && (me.role === 'admin' || (await prisma.assistant_files.count({ where: { path: key, ...ownedBy(me, 'uploaded_by') } })) > 0);
     if (!own) return new Response('Not found', { status: 404 });
   }
 

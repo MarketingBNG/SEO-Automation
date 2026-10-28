@@ -435,6 +435,13 @@ test('a broken Smartlead campaign stops outreach for the whole day, and saved li
     await settings.set('outreach_stopped_day', '');
     await runOutreach(new Date('2030-05-01T10:45:00Z'), { checkLinks: false, line, push: false });
     assert.equal(adds, 2, 'saved lines are not pushed again on a repeat pass');
+    // The next day the campaign is still broken: the same two leads are refused a second time, but a
+    // refusal blamed on the campaign never gives a lead up.
+    await runOutreach(new Date('2030-05-02T10:00:00Z'), { checkLinks: false, line });
+    assert.equal(adds, 4);
+    const day2 = await prisma.backlink_tasks.findMany({ where: { id: { in: ids } }, orderBy: { id: 'asc' } });
+    assert.deepEqual(day2.map((r) => r.status), ['planned', 'planned', 'planned', 'planned'], 'no lead given up while the campaign is broken');
+    assert.match(day2[0].note || '', /on 2030-05-02/, 'the dated note stays');
   } finally {
     await settings.set('outreach_stopped_day', saved.stopped || '');
     globalThis.fetch = saved.fetch;
@@ -461,15 +468,29 @@ test('onceADay clears only its own run marker', { skip: !hasDb }, async () => {
 
 test('a fresh run marker from the day before blocks the next day; a stale one does not', { skip: !hasDb }, async () => {
   const settings = await import('../lib/settings');
-  const { onceADay } = await import('../lib/onceADay');
+  const { onceADay, bootId } = await import('../lib/onceADay');
   const key = `test_once_nextday_${Date.now()}`;
   let ran = 0;
-  await settings.set(`${key}_running`, JSON.stringify({ day: '2026-11-01', at: Date.now() - 25 * 3600000 }));
+  await settings.set(`${key}_running`, JSON.stringify({ day: '2026-11-01', at: Date.now() - 25 * 3600000, boot: bootId() }));
   assert.equal(await onceADay(key, '2026-11-02', async () => { ran++; }, 26 * 60), null);
   assert.equal(ran, 0, 'a batch run of the day before that is still waiting is not joined');
-  await settings.set(`${key}_running`, JSON.stringify({ day: '2026-11-01', at: Date.now() - 27 * 3600000 }));
+  await settings.set(`${key}_running`, JSON.stringify({ day: '2026-11-01', at: Date.now() - 27 * 3600000, boot: bootId() }));
   await onceADay(key, '2026-11-02', async () => { ran++; }, 26 * 60);
-  assert.equal(ran, 1, 'a stale marker left by a restart does not block');
+  assert.equal(ran, 1, 'a marker of a run stuck past the limit does not block');
+});
+
+test('a run marker left by a restart (another process) is stale at once, so the day runs again', { skip: !hasDb }, async () => {
+  const settings = await import('../lib/settings');
+  const { onceADay } = await import('../lib/onceADay');
+  const key = `test_once_restart_${Date.now()}`;
+  let ran = 0;
+  await settings.set(`${key}_running`, JSON.stringify({ day: '2026-11-01', at: Date.now() - 60000, boot: 'an-earlier-process' }));
+  await onceADay(key, '2026-11-01', async () => { ran++; }, 26 * 60);
+  assert.equal(ran, 1, 'the run cut off by the restart is run again on the next tick');
+  // A marker written before boot ids existed came from the process before the deploy.
+  await settings.set(`${key}_running`, JSON.stringify({ day: '2026-11-02', at: Date.now() - 60000 }));
+  await onceADay(key, '2026-11-02', async () => { ran++; }, 26 * 60);
+  assert.equal(ran, 2);
   const { default: prisma } = await import('../lib/prisma');
   await prisma.settings.deleteMany({ where: { key: { startsWith: key } } });
 });

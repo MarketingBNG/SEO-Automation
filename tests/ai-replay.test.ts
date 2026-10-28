@@ -150,3 +150,56 @@ test('a batch turn continued after pause_turn keeps its first part for a restart
     await prisma.ai_usage.deleteMany({ where: { feature } });
   }
 });
+
+test('a kept batch that is gone is not sent again while AI work is paused', { skip: !db }, async () => {
+  const prisma = (await import('../lib/prisma')).default;
+  const { callClaude } = await import('../lib/anthropic');
+  const settings = await import('../lib/settings');
+  const { CreditPausedError } = await import('../lib/aiCredits');
+  const saved = { fetch: globalThis.fetch, key: process.env.ANTHROPIC_API_KEY, secondary: process.env.ANTHROPIC_API_KEY_SECONDARY, paused: await settings.get('ai_paused') };
+  process.env.ANTHROPIC_API_KEY = 'test-key';
+  delete process.env.ANTHROPIC_API_KEY_SECONDARY;
+  const batches = new Map<string, any>();
+  const gone = new Set<string>();
+  let creates = 0;
+  const msg = (text: string, stop: string) => ({ id: `msg_${text}`, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }], stop_reason: stop, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } });
+  const batchJson = (id: string) => ({ id, type: 'message_batch', processing_status: 'ended', created_at: new Date().toISOString(), cancel_initiated_at: null, ended_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(), request_counts: { processing: 0, succeeded: 1, errored: 0, canceled: 0, expired: 0 }, results_url: `https://api.anthropic.com/v1/messages/batches/${id}/results` });
+  globalThis.fetch = (async (url: any, init: any) => {
+    const u = new URL(String(url instanceof Request ? url.url : url));
+    if (u.hostname !== 'api.anthropic.com') throw new Error(`Network call in a test: ${u}`);
+    const m = u.pathname.match(/^\/v1\/messages\/batches(?:\/([^/]+))?(\/results)?$/);
+    if (!m) throw new Error(`Unexpected Anthropic call: ${u.pathname}`);
+    const method = init?.method || 'GET';
+    if (method === 'POST' && !m[1]) {
+      const params = JSON.parse(init.body).requests[0].params;
+      // The continuation fails (as if a restart cut it off), so the first part's id is kept.
+      if (params.messages.length > 1) return Response.json({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, { status: 503 });
+      creates++;
+      const id = `msgbatch_test_gone_${creates}_${Date.now()}`;
+      batches.set(id, msg('first part', 'pause_turn'));
+      return Response.json(batchJson(id));
+    }
+    if (gone.has(m[1])) return Response.json({ type: 'error', error: { type: 'not_found_error', message: 'Not found' } }, { status: 404 });
+    if (m[2]) return new Response(JSON.stringify({ custom_id: 'turn', result: { type: 'succeeded', message: batches.get(m[1]) } }) + '\n', { headers: { 'content-type': 'application/binary' } });
+    return Response.json(batchJson(m[1]));
+  }) as any;
+  const ask = [{ role: 'user', content: `batch gone test ${Date.now()}` }];
+  const feature = `test-batch-gone-${Date.now()}`;
+  const opts = { batch: true, maxUses: 1, feature };
+  try {
+    await assert.rejects(callClaude('system', ask, undefined, opts));
+    assert.equal(creates, 1);
+    // The kept batch can no longer be read (cancelled, too old, or not reachable with this key).
+    for (const id of batches.keys()) gone.add(id);
+    await settings.set('ai_paused', '1');
+    await assert.rejects(callClaude('system', ask, undefined, opts), (e: any) => e instanceof CreditPausedError);
+    assert.equal(creates, 1, 'no new paid batch while AI work is paused');
+  } finally {
+    globalThis.fetch = saved.fetch;
+    await settings.set('ai_paused', saved.paused || '0');
+    process.env.ANTHROPIC_API_KEY = saved.key || '';
+    if (saved.secondary) process.env.ANTHROPIC_API_KEY_SECONDARY = saved.secondary;
+    await prisma.settings.deleteMany({ where: { key: { startsWith: 'batch_pending:' }, value: { contains: 'msgbatch_test_gone_' } } });
+    await prisma.ai_usage.deleteMany({ where: { feature } });
+  }
+});

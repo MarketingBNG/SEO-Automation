@@ -2,13 +2,15 @@ import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { generateContentSkill } from '@/lib/anthropic';
 import * as activity from '@/lib/activity';
+import { timed } from '@/lib/jobTimer';
 import { methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
 
 export async function POST() {
   try {
-    const result: any = await generateContentSkill();
+    // A live timer, so the run shows in the header bar and in /api/ai-credits (running.other).
+    const result: any = await timed('skill-generate', 'skill', 'Content-writing skill update', () => generateContentSkill());
 
     await prisma.writing_skills.updateMany({ where: { status: 'active' }, data: { status: 'superseded' } });
 

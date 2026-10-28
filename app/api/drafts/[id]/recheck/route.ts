@@ -5,6 +5,7 @@ import { getActor } from '@/lib/auth';
 import { recheckIssues, fixIssues } from '@/lib/anthropic';
 import { markEditedAsChecked } from '@/lib/factCheckMark';
 import { sqlNow } from '@/lib/time';
+import { timed } from '@/lib/jobTimer';
 import { methodNotAllowed, toId } from '../../../_lib/http';
 
 export const runtime = 'nodejs';
@@ -30,6 +31,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!issues.length) return NextResponse.json({ error: 'This draft has no open issues to check.' }, { status: 400 });
   if (running.has(id)) return NextResponse.json({ error: 'A check of this draft is already running. Wait for it to finish.' }, { status: 409 });
   running.add(id);
+  // A live timer, so the run shows in the header bar and in /api/ai-credits (running.other): the
+  // check before a deploy then sees this paid run and waits for it.
+  return timed(`recheck-${id}`, 'recheck', `${fix ? 'Check and fix' : 'Check issues again'}: ${d.title}`, () => recheck(d, id, issues, fix)).finally(() => running.delete(id));
+}
+
+async function recheck(d: any, id: number, issues: string[], fix: boolean) {
   try {
     const results = await recheckIssues(d, issues);
     let open = results.filter((r) => r.open).map((r) => String(r.text || r.issue));
@@ -59,8 +66,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } catch (err: any) {
     console.error('Issue re-check failed', err);
     return NextResponse.json({ error: `The check could not finish: ${String(err?.message || err).slice(0, 200)}` }, { status: 500 });
-  } finally {
-    running.delete(id);
   }
 }
 export { methodNotAllowed as GET, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

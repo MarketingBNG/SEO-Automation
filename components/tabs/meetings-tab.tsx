@@ -21,7 +21,8 @@ export default function MeetingsTab() {
   const [insights, setInsights] = useState<any[]>([]);
   // A failed save or decision on one insight; the overview box goes back to the saved text.
   const [insightErr, setInsightErr] = useState<{ id: any; text: string } | null>(null);
-  const [overviewReset, setOverviewReset] = useState(0);
+  // Per insight, so a failed save resets only that box, not text being typed in another one.
+  const [overviewReset, setOverviewReset] = useState<Record<string, number>>({});
 
   const loadInsights = useCallback(async () => {
     const j = await fetch('/api/client-insights').then((r) => r.json()).catch(() => null);
@@ -96,7 +97,7 @@ export default function MeetingsTab() {
   }
 
   async function updateInsightOverview(id: any, overview: string) {
-    if (!(await patchInsight(id, { overview }))) setOverviewReset((n) => n + 1);
+    if (!(await patchInsight(id, { overview }))) setOverviewReset((m) => ({ ...m, [id]: (m[id] || 0) + 1 }));
     loadInsights();
   }
 
@@ -164,7 +165,7 @@ export default function MeetingsTab() {
                 </Badge>
               </div>
               <Textarea
-                key={`${i.overview}-${overviewReset}`}
+                key={`${i.overview}-${overviewReset[i.id] || 0}`}
                 rows={5}
                 defaultValue={i.overview}
                 onBlur={(e) => {

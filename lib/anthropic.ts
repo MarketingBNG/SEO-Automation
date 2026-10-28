@@ -341,6 +341,10 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
   // Whether this call has sent a part itself yet. Until it has, every part only collected a batch
   // already paid for, so the first part it would send checks credits (see below).
   let sentHere = false;
+  const beforeSend = async () => {
+    if (!sentHere) await assertCredits();
+    sentHere = true;
+  };
   for (let part = 0; part < maxParts; part++) {
     activity.part = part;
     // Refuses to start when AI work is paused for low credits (see lib/aiCredits.ts). Only before the
@@ -354,15 +358,16 @@ async function callClaudeLive(systemPrompt, userMessages, signal, { maxUses = 8,
     // read so far keep their ids, so nothing is paid twice then).
     if (collectOnly && !pending) throw new TestingModeError();
     // The first part this call sends checks credits, also when the parts before it were only collected
-    // from their kept batches (free) after a restart or in Testing mode.
-    if (!pending && !sentHere) await assertCredits();
-    if (!pending) sentHere = true;
+    // from their kept batches (free) after a restart or in Testing mode. A kept batch that turns out
+    // to be gone (cancelled, too old, not reachable with this key) is sent again: runBatchTurn calls
+    // beforeSend then, so that send checks credits too.
+    if (!pending) await beforeSend();
     if (batch) {
       // Read now: the key names this part's request, before the conversation grows.
       const pendingKey = `batch_pending:${requestHash(batchParams)}`;
       let response;
       try {
-        response = await runBatchTurn(client, batchParams, signal, { keep: true, collectOnly }).catch(async (err: any) => {
+        response = await runBatchTurn(client, batchParams, signal, { keep: true, collectOnly, beforeSend }).catch(async (err: any) => {
           await onApiError(err, 'secondary');
           throw err;
         });
@@ -527,7 +532,8 @@ async function recordBatchUsageOnce(pendingKey: string, { model, usage, feature 
 // `keep`: a result read successfully leaves its saved id in place (callClaudeLive drops it when the
 // whole call ends), so a later part cut off by a restart does not make this part paid again.
 // `collectOnly` (Testing mode): only a batch already sent is read; none is sent.
-async function runBatchTurn(client, params, signal, { keep = false, collectOnly = false }: { keep?: boolean; collectOnly?: boolean } = {}) {
+// `beforeSend`: runs right before a new (paid) batch is sent, for the caller's credit check.
+async function runBatchTurn(client, params, signal, { keep = false, collectOnly = false, beforeSend }: { keep?: boolean; collectOnly?: boolean; beforeSend?: () => Promise<void> } = {}) {
   const pendingKey = `batch_pending:${requestHash(params)}`;
   const forget = () => prisma.settings.deleteMany({ where: { key: pendingKey } }).catch(() => {});
   // Saved as {"id","at"} (at: when it was sent, so pruneReplay can drop a key whose request never came
@@ -546,6 +552,7 @@ async function runBatchTurn(client, params, signal, { keep = false, collectOnly 
   if (created && (created.cancel_initiated_at || Date.now() - Date.parse(created.created_at) > 7 * 86400000)) created = null;
   if (!created && collectOnly) throw new TestingModeError();
   if (!created) {
+    await beforeSend?.();
     created = await client.messages.batches
       .create({ requests: [{ custom_id: 'turn', params }] })
       .catch((err: any) => rethrowFriendly(err, signal, clientKeyKind(client)));
@@ -582,7 +589,7 @@ async function runBatchTurn(client, params, signal, { keep = false, collectOnly 
       if (/credit balance is too low|out of credit/i.test(why) && clientKeyKind(client) === 'main' && secondaryKeyConfigured()) {
         switchedToSecondary();
         if (collectOnly) throw new TestingModeError();
-        return runBatchTurn(anthropicClient(), params, signal, { keep, collectOnly });
+        return runBatchTurn(anthropicClient(), params, signal, { keep, collectOnly, beforeSend });
       }
       throw new Error(`Batch request failed: ${why}`);
     }

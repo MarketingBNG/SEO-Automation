@@ -123,3 +123,16 @@ test('a private assistant document cannot be read through a key that storage wou
     await deleteFile(`assistant/docs/${name}`);
   }
 });
+
+test('assistant chats and files: owned by email; a shared display name opens only rows from before', async () => {
+  const { isOwner, ownedBy, mineOnly } = await import('../lib/assistant/conversations');
+  const a = { email: 'rahul.a@example.com', name: 'Rahul Sharma', role: 'user' };
+  const b = { email: 'rahul.b@example.com', name: 'Rahul Sharma', role: 'user' };
+  assert.equal(isOwner(a, a.email), true);
+  assert.equal(isOwner(b, a.email), false, 'the same name does not open a newer row');
+  assert.equal(isOwner(a, 'Rahul Sharma'), true, 'a row from before (display name) still opens');
+  assert.equal(isOwner(a, null), false);
+  assert.deepEqual(ownedBy(b, 'uploaded_by'), { OR: [{ uploaded_by: b.email }, { uploaded_by: 'Rahul Sharma' }] });
+  assert.deepEqual(ownedBy({ email: 'x@example.com', name: 'x@example.com' }, 'created_by'), { OR: [{ created_by: 'x@example.com' }] });
+  assert.equal(mineOnly({ ...a, role: 'admin' }), null);
+});

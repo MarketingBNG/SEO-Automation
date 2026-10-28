@@ -560,6 +560,8 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
         // Also a row left 'drafting' by a restart mid-write (no run is in progress here, the flag in
         // runDaily) and a row already held for 'No draft was written in time'.
         if (summary.drafted < maxDrafts) {
+          // The hold reason is cleared only once AI work is possible, so a row waiting for AI keeps it.
+          await assertAiReady();
           if (row.hold_reasons) await update(row.id, { hold_reasons: null });
           await writeDraft(row, '', write);
           summary.drafted++;

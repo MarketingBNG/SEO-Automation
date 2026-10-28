@@ -3,10 +3,14 @@ import sharp from 'sharp';
 import mammoth from 'mammoth';
 import prisma from '@/lib/prisma';
 import { saveFile, basename } from '@/lib/storage';
-import { getActor } from '@/lib/auth';
+import { getActor, getMe } from '@/lib/auth';
+import { ownerStamp } from '@/lib/assistant/conversations';
 import { escapeHtml } from '../../_lib/http';
 
 export const runtime = 'nodejs';
+
+// The owner of an attached file: the uploader's email (see lib/assistant/conversations.ts).
+const uploader = async () => ownerStamp(await getMe(), await getActor());
 
 const ALLOWED: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -38,7 +42,7 @@ export async function POST(req: NextRequest) {
       const docName = originalFilename || 'document.docx';
       const docKey = `assistant/docs/${Date.now()}-${docName.replace(/[^a-z0-9._-]+/gi, '-').slice(-80)}`;
       await saveFile(docKey, buf, DOCX);
-      const saved = await prisma.assistant_files.create({ data: { kind: 'document', filename: docName, path: docKey, mime: DOCX, size: buf.length, uploaded_by: await getActor() } });
+      const saved = await prisma.assistant_files.create({ data: { kind: 'document', filename: docName, path: docKey, mime: DOCX, size: buf.length, uploaded_by: await uploader() } });
       return NextResponse.json(
         {
           kind: 'document',
@@ -73,7 +77,7 @@ export async function POST(req: NextRequest) {
       const mime = isPdf ? PDF : 'text/plain';
       const docKey = `assistant/docs/${Date.now()}-${docName.replace(/[^a-z0-9._-]+/gi, '-').slice(-80)}`;
       await saveFile(docKey, buf, mime);
-      const saved = await prisma.assistant_files.create({ data: { kind: 'document', filename: docName, path: docKey, mime, size: buf.length, uploaded_by: await getActor() } });
+      const saved = await prisma.assistant_files.create({ data: { kind: 'document', filename: docName, path: docKey, mime, size: buf.length, uploaded_by: await uploader() } });
       const html = text
         .split(/\n\s*\n/)
         .map((p) => p.trim())
@@ -119,7 +123,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    await prisma.assistant_files.create({ data: { kind: 'image', filename: originalFilename || safeName, path: originalKey, mime: mimetype, size: buf.length, uploaded_by: await getActor() } });
+    await prisma.assistant_files.create({ data: { kind: 'image', filename: originalFilename || safeName, path: originalKey, mime: mimetype, size: buf.length, uploaded_by: await uploader() } });
 
     return NextResponse.json(
       {

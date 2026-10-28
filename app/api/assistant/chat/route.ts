@@ -4,6 +4,7 @@ import { streamNdjson } from '@/lib/assistant/stream';
 import { getActor, getMe } from '@/lib/auth';
 import * as activity from '@/lib/activity';
 import prisma from '@/lib/prisma';
+import { isOwner, ownerStamp } from '@/lib/assistant/conversations';
 
 export const runtime = 'nodejs';
 // Vercel Hobby plan limit. On Pro, raise to 800 for long generations.
@@ -20,12 +21,12 @@ export async function POST(req: NextRequest) {
   // Only the owner (or an admin) may continue a chat.
   if (conversationId) {
     const row = await prisma.assistant_conversations.findUnique({ where: { id: Number(conversationId) }, select: { created_by: true } });
-    if (row && me && me.role !== 'admin' && ![me.name, me.email].includes(row.created_by || '')) return NextResponse.json({ error: 'This chat belongs to someone else.' }, { status: 403 });
+    if (row && me && me.role !== 'admin' && !isOwner(me, row.created_by)) return NextResponse.json({ error: 'This chat belongs to someone else.' }, { status: 403 });
   }
   await activity.log('assistant.asked', { details: String(message || '(image)').replace(/<attached_document[\s\S]*$/, '').trim().slice(0, 160) || 'Sent a file', source: 'assistant' }).catch(() => {});
 
   return streamNdjson(req, (emit, signal) =>
-    sendMessage({ conversationId: conversationId ? Number(conversationId) : null, text: message || '', imageIds: ids, actor, me }, emit, signal)
+    sendMessage({ conversationId: conversationId ? Number(conversationId) : null, text: message || '', imageIds: ids, actor: ownerStamp(me, actor), me }, emit, signal)
   );
 }
 

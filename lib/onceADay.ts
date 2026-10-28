@@ -3,9 +3,14 @@
 // tick runs it once AI work is possible again; any other failure still closes the day (it is not
 // paid for again every 15 minutes). While a run is going, a marker stops a second one, also the next
 // day's (a run still waiting on a batch past midnight is not joined); a marker left by a run that a
-// restart cut off goes stale after `staleMinutes`, and the day is run again.
+// restart cut off is stale at once (it carries the id of the process that wrote it), and the day is
+// run again: a batch it was waiting on is then collected for free by the same request. `staleMinutes`
+// only limits a marker of this same process (a run stuck without ending).
 import * as settings from './settings';
 import { CreditPausedError, isCreditError } from './aiCredits';
+
+// The id of this server process, the same for every module and route in it.
+export const bootId = (): string => ((globalThis as any).__onceADayBootId ||= `${process.pid}-${Date.now()}`);
 
 export const waitsForAi = (e: any) => e instanceof CreditPausedError || isCreditError(e);
 
@@ -18,9 +23,9 @@ export async function onceADay<T>(key: string, day: string, fn: () => Promise<T>
   const runKey = `${key}_running`;
   try {
     const r = JSON.parse((await settings.get(runKey)) || 'null');
-    if (r?.at && Date.now() - r.at < staleMinutes * 60000) return null;
+    if (r?.at && r.boot === bootId() && Date.now() - r.at < staleMinutes * 60000) return null;
   } catch {}
-  const mine = JSON.stringify({ day, at: Date.now() });
+  const mine = JSON.stringify({ day, at: Date.now(), boot: bootId() });
   await settings.set(runKey, mine);
   try {
     const out = await fn();

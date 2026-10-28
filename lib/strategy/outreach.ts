@@ -233,6 +233,8 @@ export async function runOutreach(now = new Date(), { checkLinks = true, push = 
   // Add-lead failures in a row in this run: two different leads refused means the campaign itself is
   // the problem (deleted or paused, bad key), so the run stops instead of paying for more opening lines.
   let refusedInARow = 0;
+  // The leads of that streak given up on (refused for the second time): put back if the run stops.
+  let givenUpInStreak: number[] = [];
   if ((await settings.get(STOPPED_DAY)) === today) {
     out.stoppedForToday = true;
     budget = 0;
@@ -289,22 +291,31 @@ export async function runOutreach(now = new Date(), { checkLinks = true, push = 
       } catch (err: any) {
         // A lead refused twice (on two days) is given up on, so one lead Smartlead keeps refusing does
         // not block every other due task on every run.
-        const again = String(t.note || '').startsWith(ADD_LEAD_FAILED);
+        // A refusal that stops the run is blamed on the campaign, not the lead: it never gives a lead up,
+        // and the leads of the same streak given up on before it are put back (their dated note stays).
+        refusedInARow++;
+        const stop = refusedInARow >= 2;
+        const again = String(t.note || '').startsWith(ADD_LEAD_FAILED) && !stop;
         const why = String(err.message || err).slice(0, 400);
         t.note = failedNote(ADD_LEAD_FAILED, today, why);
         await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: again ? 'failed' : 'planned', contact_email: contact.email, note: t.note } });
-        refusedInARow++;
-        const stop = refusedInARow >= 2;
+        if (again) givenUpInStreak.push(t.id);
         // Kept for the day, so a repeat pass 15 minutes later does not take the next leads.
         if (stop) {
           await settings.set(STOPPED_DAY, today);
           out.stoppedForToday = true;
+          if (givenUpInStreak.length) {
+            await prisma.backlink_tasks.updateMany({ where: { id: { in: givenUpInStreak }, status: 'failed' }, data: { status: 'planned' } });
+            for (const id of givenUpInStreak) await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: id, details: 'Put back to planned: the next lead was refused too, so the Smartlead campaign is the problem, not this lead.' });
+            givenUpInStreak = [];
+          }
         }
         await activity.log('backlink.failed', { entityType: 'backlink_task', entityId: t.id, details: `Smartlead add-lead failed${again ? ' again, so this lead is given up on' : ''}${stop ? '; outreach stopped for today' : ''}: ${why}` });
         if (stop) break;
         continue;
       }
       refusedInARow = 0;
+      givenUpInStreak = [];
       await prisma.backlink_tasks.update({ where: { id: t.id }, data: { status: 'sent', contact_email: contact.email, email_body: line, sent_at: sqlNow(now), note: 'Added to Smartlead campaign.' } });
       await activity.log('backlink.sent', { entityType: 'backlink_task', entityId: t.id, details: `Added ${contact.email} (${t.target_site}) to the Smartlead campaign` });
       out.pushed++;

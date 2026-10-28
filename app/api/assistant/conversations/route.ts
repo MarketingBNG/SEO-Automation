@@ -4,7 +4,7 @@ import { basename } from '@/lib/storage';
 import { loadConversation, IMAGE_MARKER } from '@/lib/assistant/engine';
 import { getTool } from '@/lib/assistant/tools';
 import { getMe } from '@/lib/auth';
-import { mineOnly } from '@/lib/assistant/conversations';
+import { mineOnly, isOwner } from '@/lib/assistant/conversations';
 
 export const runtime = 'nodejs';
 
@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
   if (qid) {
     const conv = await loadConversation(Number(qid));
     if (!conv) return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
-    if (own && !own.created_by.in.includes(conv.created_by)) return NextResponse.json({ error: 'This chat belongs to someone else. Only an admin can open other people\'s chats.' }, { status: 403 });
+    if (own && !isOwner(me, conv.created_by)) return NextResponse.json({ error: 'This chat belongs to someone else. Only an admin can open other people\'s chats.' }, { status: 403 });
     // PORT NOTE: `undo IS NOT NULL AS undoable` was SQLite 0/1; kept as 0/1.
     const changes = (
       await prisma.site_changes.findMany({
