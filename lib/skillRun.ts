@@ -13,6 +13,11 @@ export function claimSkillRun(kind: SkillRunKind): SkillRunKind | null {
   return null;
 }
 
+// The kind running now, without taking the run.
+export function skillRunning(): SkillRunKind | null {
+  return state.running;
+}
+
 export function releaseSkillRun(kind: SkillRunKind) {
   if (state.running === kind) state.running = null;
 }

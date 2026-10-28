@@ -193,8 +193,14 @@ export default function SettingsTab() {
     for (const name of CONN_TESTS) {
       if (savedConn(name) !== 'checking') continue;
       fetch(`/api/${name}/test`)
-        .then((r) => r.json())
-        .then((json) => alive && markConn(name, json))
+        .then(async (r) => {
+          if (!alive) return;
+          // Someone who may view Settings but not change it cannot run the checks: no badge (not
+          // "Error", the connection itself may be fine), and nothing kept for later.
+          if (r.status === 403) return setConn((c) => ({ ...c, [name]: undefined }));
+          const json = await r.json();
+          if (alive) markConn(name, json);
+        })
         .catch(() => alive && setConn((c) => ({ ...c, [name]: 'fail' })));
     }
     return () => {

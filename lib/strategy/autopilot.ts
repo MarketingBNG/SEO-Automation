@@ -11,7 +11,7 @@ import { CreditPausedError, isCreditError, assertCredits } from '../aiCredits';
 import { aiMode, isAutomatic, TestingModeError } from '../aiQueue';
 import { withReplay, clearReplay, markAiWait } from '../aiReplay';
 import { claimPublish, publishingRows } from './publishLock';
-import { connectorOn, authorSlug } from '../siteConnector';
+import { connectorOn, authorSlug, siteOrigin } from '../siteConnector';
 import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia, freeSlug } from '../wordpress';
 import { listSites, getSiteRankings, addTrackedKeyword } from '../seranking';
 import { getTermsForKeyword } from '../surfer';
@@ -158,10 +158,12 @@ async function publishingPaused() {
     const serverErrors = problems.filter((p) => (p.issues || []).some((i) => /^5\d\d status/.test(i))).length;
     if (serverErrors > 0) return `latest crawl has ${serverErrors} URL(s) with 5xx server errors`;
   }
-  // No default domain here: a local or test server must not fetch the live site.
-  if (!process.env.WORDPRESS_SITE_URL?.trim()) return 'WORDPRESS_SITE_URL is not set, so the site cannot be checked';
+  // No default domain here: a local or test server must not fetch the live site. A server that
+  // publishes through the site connector checks the connector's site.
+  const origin = siteOrigin();
+  if (!origin) return 'neither WORDPRESS_SITE_URL nor the site connector is set, so the site cannot be checked';
   try {
-    const res = await fetch(`${SITE()}/robots.txt`, { signal: AbortSignal.timeout(15000) });
+    const res = await fetch(`${origin}/robots.txt`, { signal: AbortSignal.timeout(15000) });
     if (res.status >= 500) return `site returned ${res.status}`;
     const txt = await res.text();
     if (/^\s*disallow:\s*\/\s*$/im.test(txt.split(/user-agent:\s*\*/i)[1]?.split(/user-agent:/i)[0] || '')) return 'robots.txt blocks all crawlers';
@@ -331,7 +333,9 @@ async function publishRowOnce(row, now, verify) {
   // A blog a person reviewed or approved is not fact-checked again: the check at generation time
   // stands, and edits made in review are the reviewer's call. It publishes at its slot.
   const humanApproved = Boolean(row.reviewed_at) || draft.status === 'approved';
-  const fc = humanApproved ? { ok: true, rounds: 0, draft } : await ensureFactChecked(row, draft, verify);
+  // A blog already held because publishing is paused is not fact-checked now (each check is paid):
+  // it is checked once the pause lifts.
+  const fc = humanApproved || paused ? { ok: true, rounds: 0, draft } : await ensureFactChecked(row, draft, verify);
   const checked = fc.draft;
   if (/\[(PRACTITIONER NOTE NEEDED|VERIFY|AUTHOR NAME|REVIEWER NAME|VISUAL SUGGESTION)/i.test(checked.content_html || '')) reasons.push('Draft still has a reviewer placeholder.');
   if (!fc.ok) reasons.push(`Fact check could not confirm every claim from a primary source after ${fc.rounds} rounds. Not published: correct the claims (the edited text is checked again) or approve the blog to publish it as it is.`);

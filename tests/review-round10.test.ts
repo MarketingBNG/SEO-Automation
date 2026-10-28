@@ -44,7 +44,7 @@ test('the daily site check does not fetch the live site when WORDPRESS_SITE_URL 
   const { runSiteChecks } = await import('../lib/siteChecks');
   calls.length = 0;
   const out: any = await withoutWordPress(() => runSiteChecks());
-  assert.equal(out.robots, 'not checked: WORDPRESS_SITE_URL not set');
+  assert.equal(out.robots, 'not checked: neither WORDPRESS_SITE_URL nor the site connector is set');
   assert.deepEqual(calls.filter((u) => /robots\.txt/.test(u)), []);
 });
 

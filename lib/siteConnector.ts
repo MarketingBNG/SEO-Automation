@@ -19,6 +19,20 @@ export const SITE_AUTHORS = () => list(process.env.SITE_CONNECTOR_AUTHORS, ['aks
 // confirmed that "draft" stays hidden (SITE_CONNECTOR_DRAFTS=on).
 export const draftsAllowed = () => process.env.SITE_CONNECTOR_DRAFTS === 'on';
 
+// The live site's origin for checks that fetch it (robots.txt, Bing): WORDPRESS_SITE_URL, else the
+// connector's own site when the connector is set up. '' when neither is (a local or test server,
+// which must not fetch the live site).
+export function siteOrigin(): string {
+  const wp = (process.env.WORDPRESS_SITE_URL || '').trim().replace(/\/+$/, '');
+  if (wp) return wp;
+  if (!connectorOn()) return '';
+  try {
+    return new URL(String(process.env.SITE_CONNECTOR_URL)).origin;
+  } catch {
+    return '';
+  }
+}
+
 export async function connectorCall(action: string, data: Record<string, unknown> = {}): Promise<any> {
   const url = process.env.SITE_CONNECTOR_URL;
   const secret = process.env.SITE_CONNECTOR_SECRET;

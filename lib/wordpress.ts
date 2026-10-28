@@ -35,6 +35,12 @@ function wpConfigured() {
   return Boolean((process.env.WORDPRESS_SITE_URL || '').trim() && process.env.WORDPRESS_USERNAME && process.env.WORDPRESS_APPLICATION_PASSWORD);
 }
 
+// Why a post with this status cannot be sent (the site connector makes every saved post live, so a
+// draft is refused until SITE_CONNECTOR_DRAFTS=on), or null. Checked before steps that save anything.
+function draftsRefused(status: string): string | null {
+  return connectorOn() && siteStatus(status) === 'draft' && !draftsAllowed() ? noDrafts().message : null;
+}
+
 function getConfig() {
   const siteUrl = (process.env.WORDPRESS_SITE_URL || '').replace(/\/+$/, '');
   const username = process.env.WORDPRESS_USERNAME;
@@ -446,6 +452,7 @@ async function siteRequest(method: string, route: string, query: any, body: any)
 
 export {
   wpConfigured,
+  draftsRefused,
   freeSlug,
   testConnection,
   uploadBuffer,

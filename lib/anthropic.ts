@@ -1617,8 +1617,12 @@ corrected draft again in the exact same format (===TITLE=== through ===END===):\
 // A manual skill update refused because the automatic refresh's batch (already paid for) is still
 // waiting to be read.
 export class SkillBatchWaitingError extends Error {
-  constructor() {
-    super('The automatic skill refresh is waiting for its batch, which is already paid for. It finishes by itself; update the skill after that if you still want to.');
+  constructor(testing = false) {
+    super(
+      testing
+        ? 'The automatic skill refresh is waiting for its batch, which is already paid for. Testing mode is on, so it finishes only once Live mode is back on (at the next daily run); update the skill after that if you still want to.'
+        : 'The automatic skill refresh is waiting for its batch, which is already paid for. It finishes by itself; update the skill after that if you still want to.'
+    );
     this.name = 'SkillBatchWaitingError';
   }
 }
@@ -1662,7 +1666,7 @@ async function generateContentSkill({ batch = false }: any = {}) {
       else if (batch && (await pending())) frozenNote = saved.note;
     }
   } catch {}
-  if (batchWaiting) throw new SkillBatchWaitingError();
+  if (batchWaiting) throw new SkillBatchWaitingError((await aiMode()) === 'testing');
   if (frozenNote != null) ownPerformanceNote = frozenNote;
   else {
     try {

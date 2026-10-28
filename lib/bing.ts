@@ -1,9 +1,11 @@
 // Bing Webmaster Tools (K11): submits new URLs and checks the connection. Needs
 // BING_WEBMASTER_API_KEY (Bing Webmaster Tools > Settings > API access) in the environment.
+import { siteOrigin } from './siteConnector';
+
 const BASE = 'https://ssl.bing.com/webmaster/api.svc/json';
 const SITE = () => {
-  const site = (process.env.WORDPRESS_SITE_URL || '').trim().replace(/\/+$/, '');
-  if (!site) throw new Error('WORDPRESS_SITE_URL is not set');
+  const site = siteOrigin();
+  if (!site) throw new Error('WORDPRESS_SITE_URL is not set (and the site connector is not set up)');
   return site + '/';
 };
 

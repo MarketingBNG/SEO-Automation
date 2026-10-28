@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { generateContentSkill, SkillBatchWaitingError } from '@/lib/anthropic';
-import { claimSkillRun, releaseSkillRun } from '@/lib/skillRun';
+import { claimSkillRun, releaseSkillRun, skillRunning } from '@/lib/skillRun';
+import { aiMode } from '@/lib/aiQueue';
 import * as activity from '@/lib/activity';
 import { timed } from '@/lib/jobTimer';
 import { methodNotAllowed } from '../../_lib/http';
@@ -11,8 +12,12 @@ export const runtime = 'nodejs';
 // One paid run at a time (two tabs or two people, or the automatic refresh waiting for its batch):
 // a second run would be paid again, and the shared timer key would drop it from /api/ai-credits
 // (running.other) when the first one ends.
+//
+// In Testing mode the run waits in the free Claude Code queue, with no time limit, so it does not take
+// the run: a job left unanswered there would otherwise stop the automatic refresh for good.
 export async function POST() {
-  const busy = claimSkillRun('manual');
+  const claims = (await aiMode()) === 'live';
+  const busy = claims ? claimSkillRun('manual') : skillRunning() === 'auto' ? 'auto' : null;
   if (busy === 'auto') return NextResponse.json({ error: 'The automatic skill refresh is running (its batch can take a few hours). It finishes by itself; update the skill after that if you still want to.' }, { status: 409 });
   if (busy) return NextResponse.json({ error: 'A skill update is already running.' }, { status: 409 });
   try {
@@ -44,7 +49,7 @@ export async function POST() {
     console.error(err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   } finally {
-    releaseSkillRun('manual');
+    if (claims) releaseSkillRun('manual');
   }
 }
 export { methodNotAllowed as GET, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

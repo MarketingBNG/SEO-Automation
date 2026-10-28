@@ -6,11 +6,13 @@
 // Each problem becomes a task for a person (Monthly Strategy > tasks) with an alert, once.
 import prisma from './prisma';
 import { wpRequest } from './wordpress';
+import { siteOrigin } from './siteConnector';
 import { notify } from './notify';
 import { aiLeftovers } from './strategy/core';
 
-// No default domain: a local or test server without WORDPRESS_SITE_URL must not fetch the live site.
-const SITE = () => (process.env.WORDPRESS_SITE_URL || '').trim().replace(/\/+$/, '');
+// No default domain: a local or test server without WORDPRESS_SITE_URL or the site connector must
+// not fetch the live site.
+const SITE = () => siteOrigin();
 
 async function addTask(url: string, issue: string, fix: string) {
   const exists = await prisma.technical_fix_tasks.findFirst({ where: { url, issue, status: { in: ['manual', 'planned'] } } });
@@ -43,7 +45,7 @@ export async function runSiteChecks() {
   }
 
   // 2. Sitemap listed in robots.txt.
-  if (!SITE()) out.robots = 'not checked: WORDPRESS_SITE_URL not set';
+  if (!SITE()) out.robots = 'not checked: neither WORDPRESS_SITE_URL nor the site connector is set';
   else {
     try {
       const txt = await (await fetch(`${SITE()}/robots.txt`, { signal: AbortSignal.timeout(15000) })).text();

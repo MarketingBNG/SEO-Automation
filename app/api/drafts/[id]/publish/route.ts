@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { ensurePhotoCover } from '@/lib/coverPhoto';
-import { uploadMedia, publishPost, updatePost, seoSlug, freeSlug, wpRequest, wpConfigured } from '@/lib/wordpress';
+import { uploadMedia, publishPost, updatePost, seoSlug, freeSlug, wpRequest, wpConfigured, draftsRefused } from '@/lib/wordpress';
 import * as activity from '@/lib/activity';
 import { getActor, getMe } from '@/lib/auth';
 import { canDo } from '@/lib/access';
@@ -106,6 +106,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!wpConfigured()) {
     return NextResponse.json({ error: 'WordPress connection is not configured. Set WORDPRESS_SITE_URL, WORDPRESS_USERNAME and WORDPRESS_APPLICATION_PASSWORD (or the site connector), then publish again.' }, { status: 503 });
   }
+  // The website connector refuses drafts (it makes every saved post live): refused here, before the
+  // paid checks, the author and cover saves and the image uploads.
+  const noDraft = draftsRefused(wpStatus);
+  if (noDraft) return NextResponse.json({ error: noDraft }, { status: 400 });
   // The paid originality checks (live SERP searches, Copyscape) run only after the free refusals above.
   const orig = await ensureOriginality(nid).catch(() => null);
   if (orig && !orig.ok) return NextResponse.json({ error: originalityReason(orig) }, { status: 400 });
