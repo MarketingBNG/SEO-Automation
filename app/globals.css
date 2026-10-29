@@ -151,6 +151,24 @@
   }
   html {
     @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  body {
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Taps act at once on touch screens (no double-tap zoom delay on controls). */
+  button, [role="button"], a, input, select, textarea, summary, label {
+    touch-action: manipulation;
+  }
+  /* People who turn animations off in their system get a still dashboard. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 /* Moving shine on progress bars (same as the Social Media dashboard). */

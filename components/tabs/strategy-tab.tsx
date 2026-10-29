@@ -769,24 +769,10 @@ export function MonthRunning({ standalone = false }: { standalone?: boolean } = 
       <p className="text-sm text-muted-foreground">{data ? 'No blogs are scheduled. Approve a Monthly Strategy and its blog calendar appears here.' : 'Loading the blog calendar…'}</p>
     ) : null;
   const overdue = data.rows.filter((r: any) => r.overdue);
-  return (
-    <div className="space-y-4">
-      {msg && <div className="rounded-lg border p-2 text-sm">{msg}</div>}
-      {overdue.length > 0 && (
-        <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-3 text-sm font-medium text-red-700 dark:text-red-400">
-          {overdue.length} blog{overdue.length === 1 ? ' has' : 's have'} waited more than 48 hours for review: {overdue.map((r: any) => r.title).join('; ')}. A reminder goes out every 12 hours until someone decides.
-        </div>
-      )}
-      <Section
-        title="Blog calendar: approve, and see when each publishes"
-        description="Every blog is fact-checked against official sources by two different AI models. The team (managers and associates) then has 48 hours to approve or reject it, and can pause a blog or move it to another time (with suggested times). If nobody rejects it, it is approved and published automatically under one of the partners' names, with its image and a call to action for its service. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
-      >
-        <DataTable head={['Publish date', 'Title', 'Fact check', 'Status', 'Publishes', '']}>
-          {data.rows.map((r: any) => (
-            <tr key={r.id} className={r.overdue ? 'bg-red-500/10' : undefined}>
-              <td className={TD_MUTED}>{fmtDate(r.publish_at)}{r.overdue && <div className="font-semibold text-red-600 dark:text-red-400">Review overdue</div>}</td>
-              <td className={TD}>
-                <div className="flex gap-2">
+  // The cells of one calendar row, shared by the table (from the sm breakpoint up) and the cards (phones).
+  const titleCell = (r: any) => (
+    <div className="flex gap-2">
+
                   {r.cover_url && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={r.cover_url} alt="" loading="lazy" className="mt-0.5 h-12 w-[88px] shrink-0 rounded border object-cover" title="The cover that goes live with this blog" />
@@ -804,14 +790,16 @@ export function MonthRunning({ standalone = false }: { standalone?: boolean } = 
                     )}
                   </div>
                 </div>
-              </td>
-              <td className={TD}>{factCheck(r)}</td>
-              <td className={TD}>
+  );
+  const statusCell = (r: any) => (
+    <>
                 {STATUS[r.status] || r.status}
                 {r.approval_mode ? ` (${r.approval_mode === 'auto' ? 'auto-approved' : `approved by ${r.reviewed_by || 'reviewer'}`})` : ''}
                 {r.hold_reasons?.length > 0 && <ul className="ml-4 list-disc text-xs">{r.hold_reasons.map((h: string, i: number) => <li key={i}>{h}</li>)}</ul>}
-              </td>
-              <td className={TD}>
+    </>
+  );
+  const publishCell = (r: any) => (
+    <>
                 {r.publish_plan && (
                   <div className={`mb-1 text-xs ${r.status === 'in_review' && r.needs_expert && !r.reviewed_at ? 'font-medium text-amber-700 dark:text-amber-400' : ''}`}>
                     <strong>{r.publish_plan.headline}.</strong>{' '}
@@ -827,17 +815,19 @@ export function MonthRunning({ standalone = false }: { standalone?: boolean } = 
                   </details>
                 )}
                 {r.status === 'rejected' && r.reject_feedback && <div className="text-xs text-muted-foreground">Feedback from {r.rejected_by}: {r.reject_feedback}</div>}
-              </td>
-              <td className={TD}>
+    </>
+  );
+  const actionsCell = (r: any) => (
+    <>
                 {canReview && ['in_review', 'held'].includes(r.status) && r.draft_id && !r.reviewed_at && (
                   <div className="flex flex-col gap-1">
                     {r.needs_expert && (
-                      <select className="h-8 w-52 rounded-md border bg-background px-1 text-xs" value={reviewer[r.id] || ''} onChange={(e) => setReviewer((m) => ({ ...m, [r.id]: e.target.value }))} aria-label="CA/CPA reviewer">
+                      <select className="h-8 w-full rounded-md border sm:w-52 bg-background px-1 text-xs" value={reviewer[r.id] || ''} onChange={(e) => setReviewer((m) => ({ ...m, [r.id]: e.target.value }))} aria-label="CA/CPA reviewer">
                         <option value="">Reviewed by (CA/CPA)...</option>
                         {(data.reviewers || []).map((n: string) => <option key={n} value={n}>{n}</option>)}
                       </select>
                     )}
-                    {r.needs_expert && !(data.reviewers || []).length && <span className="w-52 text-xs text-muted-foreground">Type the reviewer as &quot;Name, CA&quot;.</span>}
+                    {r.needs_expert && !(data.reviewers || []).length && <span className="text-xs text-muted-foreground">Type the reviewer as &quot;Name, CA&quot;.</span>}
                     <Button size="sm" disabled={busy === r.id || (r.needs_expert && !reviewer[r.id])} onClick={() => decide(r.id, 'approve')}>Approve blog</Button>
                     <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => setRejecting(rejecting === r.id ? null : r.id)}>Reject</Button>
                   </div>
@@ -848,15 +838,56 @@ export function MonthRunning({ standalone = false }: { standalone?: boolean } = 
                   </div>
                 )}
                 {rejecting === r.id && (
-                  <div className="mt-2 w-64 space-y-1">
+                  <div className="mt-2 w-full space-y-1 sm:w-64">
                     <textarea className="w-full rounded-md border bg-background p-2 text-xs" rows={4} placeholder="Why are you rejecting it? What should change?" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
                     <Button size="sm" variant="destructive" disabled={busy === r.id || feedback.trim().length < 10} onClick={() => decide(r.id, 'reject')}>Reject and rewrite</Button>
                   </div>
                 )}
-              </td>
-            </tr>
+    </>
+  );
+  return (
+    <div className="space-y-4">
+      {msg && <div className="rounded-lg border p-2 text-sm">{msg}</div>}
+      {overdue.length > 0 && (
+        <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-3 text-sm font-medium text-red-700 dark:text-red-400">
+          {overdue.length} blog{overdue.length === 1 ? ' has' : 's have'} waited more than 48 hours for review: {overdue.map((r: any) => r.title).join('; ')}. A reminder goes out every 12 hours until someone decides.
+        </div>
+      )}
+      <Section
+        title="Blog calendar: approve, and see when each publishes"
+        description="Every blog is fact-checked against official sources by two different AI models. The team (managers and associates) then has 48 hours to approve or reject it, and can pause a blog or move it to another time (with suggested times). If nobody rejects it, it is approved and published automatically under one of the partners' names, with its image and a call to action for its service. A rejected blog is rewritten with the feedback and comes back for review with a note on what changed. A blog that cannot be fully verified is never published."
+      >
+        <div className="space-y-3 sm:hidden">
+          {data.rows.map((r: any) => (
+            <div key={r.id} className={`rounded-xl border p-3 text-sm ${r.overdue ? 'border-red-500/50 bg-red-500/5' : ''}`}>
+              {titleCell(r)}
+              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                <dt className="text-muted-foreground">Publish</dt>
+                <dd>{fmtDate(r.publish_at)}{r.overdue && <span className="ml-1 font-semibold text-red-600 dark:text-red-400">Review overdue</span>}</dd>
+                <dt className="text-muted-foreground">Fact check</dt>
+                <dd>{factCheck(r)}</dd>
+                <dt className="text-muted-foreground">Status</dt>
+                <dd>{statusCell(r)}</dd>
+              </dl>
+              <div className="mt-2">{publishCell(r)}</div>
+              <div className="mt-2">{actionsCell(r)}</div>
+            </div>
           ))}
-        </DataTable>
+        </div>
+        <div className="hidden sm:block">
+          <DataTable head={['Publish date', 'Title', 'Fact check', 'Status', 'Publishes', '']}>
+            {data.rows.map((r: any) => (
+              <tr key={r.id} className={r.overdue ? 'bg-red-500/10' : undefined}>
+                <td className={TD_MUTED}>{fmtDate(r.publish_at)}{r.overdue && <div className="font-semibold text-red-600 dark:text-red-400">Review overdue</div>}</td>
+                <td className={TD}>{titleCell(r)}</td>
+                <td className={TD}>{factCheck(r)}</td>
+                <td className={TD}>{statusCell(r)}</td>
+                <td className={TD}>{publishCell(r)}</td>
+                <td className={TD}>{actionsCell(r)}</td>
+              </tr>
+            ))}
+          </DataTable>
+        </div>
       </Section>
     </div>
   );

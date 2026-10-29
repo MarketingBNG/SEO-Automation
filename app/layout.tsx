@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, Lora } from 'next/font/google';
 import { Providers } from '@/components/providers';
 import './globals.css';
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   },
 };
 
-export const viewport = { themeColor: '#1B2A5E' };
+export const viewport: Viewport = { themeColor: '#1B2A5E', width: 'device-width', initialScale: 1, viewportFit: 'cover' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
