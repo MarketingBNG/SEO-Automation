@@ -9,6 +9,8 @@ import { getPost } from './wordpress';
 import * as activity from './activity';
 import { startTimer, endTimer } from './jobTimer';
 import { parseAuditRow } from './audits';
+import { findPreviousAudit, recordChange } from './contentChanges';
+import { diffContent } from './contentDiff';
 import { safeFetchText } from './safeFetch';
 
 const g = globalThis as unknown as { __auditJobs?: Set<number>; __auditStops?: Map<string, AbortController> };
@@ -23,7 +25,7 @@ function titleFromHtml(html: string): string | null {
 }
 
 // Creates the row (content fetched now, which is quick) and starts the audit in the background.
-export async function startAudit({ title, contentHtml, sourceUrl, wpPostId, actor }: any) {
+export async function startAudit({ title, contentHtml, sourceUrl, wpPostId, actor, draftId, mode }: any) {
   let content = contentHtml;
   let resolvedTitle = title;
   let resolvedUrl = sourceUrl || null;
@@ -45,21 +47,33 @@ export async function startAudit({ title, contentHtml, sourceUrl, wpPostId, acto
     const open = await prisma.blog_audits.findFirst({ where: { wp_post_id: wpPostId, audit_status: 'running' } });
     if (open) return parseAuditRow(open);
   }
+  // A re-upload of a piece audited before: what changed is recorded, shown, and verified first.
+  const previous = !wpPostId ? await findPreviousAudit(resolvedTitle, content).catch(() => null) : null;
+  const changes = previous ? diffContent({ title: previous.title, html: previous.content_html || '' }, { title: resolvedTitle, html: content }) : null;
+  const changed = changes && changes.kind !== 'none';
   const row = await prisma.blog_audits.create({
-    data: { title: resolvedTitle || null, source_url: resolvedUrl, content_html: content, word_count: wordCount(content), wp_post_id: wpPostId || null, wp_post_url: wpPostId ? resolvedUrl : null, audit_status: 'running', issues: '[]', suggestions: '[]', facts: '[]' },
+    data: {
+      title: resolvedTitle || null, source_url: resolvedUrl, content_html: content, word_count: wordCount(content), wp_post_id: wpPostId || null, wp_post_url: wpPostId ? resolvedUrl : null, audit_status: 'running', issues: '[]', suggestions: '[]', facts: '[]',
+      previous_audit_id: previous?.id || null, changes_summary: changed ? changes!.summary : previous ? 'Same words as the earlier upload.' : null, draft_id: draftId || null, mode: mode || null,
+    },
   });
-  void runAudit(row.id, { title: resolvedTitle, content, sourceUrl: resolvedUrl, actor });
+  if (previous && changed) {
+    await recordChange({ entityType: 'audit', entityId: row.id, kind: 'reupload', actor, title: resolvedTitle, before: { title: previous.title, html: previous.content_html || '' }, after: { title: resolvedTitle, html: content }, previousId: previous.id }).catch(() => null);
+    await activity.log('audit.reupload', { entityType: 'blog_audit', entityId: row.id, details: `"${resolvedTitle || 'untitled'}" uploaded again (earlier audit #${previous.id}): ${changes!.summary}`, actor }).catch(() => {});
+  }
+  const reverify = changed ? changes!.samples.filter((s) => s.type !== 'removed' && s.after).map((s) => s.after as string) : [];
+  void runAudit(row.id, { title: resolvedTitle, content, sourceUrl: resolvedUrl, actor, reverify });
   return parseAuditRow(row);
 }
 
-async function runAudit(id: number, { title, content, sourceUrl, actor }: any) {
+async function runAudit(id: number, { title, content, sourceUrl, actor, reverify }: any) {
   running.add(id);
   const key = `audit-${id}`;
   const stop = new AbortController();
   stops.set(key, stop);
   startTimer(key, 'audit', `Audit: ${title || sourceUrl || `#${id}`}`);
   try {
-    const result = await auditBlog({ title, content, sourceUrl, signal: stop.signal });
+    const result = await auditBlog({ title, content, sourceUrl, signal: stop.signal, reverify });
     await prisma.blog_audits.update({
       where: { id },
       data: { verdict: result.verdict, summary: result.summary, issues: JSON.stringify(result.issues), suggestions: JSON.stringify(result.suggestions), facts: JSON.stringify(result.facts), people_also_ask: JSON.stringify(result.peopleAlsoAsk || []), audit_status: 'ready', audit_error: null },
@@ -83,13 +97,14 @@ async function runAudit(id: number, { title, content, sourceUrl, actor }: any) {
 }
 
 // Marks the row and starts the rewrite in the background.
-export async function startRewrite(id: number, actor?: string | null) {
+// mode 'optimise': keep the author's text and facts, add only what SEO, AEO and GEO need.
+export async function startRewrite(id: number, actor?: string | null, opts: { mode?: 'optimise' } = {}) {
   const audit: any = await prisma.blog_audits.findUnique({ where: { id } });
   if (!audit) throw Object.assign(new Error('Audit not found'), { status: 404 });
   if (!audit.content_html) throw Object.assign(new Error('This audit was run from a URL without saving content, so there is nothing to rewrite from. Re-run the audit with pasted content or a file upload.'), { status: 400 });
   if (audit.audit_status === 'running') throw Object.assign(new Error('The audit is still running. Wait for it to finish, then rewrite.'), { status: 409 });
   if (audit.rewrite_status === 'generating' && running.has(id)) return parseAuditRow(audit);
-  const row = await prisma.blog_audits.update({ where: { id }, data: { rewrite_status: 'generating', rewrite_error: null } });
+  const row = await prisma.blog_audits.update({ where: { id }, data: { rewrite_status: 'generating', rewrite_error: null, mode: opts.mode || null } });
   void runRewrite(row, actor);
   return parseAuditRow(row);
 }
@@ -102,12 +117,13 @@ async function runRewrite(audit: any, actor?: string | null) {
   stops.set(key, stop);
   startTimer(key, 'rewrite', `Rewrite: ${audit.title || `#${id}`}`);
   try {
-    const result: any = await rewriteBlog({ title: audit.title, content: audit.content_html, issues: JSON.parse(audit.issues || '[]'), suggestions: JSON.parse(audit.suggestions || '[]'), signal: stop.signal });
+    const result: any = await rewriteBlog({ title: audit.title, content: audit.content_html, issues: JSON.parse(audit.issues || '[]'), suggestions: JSON.parse(audit.suggestions || '[]'), signal: stop.signal, mode: audit.mode || undefined });
     await prisma.blog_audits.update({
       where: { id },
       data: { rewrite_title: result.title, rewrite_content_html: result.content, rewrite_meta: result.meta || null, rewrite_people_also_ask: JSON.stringify(result.peopleAlsoAsk || []), rewrite_status: 'ready', rewrite_error: null },
     });
-    await activity.log('audit.rewritten', { entityType: 'blog_audit', entityId: id, details: `"${result.title}", ${result.productionState}, ${result.repairAttempts} repair attempt(s)`, actor });
+    await recordChange({ entityType: 'audit', entityId: id, kind: audit.mode === 'optimise' ? 'optimise' : 'rewrite', actor, title: result.title || audit.title, before: { title: audit.title, html: audit.content_html || '' }, after: { title: result.title, meta: result.meta, html: result.content } }).catch(() => null);
+    await activity.log('audit.rewritten', { entityType: 'blog_audit', entityId: id, details: `"${result.title}", ${result.productionState}, ${result.repairAttempts} repair attempt(s)${audit.mode === 'optimise' ? ', optimised keeping the author\'s text' : ''}`, actor });
     await endTimer(key, true);
   } catch (err: any) {
     const stopped = stop.signal.aborted;

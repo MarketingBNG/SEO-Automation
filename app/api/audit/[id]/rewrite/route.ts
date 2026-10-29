@@ -7,9 +7,10 @@ export const runtime = 'nodejs';
 
 // Starts the rewrite in the background and returns at once (rewrite_status "generating"); the
 // page polls GET /api/audit until it is "ready" or carries rewrite_error.
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const row = await startRewrite(toId((await params).id), await getActor());
+    const body: any = (await req.json().catch(() => ({}))) || {};
+    const row = await startRewrite(toId((await params).id), await getActor(), { mode: body.mode === 'optimise' ? 'optimise' : undefined });
     return NextResponse.json(row, { status: 202 });
   } catch (err: any) {
     if (!err.status) console.error(err);

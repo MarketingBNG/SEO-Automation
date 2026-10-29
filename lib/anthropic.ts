@@ -1398,7 +1398,7 @@ Return plain text in EXACTLY this format:
 // gates the writer itself is held to: SEO, AEO, GEO/AI, voice/humanize, accuracy, and CTA.
 // Distinct from researchAndWriteBlog: this reviews something that already exists, it doesn't
 // write anything new.
-async function auditBlog({ title, content, sourceUrl, signal }: any) {
+async function auditBlog({ title, content, sourceUrl, signal, reverify }: any) {
   // Google's live "People also ask" questions for the post's topic, so the audit can check the FAQ
   // against what searchers actually ask.
   let peopleAlsoAsk: any[] = [];
@@ -1477,7 +1477,12 @@ If the piece has no checkable hard claims, leave this section empty.>
     ? `Audit the blog post at this URL: ${sourceUrl}\n\nHere is the raw fetched page content (it includes navigation/header/footer noise - identify and audit only the actual article body):\n\n${content.slice(0, 20000)}`
     : `Audit this blog post${title ? ` titled "${title}"` : ''}:\n\n${content.slice(0, 20000)}`;
 
-  const { text } = await callClaude(systemPrompt, [{ role: 'user', content: userPrompt }], signal, { maxUses: 8, feature: 'audit' });
+  // A re-upload: the sentences that changed since the earlier version are checked before anything else.
+  const reverifyNote =
+    Array.isArray(reverify) && reverify.length
+      ? `\n\nRE-VERIFY FIRST: this piece was uploaded before and these sentences changed since then. Check every claim in them against primary sources before anything else, and name each one in ISSUES or FACTS:\n${reverify.slice(0, 25).map((s) => `- ${s}`).join('\n')}`
+      : '';
+  const { text } = await callClaude(systemPrompt, [{ role: 'user', content: userPrompt + reverifyNote }], signal, { maxUses: 8, feature: 'audit' });
 
   const get = (start, end) => {
     const startIdx = text.indexOf(start);
@@ -1535,7 +1540,7 @@ If the piece has no checkable hard claims, leave this section empty.>
 // house voice, research, and Facts Register as new drafts. Runs through the same
 // validate+auto-repair loop as researchAndWriteBlog so a rewrite can't ship with the same
 // problems it was supposed to fix.
-async function rewriteBlog({ title, content, issues, suggestions, signal, onProgress }: any) {
+async function rewriteBlog({ title, content, issues, suggestions, signal, onProgress, mode }: any) {
   const systemPrompt = await buildSystemPrompt();
 
   const issuesList = (issues || [])
@@ -1543,11 +1548,26 @@ async function rewriteBlog({ title, content, issues, suggestions, signal, onProg
     .join('\n');
   const suggestionsList = (suggestions || []).map((s) => `- ${s}`).join('\n');
 
-  const userPrompt = `Rewrite this existing blog post to fix every issue listed below. Keep what
+  // optimise: a piece written by our own team; keep their words and add only what SEO, AEO and GEO need.
+  const lead =
+    mode === 'optimise'
+      ? `OPTIMISE THIS BLOG FOR SEO, AEO AND GEO WITHOUT REWRITING IT. It was written by our own team: keep
+their sentences, order of argument, examples and facts wherever they are correct (verify the hard claims
+with web search and correct only what is wrong or outdated). Change or add only what search engines and AI
+answers need: the main keyword in the title, the first 100 words and one H2; question-style H2/H3 headings
+with a 40-60 word direct answer right under each; a short direct answer at the top; the FAQ section with
+the real People also ask questions; internal links to the matching USAIndiaCFO service page where the text
+already mentions the service; one specific call to action at the end; a meta description; tables for
+rates, thresholds and deadlines already in the text. Do not change the author's voice, do not add filler
+or padding, do not drop their points. Where you reword a sentence, keep its meaning. The issues listed
+below tell you what to fix; skip any that would mean rewriting the author's content.`
+      : `Rewrite this existing blog post to fix every issue listed below. Keep what
 already works (the parts not flagged), research and correct anything flagged as inaccurate using
 web search, and follow all of your standing instructions (voice, word limit, Facts Register,
 FAQ/structure). Do not just patch around the issues - produce a complete, clean, publish-ready
-replacement.
+replacement.`;
+
+  const userPrompt = `${lead}
 
 ORIGINAL TITLE: ${title || '(untitled)'}
 

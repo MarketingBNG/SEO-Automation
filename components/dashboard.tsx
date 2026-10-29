@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
-  Activity, BarChart3, BookOpen, Bot, BrainCircuit, CalendarClock, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
+  Activity, BarChart3, Brain, BookOpen, Bot, BrainCircuit, CalendarClock, CalendarRange, FileSearch, FileText, Globe, GraduationCap, House, PanelsTopLeft, KeyRound, Lightbulb,
   LogOut, MessageSquareQuote, RefreshCcw, RefreshCw, Search, Settings, Share2, ShieldCheck, Sparkles, Users,
 } from 'lucide-react';
 import {
@@ -38,6 +38,7 @@ const RenewalTab = dynamic(() => import('@/components/tabs/renewal-tab'), { load
 const PerformanceTab = dynamic(() => import('@/components/tabs/performance-tab'), { loading });
 const TrainingTab = dynamic(() => import('@/components/tabs/training-tab'), { loading });
 const AssociateTrainingTab = dynamic(() => import('@/components/tabs/associate-training-tab'), { loading });
+const LearningTab = dynamic(() => import('@/components/tabs/learning-tab'), { loading });
 const WebsiteContentTab = dynamic(() => import('@/components/tabs/website-content-tab'), { loading });
 const MeetingsTab = dynamic(() => import('@/components/tabs/meetings-tab'), { loading });
 const ActivityTab = dynamic(() => import('@/components/tabs/activity-tab'), { loading });
@@ -76,6 +77,7 @@ const TABS = [
   { key: 'associates', label: 'Associate Training', icon: GraduationCap, group: 'Team', hint: 'Daily lesson, next-day test, levels' },
   { key: 'team', label: 'Team & Roles', icon: ShieldCheck, group: 'Team', hint: 'Who can sign in and what they can do' },
   { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Team', hint: 'Everything the dashboard did, with errors' },
+  { key: 'learning', label: 'Learning', icon: Brain, group: 'Team', hint: 'What the team changed in blogs, what the writer learned, what people ask for' },
 
   { key: 'settings', label: 'Settings', icon: Settings, group: 'Admin', hint: 'Connections, blog rules, SE Ranking, AI credits' },
 ] as const;
@@ -277,6 +279,7 @@ export default function Dashboard() {
               {k === 'topics' && <TopicsTab />}
               {k === 'calendar' && <MonthRunning standalone />}
               {k === 'associates' && <AssociateTrainingTab />}
+              {k === 'learning' && <LearningTab />}
               {k === 'sitecontent' && <WebsiteContentTab />}
               {k === 'keywords' && <KeywordsTab />}
               {k === 'drafts' && <DraftsTab />}

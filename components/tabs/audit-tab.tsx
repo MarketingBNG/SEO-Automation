@@ -355,11 +355,11 @@ export default function AuditTab() {
     });
   const note = (id: any, message: any) => setAuditMessages((prev) => ({ ...prev, [id]: message }));
 
-  async function doRewrite(id: any) {
+  async function doRewrite(id: any, mode?: 'optimise') {
     markBusy(id, 'rewrite');
     note(id, null);
     try {
-      const res = await fetch(`/api/audit/${id}/rewrite`, { method: 'POST' });
+      const res = await fetch(`/api/audit/${id}/rewrite`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mode ? { mode } : {}) });
       const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}). Try again.` }));
       if (!res.ok) throw new Error(json.error);
       // Started in the background; the list polls until the rewrite is ready.
@@ -585,6 +585,12 @@ export default function AuditTab() {
 
             <Separator className="my-1" />
 
+            {open.changes_summary && (
+              <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-sm">
+                <strong>Uploaded before.</strong> Compared with the earlier upload of this piece: {open.changes_summary} {open.changes_summary.startsWith('Same') ? '' : 'The audit verified the changed sentences first.'}
+              </p>
+            )}
+
             {open.audit_status === 'running' ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Auditing this blog on the server (usually a few minutes). You can leave this page; the result appears here and in the header bar.</p>
             ) : open.audit_status === 'failed' ? (
@@ -599,15 +605,21 @@ export default function AuditTab() {
             ) : !open.rewrite_content_html ? (
               <div className="space-y-1">
                 {open.rewrite_error && <p className="text-sm text-destructive">The last rewrite failed: {open.rewrite_error}</p>}
-                <Button onClick={() => doRewrite(open.id)} disabled={Boolean(openBusy)}>
-                  {openBusy === 'rewrite' ? <Loader2 className="animate-spin" /> : <Wand2 />}
-                  {open.rewrite_error ? 'Try the rewrite again' : 'Rewrite to fix these issues'}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => doRewrite(open.id)} disabled={Boolean(openBusy)}>
+                    {openBusy === 'rewrite' ? <Loader2 className="animate-spin" /> : <Wand2 />}
+                    {open.rewrite_error ? 'Try the rewrite again' : 'Rewrite to fix these issues'}
+                  </Button>
+                  <Button variant="outline" onClick={() => doRewrite(open.id, 'optimise')} disabled={Boolean(openBusy)} title="Keeps the author's sentences and facts; adds only what SEO, AEO and GEO need (keyword, question headings with direct answers, FAQ, service links, call to action, meta description)">
+                    <Wand2 /> Optimise, keep my text
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Rewrite produces a complete new version. Optimise keeps your words and facts and adds what search and AI answers need; use it for a blog your team wrote.</p>
               </div>
             ) : (
               <div className="flex flex-col gap-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <strong>{open.rewrite_production_state === 'NEEDS_ATTENTION' ? 'Rewrite needs attention' : 'Rewrite ready for review'}</strong>
+                  <strong>{open.rewrite_production_state === 'NEEDS_ATTENTION' ? 'Rewrite needs attention' : 'Rewrite ready for review'}{open.mode === 'optimise' ? ' (optimised: your text kept, SEO, AEO and GEO added)' : ''}</strong>
                   {open.rewrite_status && (
                     <StatusBadge kind={rewriteBadgeClass(open.rewrite_status)}>{open.rewrite_status.replace(/_/g, ' ')}</StatusBadge>
                   )}

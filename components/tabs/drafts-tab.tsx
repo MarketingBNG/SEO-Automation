@@ -20,6 +20,7 @@ import { DataTable, FieldLabel, NativeSelect, TD, TD_MUTED } from '@/components/
 import { jobsChanged } from '@/components/shared/job-progress';
 import { OriginLabel } from '@/components/shared/origin-details';
 import { useRole } from '@/hooks/use-role';
+import DraftChanges from '@/components/shared/draft-changes';
 
 export { PeopleAlsoAskList };
 
@@ -170,6 +171,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
   const [meta, setMeta] = useState('');
   const [content, setContent] = useState('');
   const canPublishNow = useRole().can('blog.publish_now');
+  const canWork = useRole().can('content.work');
   // The saved version the Title / Meta / Content boxes started from. Save sends the hash of its words,
   // so a save never writes old text over a newer one (the issue fixer, Claude Code, another reviewer);
   // a new cover meanwhile is not a conflict.
@@ -183,6 +185,8 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [coverAlt, setCoverAlt] = useState('');
   const [wordNote, setWordNote] = useState('');
+  // The boxes hold a Word file not yet saved: the save is recorded as an upload, not an edit.
+  const [fromWord, setFromWord] = useState(false);
   const wordInput = useRef<HTMLInputElement>(null);
   // Publishing takes a while (images, cover, WordPress): a bar with the step and the time, then
   // what WordPress really holds (live or not, the address, the FAQ format), read back from it.
@@ -298,7 +302,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
       const res = await fetch(`/api/drafts/${draft.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, meta_description: meta, content_html: content, status, if_text_hash: baseRef.current?.text_hash }),
+        body: JSON.stringify({ title, meta_description: meta, content_html: content, status, if_text_hash: baseRef.current?.text_hash, change_source: fromWord ? 'word' : undefined }),
       });
       const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (res.status === 409) {
@@ -312,6 +316,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
       }
       if (!res.ok) throw new Error(json.error);
       baseRef.current = { updated_at: json.updated_at, text_hash: json.text_hash, ...sent };
+      setFromWord(false);
       onChange();
       // The server now holds what was sent, so keep the boxes (anything typed meanwhile stays).
       const fresh = await loadDraft(false);
@@ -349,11 +354,12 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
       setTitle(json.title || '');
       setMeta(json.meta_description || '');
       setContent(json.content_html || '');
+      setFromWord(true);
       if (json.cover_changed) {
         onChange();
         loadDraft(false);
       }
-      setWordNote(['Loaded from the Word file. Check the preview, then press Save changes (or Approve). Nothing is saved until you do.', ...(json.notes || [])].join(' '));
+      setWordNote(['Loaded from the Word file. Check the preview, then press Save changes (or Approve). Nothing is saved until you do.', json.changes ? `Compared with the saved blog: ${json.changes}` : 'The words are the same as the saved blog.', ...(json.notes || [])].join(' '));
     } catch (err: any) {
       setWordNote('Error: ' + err.message);
     } finally {
@@ -467,6 +473,8 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
         </div>
 
         <GoesLive draft={draft} onChanged={() => { onChange(); loadDraft(false); }} />
+
+        <DraftChanges draftId={draft.id} stamp={String(draft.updated_at || '')} canEdit={canWork} dirty={dirty} published={draft.status === 'published'} onChanged={() => { onChange(); loadDraft(true); }} />
 
         {draft.production_state === 'NEEDS_ATTENTION' && draft.validation_issues && (
           <>
