@@ -364,6 +364,7 @@ model blog_schedule {
   status           String  @default("planned")
   paused_from      String? // the status a paused blog goes back to when it is resumed
   paused_by        String?
+  pillar           String? // Visibility | Traction | Conversion: the pillar this blog serves
   review_started   String?
   reviewed_by      String?
   reviewed_at      String?
@@ -495,6 +496,7 @@ model topics {
   audit_id         Int?
   comparison       String? // JSON, for a manually written piece compared with the research
   relevance        String? // JSON {forUs, useful, verdict: write|maybe|skip, reason}
+  pillar           String? // Visibility | Traction | Conversion
   created_at       String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 
   @@index([day])

@@ -5,6 +5,7 @@
 // more move the person up a level (1 to 5): longer lessons, more and harder questions. Below that
 // they stay at their level.
 import prisma from './prisma';
+import { goalBlock } from './goal';
 import * as settings from './settings';
 import * as activity from './activity';
 import { callClaude } from './anthropic';
@@ -35,7 +36,9 @@ export type Question = { id: string; q: string; options: string[]; answer: numbe
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 const g = globalThis as unknown as { __trainingRun?: boolean };
 
-const SYSTEM = `You train new associates at USAIndiaCFO (usaindiacfo.com), a cross-border finance, tax and compliance firm serving Indian founders with US companies and NRIs. You write one short, accurate study lesson a day and the test questions on it. Use web search for the latest news, rule changes, laws and deadlines (IRS, CBDT, RBI, FEMA, MCA, SEC, state filings, GST, DTAA). Only state facts you can support; give the source URL for every news or rule item. Never invent figures, dates or rules. Keep it short: an associate reads it in a few minutes.`;
+const SYSTEM = `${goalBlock()}
+
+You train new associates at USAIndiaCFO (usaindiacfo.com), a cross-border finance, tax and compliance firm serving Indian founders with US companies and NRIs. You write one short, accurate study lesson a day and the test questions on it. Use web search for the latest news, rule changes, laws and deadlines (IRS, CBDT, RBI, FEMA, MCA, SEC, state filings, GST, DTAA). Only state facts you can support; give the source URL for every news or rule item. Never invent figures, dates or rules. Keep it short: an associate reads it in a few minutes.`;
 
 function cleanQuestions(list: any[], prefix: string, max: number): Question[] {
   return (Array.isArray(list) ? list : [])

@@ -7,6 +7,7 @@
 // From a topic a person can have the dashboard write a blog or a LinkedIn article, or upload their
 // own piece for an audit, a comparison with the research, and a finalized version.
 import prisma from './prisma';
+import { goalBlock, normalizePillar, type Pillar } from './goal';
 import * as settings from './settings';
 import * as activity from './activity';
 import { callClaude } from './anthropic';
@@ -24,12 +25,14 @@ export const istHour = (d = new Date()) => new Date(d.getTime() + 5.5 * 3600000)
 const g = globalThis as unknown as { __topicsRun?: boolean };
 
 export type Relevance = { forUs: string; useful: string; verdict: 'write' | 'maybe' | 'skip'; reason: string };
-export type Topic = { title: string; why: string; relevance: Relevance | null; keywords: string[]; sources: { title: string; url: string }[]; kind: 'news' | 'evergreen'; publishedAt: string | null };
+export type Topic = { title: string; why: string; relevance: Relevance | null; keywords: string[]; sources: { title: string; url: string }[]; kind: 'news' | 'evergreen'; pillar: Pillar | null; publishedAt: string | null };
 
 // News must be from the last day (a few hours of slack for time zones and late indexing).
 export const NEWS_MAX_AGE_HOURS = 30;
 
-const SYSTEM = `You are the content research lead for USAIndiaCFO (usaindiacfo.com), a cross-border finance, tax and compliance firm serving Indian founders with US companies and NRIs. Each morning you find (1) what happened in the LAST 24 HOURS that this firm should write about, and (2) evergreen topics that stay useful. News means: rule, law, deadline or policy changes, official notices, court rulings, budget or tax announcements, and business events from IRS, Treasury, CBDT, RBI, FEMA, MCA, SEBI, SEC, US states, GST Council, DTAA partners, US and Indian immigration for founders, plus anything that changes how Indian founders, NRIs or US-India businesses must act. Use web search and open the pages. Only report an item if the page shows it was published in the last 24 hours, and give that publish time. Never invent news, dates or URLs. If nothing relevant was published in the last 24 hours, return no news; never fill the list with older items.`;
+const SYSTEM = `${goalBlock()}
+
+You are the content research lead for USAIndiaCFO (usaindiacfo.com), a cross-border finance, tax and compliance firm serving Indian founders with US companies and NRIs. Each morning you find (1) what happened in the LAST 24 HOURS that this firm should write about, and (2) evergreen topics that stay useful. News means: rule, law, deadline or policy changes, official notices, court rulings, budget or tax announcements, and business events from IRS, Treasury, CBDT, RBI, FEMA, MCA, SEBI, SEC, US states, GST Council, DTAA partners, US and Indian immigration for founders, plus anything that changes how Indian founders, NRIs or US-India businesses must act. Use web search and open the pages. Only report an item if the page shows it was published in the last 24 hours, and give that publish time. Never invent news, dates or URLs. If nothing relevant was published in the last 24 hours, return no news; never fill the list with older items.`;
 
 // Why the topic matters to us and whether it is worth writing, for the person deciding.
 function cleanRelevance(r: any): Relevance | null {
@@ -51,6 +54,7 @@ function cleanTopic(t: any, kind: 'news' | 'evergreen'): Topic | null {
     keywords: (Array.isArray(t.keywords) ? t.keywords : String(t.keywords || '').split(',')).map((k: any) => String(k).trim()).filter(Boolean).slice(0, 8),
     sources,
     kind,
+    pillar: normalizePillar(t.pillar),
     publishedAt: Number.isFinite(at) ? new Date(at).toISOString() : null,
   };
 }
@@ -99,15 +103,15 @@ Topics given on earlier days (never repeat them): ${earlier.map((t) => t.title).
 1. Search the web for news published in the last 24 hours that matters to our company, our services, our clients or our niche. Up to 6 items, each with the page URL and its publish time.
 2. Give 3 evergreen topics from the strategy keywords or our services that are not on the site yet.
 Return ONLY JSON between ===JSON=== and ===END===:
-{"news":[{"title":"...","why":"what happened and why our clients care, one or two sentences","keywords":["primary","secondary"],"sources":[{"title":"...","url":"https://..."}],"publishedAt":"2026-01-31T09:00:00Z","relevance":{"forUs":"which of our services or client groups this touches and how, one or two sentences","useful":"what a reader can do with it: a deadline, a filing, a cost, a risk to plan for","verdict":"write|maybe|skip","reason":"one line: why write it now, or why it is weak (too niche, not our service, already covered, no action for clients)"}}],
- "evergreen":[{"title":"...","why":"why it stays useful for our clients","keywords":["primary","secondary"],"sources":[],"relevance":{"forUs":"which of our services or client groups this touches and how, one or two sentences","useful":"what a reader can do with it: a deadline, a filing, a cost, a risk to plan for","verdict":"write|maybe|skip","reason":"one line: why write it now, or why it is weak (too niche, not our service, already covered, no action for clients)"}}]}
-For every item fill "relevance" honestly: "write" only when it touches a service we sell and gives clients something to act on; "skip" when it is only loosely related. Inside string values never use a double quote. If no news qualifies, return "news":[].`;
+{"news":[{"title":"...","why":"what happened and why our clients care, one or two sentences","keywords":["primary","secondary"],"pillar":"Visibility|Traction|Conversion","sources":[{"title":"...","url":"https://..."}],"publishedAt":"2026-01-31T09:00:00Z","relevance":{"forUs":"which of our services or client groups this touches and how, one or two sentences","useful":"what a reader can do with it: a deadline, a filing, a cost, a risk to plan for","verdict":"write|maybe|skip","reason":"one line: why write it now, or why it is weak (too niche, not our service, already covered, no action for clients)"}}],
+ "evergreen":[{"title":"...","why":"why it stays useful for our clients","keywords":["primary","secondary"],"pillar":"Visibility|Traction|Conversion","sources":[],"relevance":{"forUs":"which of our services or client groups this touches and how, one or two sentences","useful":"what a reader can do with it: a deadline, a filing, a cost, a risk to plan for","verdict":"write|maybe|skip","reason":"one line: why write it now, or why it is weak (too niche, not our service, already covered, no action for clients)"}}]}
+For every item set "pillar" to the one pillar it mainly serves. For every item fill "relevance" honestly: "write" only when it touches a service we sell and gives clients something to act on; "skip" when it is only loosely related. Inside string values never use a double quote. If no news qualifies, return "news":[].`;
     const { text } = (await callClaude(SYSTEM, [{ role: 'user', content: prompt }], undefined, { maxUses: Number(process.env.TOPICS_SEARCHES || 15), effort: 'high', feature: 'other' })) as { text: string };
     const topics = parseTopics(text, now);
     // A fresh run replaces today's topics nobody has started on.
     await prisma.topics.deleteMany({ where: { day, status: 'new' } });
     const saved: any[] = [];
-    for (const t of topics) saved.push(await prisma.topics.create({ data: { day, title: t.title, why: t.why, keywords: JSON.stringify(t.keywords), sources: JSON.stringify(t.sources), relevance: t.relevance ? JSON.stringify(t.relevance) : null, kind: t.kind, published_at: t.publishedAt } }));
+    for (const t of topics) saved.push(await prisma.topics.create({ data: { day, title: t.title, why: t.why, keywords: JSON.stringify(t.keywords), sources: JSON.stringify(t.sources), relevance: t.relevance ? JSON.stringify(t.relevance) : null, kind: t.kind, pillar: t.pillar, published_at: t.publishedAt } }));
     const news = saved.filter((t) => t.kind === 'news').length;
     const note = news ? null : 'No news from the last 24 hours fits our company, services or clients.';
     await settings.set('topics_last_run', JSON.stringify({ at: new Date().toISOString(), day, count: saved.length, news, note }));

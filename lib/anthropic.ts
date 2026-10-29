@@ -1,6 +1,7 @@
 // @ts-nocheck -- PORT NOTE: ported 1:1 from untyped JS; type checking disabled for this file only (logic unchanged).
 import * as settings from './settings';
 import prisma from './prisma';
+import { goalBlock } from './goal';
 import { rethrowFriendly } from './apiErrors';
 import { anthropicClient, clientKeyKind, secondaryKeyConfigured, switchedToSecondary } from './anthropicClient';
 import { replayScope, requestHash, savedStep, saveStep, frozenInput, runToday } from './aiReplay';
@@ -96,11 +97,12 @@ them only for the general question/pain point, never the individual case:\n` +
   const strategyReference = activePlan
     ? `\n\nCURRENT APPROVED SEO / AEO / GEO STRATEGY (${activeStrategy.period}): ${activePlan.coreObjective?.motive || ''}
 Focus this month: ${activePlan.summary?.focus || ''}
+Pillars this month: ${Object.entries(activePlan.summary?.pillars || {}).map(([k, v]) => `${k}: ${v}`).join(' | ') || 'not set'}
 Every article must help USAIndiaCFO, its landing pages and service pages rank at the top in Google and
 Bing (SEO), win snippets, People Also Ask and AI Overviews (AEO), and be cited by ChatGPT, Perplexity and
 Gemini (GEO): direct 40-60 word answers under each question heading, a real FAQ, citable specific facts,
 and links to the relevant service page.
-Planned topics: ${(activePlan.blogPlan?.calendar || []).map((b) => `${b.title} [${(b.tags || []).join('/')}]`).join('; ')}`
+Planned topics: ${(activePlan.blogPlan?.calendar || []).map((b) => `${b.title} [${(b.tags || []).join('/')}${b.pillar ? `, ${b.pillar}` : ''}]`).join('; ')}`
     : '';
 
   const playbook = getWriterPlaybook();
@@ -120,7 +122,9 @@ HOW THE PLAYBOOK MAPS TO THIS DASHBOARD (these override the playbook where they 
 - Placeholders such as [PRACTITIONER NOTE NEEDED] and [VISUAL SUGGESTION: ...] are allowed; the reviewer replaces them and publishing is blocked until they do. NEVER write notes to us inside the article ("Here is your...", "CTA section", "Meta description:", "I hope this helps"): a check blocks any draft that has them.`
     : '';
 
-  return `You are the USAIndiaCFO blog writer. USAIndiaCFO is a Virtual CFO firm serving the USA
+  return `${goalBlock()}
+
+You are the USAIndiaCFO blog writer. USAIndiaCFO is a Virtual CFO firm serving the USA
 and India: cross-border tax, compliance, entity setup, GST/ROC, US GAAP, FEMA/RBI, fundraising,
 and family office / HNI wealth work. Blog readers include founders, SMEs, HNIs, family offices,
 and finance peers (CAs, CPAs) - some of them will notice a wrong number or a misquoted statute, so

@@ -4,6 +4,7 @@
 import prisma from '../prisma';
 import * as activity from '../activity';
 import * as settings from '../settings';
+import { goalBlock, normalizePillar } from '../goal';
 import { callClaude } from '../anthropic';
 import { gatherStrategyInputs, keywordData } from './inputs';
 import {
@@ -21,13 +22,18 @@ function systemPrompt(siteUrl: string) {
 cross-border individuals and businesses (US and India tax, FEMA/RBI, entity setup, US GAAP, GST/ROC,
 fundraising, family office). The site sits in a YMYL finance niche.
 
-THE ONLY GOAL: ${CORE_OBJECTIVE.motive}
+${goalBlock()}
+
+The channels that carry the pillars:
 - SEO: ${CORE_OBJECTIVE.channels[0].meaning}
 - AEO: ${CORE_OBJECTIVE.channels[1].meaning}
 - GEO: ${CORE_OBJECTIVE.channels[2].meaning}
-All three get real focus every month. The company name, the landing pages and the service pages must
-win the top results for every related search: brand searches, service searches, and the questions
-buyers ask. Organic leads are a signal only, never a goal.
+All three channels and all three pillars get real focus every month. The company name, the landing
+pages and the service pages must win the top results for every related search: brand searches,
+service searches, and the questions buyers ask. Build the month around the pillars: about 40% of blogs
+mainly for Visibility, 30% for Traction and 30% for Conversion (buyer-intent topics that name a
+service, comparisons, costs, "how to choose", with a clear path to the service page). Organic leads
+and clients from Zoho CRM measure Conversion; use them when the data has them.
 
 RESEARCH LIKE IT MATTERS. Credits are not a constraint. Use web search extensively:
 - Who ranks in the top 10 for each candidate topic in the US and India, what their pages cover, how
@@ -43,7 +49,8 @@ DATA RULES (strict):
 - Use ONLY numbers from the JSON you are given. Never invent volumes, positions, clicks or counts.
   Code fills all metric columns from the data after you answer; you choose topics and set targets.
 - If a number you need is missing, write "DATA MISSING: <metric>" in your text.
-- Every item you output must carry "tags": one or more of "SEO", "AEO", "GEO".
+- Every item you output must carry "tags": one or more of "SEO", "AEO", "GEO", and every keyword and
+  calendar blog must carry "pillar": exactly one of "Visibility", "Traction", "Conversion".
 - Targets must be strictly higher than last month's actual for every channel KPI that has a number.
 - If a channel's lastMonthTrend is zero or negative, that channel gets top priority: at least 40% of
   blogs and 40% of tasks tagged with it, and summary.declineNotes.<channel> explains why it fell
@@ -62,12 +69,12 @@ DATA RULES (strict):
 
 Return ONLY JSON between ===JSON=== and ===END=== with this shape:
 {
- "summary": { "focus": "one line", "strategyType": "e.g. Recovery | Growth | Authority | Defend and expand",
+ "summary": { "focus": "one line", "pillars": { "Visibility": "this month's aim and how", "Traction": "...", "Conversion": "..." }, "strategyType": "e.g. Recovery | Growth | Authority | Defend and expand",
    "whyThisType": "based on last month's report numbers", "declineNotes": { "SEO|AEO|GEO": { "whyFell": "", "howFixed": "" } } },
  "included": [ { "item": "", "tags": ["SEO"] } ],
  "keywords": [ { "keyword": "", "intent": "informational|commercial|comparison", "serpFeature": "featured snippet|PAA|AI Overview|local pack|none",
-   "tags": [], "businessValue": 0, "blogTitle": "", "newOrRefresh": "new|refresh", "refreshUrl": "", "focusService": "", "cluster": "" } ],
- "blogPlan": { "postingDays": ["Tue","Thu"], "calendar": [ { "title": "", "mainKeyword": "", "cluster": "", "tags": [], "focusService": "", "refreshUrl": "" } ] },
+   "tags": [], "pillar": "Visibility|Traction|Conversion", "businessValue": 0, "blogTitle": "", "newOrRefresh": "new|refresh", "refreshUrl": "", "focusService": "", "cluster": "" } ],
+ "blogPlan": { "postingDays": ["Tue","Thu"], "calendar": [ { "title": "", "mainKeyword": "", "cluster": "", "tags": [], "pillar": "Visibility|Traction|Conversion", "focusService": "", "refreshUrl": "" } ] },
  "aeoGeo": { "items": [ { "type": "featured snippet|PAA|AI Overview|AI chat citation", "target": "query or topic", "page": "url or planned blog title",
    "directAnswerBlock": true, "faqSchema": true, "comparisonTable": false, "tags": [] } ] },
  "backlinks": [ { "targetSite": "", "method": "", "ourPage": "", "tags": [] } ],
@@ -165,6 +172,7 @@ export async function buildPlan(ai, inputs, period, window = windowOf(period)) {
       currentPosition: metric(r?.position > 0 ? r.position : null, 'SE Ranking', r?.date || inputs.gatheredAt, 'current position'),
       serpFeature: k.serpFeature,
       tags: TAGS(k.tags),
+      pillar: normalizePillar(k.pillar),
       businessValue: Math.max(0, Math.min(5, Number(k.businessValue) || 0)),
       blogTitle: k.blogTitle,
       newOrRefresh: k.newOrRefresh === 'refresh' ? 'refresh' : 'new',
@@ -195,6 +203,7 @@ export async function buildPlan(ai, inputs, period, window = windowOf(period)) {
     mainKeyword: b.mainKeyword,
     cluster: b.cluster || '',
     tags: TAGS(b.tags),
+    pillar: normalizePillar(b.pillar),
     focusService: b.focusService || '',
     refreshUrl: b.refreshUrl || '',
     reviewDeadline: slots[i],
@@ -259,6 +268,7 @@ export async function buildPlan(ai, inputs, period, window = windowOf(period)) {
     summary: {
       month: period,
       focus: ai.summary?.focus || '',
+      pillars: ai.summary?.pillars && typeof ai.summary.pillars === 'object' ? ai.summary.pillars : {},
       strategyType: ai.summary?.strategyType || '',
       whyThisType: ai.summary?.whyThisType || '',
       declineNotes: ai.summary?.declineNotes || {},

@@ -4,11 +4,12 @@
 // Every item links straight to the place where it is handled.
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, CalendarClock, CheckCircle2, Download, FileText, KeyRound, Lightbulb, Loader2, Settings, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CheckCircle2, Download, FileText, KeyRound, Lightbulb, Loader2, Settings, Target, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useRole } from '@/hooks/use-role';
 import BlogMoveControls from '@/components/shared/blog-move-controls';
+import { GOAL, PILLARS } from '@/lib/goal';
 
 const fmtDate = (s?: string | null) => (s ? new Date(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z')).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST' : '');
 
@@ -158,6 +159,23 @@ export default function HomeTab() {
         {canWork && <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href="/?tab=drafts"><FileText />Drafts &amp; Review</Link>}
         {who.can('settings.change') && <Link className={buttonVariants({ variant: 'outline', size: 'sm' })} href="/?tab=settings"><Settings />Settings</Link>}
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Target className="size-4" />The goal</CardTitle>
+          <CardDescription>{GOAL}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 text-sm sm:grid-cols-3">
+            {PILLARS.map((p) => (
+              <div key={p.key} className="rounded-lg border p-3">
+                <div className="font-semibold">{p.key}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{p.meaning}</div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       {data.attention?.length > 0 && (
         <Card className="border-amber-500/40">

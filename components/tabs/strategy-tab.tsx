@@ -11,6 +11,7 @@ import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
 import { useManualTasks, ManualTasksBanner, ManualTaskList } from '@/components/shared/manual-tasks';
 import { useRole } from '@/hooks/use-role';
 import BlogMoveControls from '@/components/shared/blog-move-controls';
+import { PILLARS, PILLAR_KEYS } from '@/lib/goal';
 import { cn } from 'cn';
 import Link from 'next/link';
 import { jobsChanged } from '@/components/shared/job-progress';
@@ -18,7 +19,7 @@ import { jobsChanged } from '@/components/shared/job-progress';
 // Strategy section (v2): one monthly SEO / AEO / GEO strategy in 11 fixed sections, one approval,
 // then the month runs automatically. All UI text avoids em dashes by design.
 
-type Col = { key: string; label: string; edit?: 'text' | 'number' | 'tags' | 'check'; render?: (row: any) => ReactNode };
+type Col = { key: string; label: string; edit?: 'text' | 'number' | 'tags' | 'check' | 'select'; options?: string[]; render?: (row: any) => ReactNode };
 
 const CHANNELS = ['SEO', 'AEO', 'GEO'];
 
@@ -125,6 +126,11 @@ function EditTable({ rows: rowsIn, cols, editing, onChange, empty }: { rows: any
                     </label>
                   ))}
                 </span>
+              ) : editing && c.edit === 'select' ? (
+                <select className="h-7 rounded-md border bg-background px-1 text-xs" value={r[c.key] ?? ''} onChange={(e) => set(i, c.key, e.target.value || null)}>
+                  <option value="">Pick one</option>
+                  {(c.options || []).map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
               ) : editing && c.edit ? (
                 <Input
                   className="h-7 min-w-24"
@@ -478,6 +484,15 @@ export function StrategyView({ s, onChanged, active = true }: { s: any; onChange
               {editing ? <Textarea value={p.summary[k] || ''} onChange={(e) => upd('summary', { ...p.summary, [k]: e.target.value })} /> : p.summary[k]}
             </div>
           ))}
+          <div className="rounded-lg border p-2 sm:col-span-2">
+            <div className="font-semibold">The three pillars this month</div>
+            {PILLARS.map((pl) => (
+              <div key={pl.key} className="mt-1">
+                <span className="text-muted-foreground">{pl.key}: </span>
+                {editing ? <Textarea value={p.summary.pillars?.[pl.key] || ''} onChange={(e) => upd('summary', { ...p.summary, pillars: { ...(p.summary.pillars || {}), [pl.key]: e.target.value } })} /> : p.summary.pillars?.[pl.key] || <span className="text-muted-foreground">not set in this plan</span>}
+              </div>
+            ))}
+          </div>
           {Object.entries(p.summary.declineNotes || {}).map(([c, n]: any) => (
             <div key={c} className="rounded-lg border p-2 sm:col-span-2">
               <div className="font-semibold">{c} fell last month</div>
@@ -510,6 +525,7 @@ export function StrategyView({ s, onChanged, active = true }: { s: any; onChange
             { key: 'currentPosition', label: 'Current position', render: (r) => <M m={r.currentPosition} /> },
             { key: 'serpFeature', label: 'SERP feature to win', edit: 'text' },
             { key: 'tags', label: 'Tag', edit: 'tags' },
+            { key: 'pillar', label: 'Pillar', edit: 'select', options: [...PILLAR_KEYS] },
             { key: 'businessValue', label: 'Business value', edit: 'number' },
             { key: 'score', label: 'Score' },
             { key: 'blogTitle', label: 'Blog title', edit: 'text' },
@@ -530,6 +546,7 @@ export function StrategyView({ s, onChanged, active = true }: { s: any; onChange
             { key: 'mainKeyword', label: 'Main keyword', edit: 'text' },
             { key: 'cluster', label: 'Cluster', edit: 'text' },
             { key: 'tags', label: 'Tag', edit: 'tags' },
+            { key: 'pillar', label: 'Pillar', edit: 'select', options: [...PILLAR_KEYS] },
             { key: 'reviewDeadline', label: 'Review deadline', render: (r) => fmtDate(r.reviewDeadline) },
             { key: 'status', label: 'Status' },
           ]}
@@ -778,6 +795,7 @@ export function MonthRunning({ standalone = false }: { standalone?: boolean } = 
                     {r.wp_post_url ? <a className="underline" href={r.wp_post_url} target="_blank" rel="noreferrer">{r.title}</a> : r.title}
                     {r.author && <div className="text-xs text-muted-foreground">By {r.author}{r.expert_reviewer ? `, reviewed by ${r.expert_reviewer}` : ''}</div>}
                     {r.cta && <div className="text-xs text-muted-foreground">Call to action: {r.cta.service}</div>}
+                    {r.pillar && <div className="text-xs text-muted-foreground">Pillar: {r.pillar}</div>}
                     {r.draft_id && (
                       <div className="flex flex-wrap gap-x-3 text-xs">
                         {seesDrafts && <Link className="text-primary underline" href={`/?tab=drafts&draft=${r.draft_id}`}>Open the draft</Link>}
