@@ -4,6 +4,9 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-10-29
+- (seo) One goal for the whole dashboard: grow client conversions through blogs, SEO, AEO and GEO, built on three pillars, Visibility, Traction and Conversion (lib/goal.ts). The strategy plans each keyword and blog under a pillar (about 40/30/30) and states each pillar's aim for the month; the writer, LinkedIn articles, Topics, Associate Training and the Assistant all start from the goal. Home shows the goal; Monthly Strategy, Blog Calendar and Topics show the pillar.
+
 ## 2026-10-28
 - (ops) Security audit: Settings can no longer change role access, Testing/Live mode or credit switches (a tester could make itself admin that way); cron routes (daily, weekly, sweep, skill and strategy auto-checks) need the cron secret; meeting transcripts, client insights, account connections, paid live lookups and connection tests are limited to the right roles; private assistant files stay private; 'Check a blog' and site checks no longer fetch private network addresses; audit rewrite and lesson HTML are sanitised.
 - (ops) Testing mode and Pause now hold everywhere: calendar blogs, fact checks, topics, training, outreach, covers, reports and the skill refresh wait instead of failing, and pick up from their saved steps when work can run again; tests always run in Live mode and never hang on the queue.

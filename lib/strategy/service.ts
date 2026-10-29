@@ -176,7 +176,7 @@ async function syncCalendar(tx, id, period, calendar) {
       update: {},
     });
     await tx.blog_schedule.create({
-      data: { strategy_id: id, publish_at: b.publishDate, title: b.title, main_keyword: b.mainKeyword, cluster: b.cluster || null, tags: JSON.stringify(b.tags || []), refresh_url: b.refreshUrl || null },
+      data: { strategy_id: id, publish_at: b.publishDate, title: b.title, main_keyword: b.mainKeyword, cluster: b.cluster || null, tags: JSON.stringify(b.tags || []), pillar: b.pillar || null, refresh_url: b.refreshUrl || null },
     });
   }
 }
@@ -237,7 +237,7 @@ export async function approveStrategy(id: number, approver: string) {
         moved.add(key);
         await tx.blog_schedule.update({
           where: { id: match.id },
-          data: { strategy_id: id, publish_at: b.publishDate, title: b.title, cluster: b.cluster || null, tags: JSON.stringify(b.tags || []), refresh_url: b.refreshUrl || null, updated_at: now },
+          data: { strategy_id: id, publish_at: b.publishDate, title: b.title, cluster: b.cluster || null, tags: JSON.stringify(b.tags || []), pillar: b.pillar || null, refresh_url: b.refreshUrl || null, updated_at: now },
         });
       }
       await stopReplacedRows(tx, oldIds, `Its strategy was replaced by the newly approved ${row.period} version ${row.version}, so the autopilot no longer publishes it. To keep it, publish its draft from Drafts & Review.`, now);

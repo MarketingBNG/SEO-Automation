@@ -1,19 +1,25 @@
 // Strategy v2: the pure rules of the monthly SEO / AEO / GEO strategy. No database or network
 // calls here, so every rule is unit tested (tests/strategy.test.ts) and shared by the server
 // routes, the cron jobs and the UI.
+import { PILLAR_KEYS } from '../goal';
 
 export const CHANNELS = ['SEO', 'AEO', 'GEO'] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 // Shown at the top of every strategy. Hardcoded on purpose: the AI cannot change it.
 export const CORE_OBJECTIVE = {
-  motive: "Grow the website's visibility and rankings across SEO, AEO and GEO.",
+  motive: 'Grow client conversions through blogs, SEO, AEO and GEO, by building three pillars together: Visibility, Traction and Conversion.',
+  pillars: [
+    { pillar: 'Visibility', meaning: 'Be found in Google, Bing, AI Overviews and AI chat answers for every search our buyers make.' },
+    { pillar: 'Traction', meaning: 'Be read, trusted and come back to: engagement, returning visitors, links, shares and brand searches.' },
+    { pillar: 'Conversion', meaning: 'Turn readers into enquiries and paying clients through the right service page and call to action.' },
+  ],
   channels: [
     { channel: 'SEO', meaning: 'Higher rankings in normal Google and Bing results.' },
     { channel: 'AEO', meaning: 'Featured snippets, People Also Ask, Google AI Overviews and voice answers.' },
     { channel: 'GEO', meaning: 'Mentions and citations in AI chat answers (ChatGPT, Perplexity, Gemini).' },
   ],
-  signalNote: 'Organic leads from Zoho CRM are shown as a signal only, never as a goal.',
+  signalNote: 'Organic leads and clients from Zoho CRM measure the Conversion pillar.',
 };
 
 export const SECTION_ORDER = [
@@ -163,8 +169,10 @@ export function validatePlan(
   }
 
   // 4. Keywords: one main keyword per blog, never repeated within the plan or across months.
+  // Each blog also names the pillar it serves (Visibility, Traction or Conversion).
   const seen = new Set<string>();
   for (const b of blogs) {
+    if (!(PILLAR_KEYS as string[]).includes(b.pillar)) warnings.push(`Blog "${b.title}" names no pillar (Visibility, Traction or Conversion).`);
     const k = keywordKey(b.mainKeyword);
     if (!k) { errors.push(`Blog "${b.title}" has no main keyword.`); continue; }
     const twin = [...seen].find((s) => sameTopic(s, k));

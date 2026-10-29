@@ -73,7 +73,7 @@ async function writeDraft(row, extraNotes = '', write = researchAndWriteBlog, bu
   // cover and the live post all show the same name.
   const draftAuthor = row.author || (row.refresh_url ? null : pickAuthor(await authorNames()));
   const kw = await prisma.keywords.create({
-    data: { batch_name: `Strategy #${row.strategy_id}`, keyword: row.main_keyword, notes: `Planned title: ${row.title}. Channels: ${JSON.parse(row.tags).join(', ')}.${row.refresh_url ? ` Refresh of ${row.refresh_url}.` : ''}${extraNotes ? `\n\n${extraNotes}` : ''}`, status: 'generating' },
+    data: { batch_name: `Strategy #${row.strategy_id}`, keyword: row.main_keyword, notes: `Planned title: ${row.title}. Channels: ${JSON.parse(row.tags).join(', ')}.${row.pillar ? ` Pillar this blog serves: ${row.pillar}.` : ''}${row.refresh_url ? ` Refresh of ${row.refresh_url}.` : ''}${extraNotes ? `\n\n${extraNotes}` : ''}`, status: 'generating' },
   });
   const writer = progressWriter((stage, percent) => prisma.keywords.update({ where: { id: kw.id }, data: { progress_stage: stage, progress_percent: percent } }));
   // The step details reach the job timer too, so the header's time-left estimate is per step here

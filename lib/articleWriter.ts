@@ -2,6 +2,7 @@
 // [VISUAL SUGGESTION] spots where a picture or chart belongs (newspaper style, two or three per
 // piece), saved as a draft of kind "article" so it gets the same review, images and Word download.
 import prisma from './prisma';
+import { goalBlock } from './goal';
 import * as settings from './settings';
 import * as activity from './activity';
 import { callClaude } from './anthropic';
@@ -15,8 +16,10 @@ export async function writeArticle({ topic, keywordId }: { topic: any; keywordId
     const voice = await settings.get('voice_guidelines');
     const kws: string[] = JSON.parse(topic.keywords || '[]');
     const sources = JSON.parse(topic.sources || '[]');
-    const system = `You write LinkedIn articles for the partners of USAIndiaCFO, a cross-border finance, tax and compliance firm for Indian founders with US companies and NRIs. Voice: ${voice}. A LinkedIn article is 900 to 1,400 words: a first line that states the change or the point plainly (no questions, no "In today's world"), short paragraphs, concrete numbers with their source, one clear takeaway per section, a closing line that invites comments with a specific question. Use web search to verify every figure, date and rule against a primary source; never invent. Mark two or three places for a picture or chart with a line of its own: [VISUAL SUGGESTION: what the picture or chart should show]. End with a "Sources" list of the URLs used. No em dashes. No AI filler.`;
-    const prompt = `Topic: ${topic.title}\nWhy now: ${topic.why}\nKeywords to work in naturally: ${kws.join(', ')}\nStarting sources: ${sources.map((s: any) => `${s.title} ${s.url}`).join(' | ') || 'find them'}\n\nReturn exactly:\n===TITLE===\n<headline, under 90 characters>\n===META===\n<one-line summary for the post that shares the article, under 200 characters>\n===CONTENT===\n<the article as HTML: <h2> sections, <p> paragraphs, <ul> lists where they help, the [VISUAL SUGGESTION: ...] lines inside <p> tags, a final <h2>Sources</h2> with <ul> links>\n===END===`;
+    const system = `${goalBlock()}
+
+You write LinkedIn articles for the partners of USAIndiaCFO, a cross-border finance, tax and compliance firm for Indian founders with US companies and NRIs. Voice: ${voice}. A LinkedIn article is 900 to 1,400 words: a first line that states the change or the point plainly (no questions, no "In today's world"), short paragraphs, concrete numbers with their source, one clear takeaway per section, a closing line that invites comments with a specific question. Use web search to verify every figure, date and rule against a primary source; never invent. Mark two or three places for a picture or chart with a line of its own: [VISUAL SUGGESTION: what the picture or chart should show]. End with a "Sources" list of the URLs used. No em dashes. No AI filler.`;
+    const prompt = `Topic: ${topic.title}\nWhy now: ${topic.why}\n${topic.pillar ? `Pillar this article serves: ${topic.pillar}\n` : ''}Keywords to work in naturally: ${kws.join(', ')}\nStarting sources: ${sources.map((s: any) => `${s.title} ${s.url}`).join(' | ') || 'find them'}\n\nReturn exactly:\n===TITLE===\n<headline, under 90 characters>\n===META===\n<one-line summary for the post that shares the article, under 200 characters>\n===CONTENT===\n<the article as HTML: <h2> sections, <p> paragraphs, <ul> lists where they help, the [VISUAL SUGGESTION: ...] lines inside <p> tags, a final <h2>Sources</h2> with <ul> links>\n===END===`;
     const { text } = (await callClaude(system, [{ role: 'user', content: prompt }], undefined, { maxUses: Number(process.env.ARTICLE_SEARCHES || 8), effort: 'high', feature: 'blog' })) as { text: string };
     const get = (a: string, b: string) => {
       const i = text.indexOf(a);
