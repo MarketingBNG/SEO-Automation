@@ -78,6 +78,10 @@ async function tick() {
   const { trainingTick } = await import('./associateTraining');
   await trainingTick(now).catch((e: any) => console.error('Scheduler: training failed:', e.message));
 
+  // The team's edits and uploads become writer lessons once a day, when there are new ones.
+  const { changeLessonsTick } = await import('./learnFromChanges');
+  await changeLessonsTick(today).catch((e: any) => console.error('Scheduler: edit lessons failed:', e.message));
+
   if (now.getUTCDay() === 1 && (await settings.get('last_weekly_run')) !== today) {
     const r: any = await runWeekly(now).catch((e) => ({ error: e.message }));
     if (!r?.error && !r?.skipped) await settings.set('last_weekly_run', today);

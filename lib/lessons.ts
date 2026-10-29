@@ -23,6 +23,7 @@ export async function gatherEvidence(days = 60) {
     .map((f) => `"${f.title}": ${f.ok ? 'verified' : 'NOT verified'} after ${f.rounds} round(s), ${(f.log || []).reduce((n, l) => n + (l.wrong || 0), 0)} claim(s) corrected`);
   const drafts = await prisma.drafts.findMany({ where: { created_at: { gte: since } }, select: { title: true, validation_issues: true, repair_attempts: true } });
   const repairs = drafts.filter((d) => d.repair_attempts > 0).map((d) => `"${d.title}": ${JSON.parse(d.validation_issues || '[]').slice(0, 4).join(' | ') || `${d.repair_attempts} repair round(s)`}`);
+  const edits = (await prisma.content_changes.findMany({ where: { created_at: { gte: since }, kind: { in: ['edit', 'upload', 'reupload', 'restore'] }, changed_pct: { gte: 2 } }, orderBy: { id: 'desc' }, take: 60, select: { title: true, kind: true, actor: true, summary: true } }).catch(() => [])).map((c) => `[${c.kind} by ${c.actor || 'someone'}] "${c.title || ''}": ${c.summary}`);
   const guides = await prisma.activity_log.findMany({ where: { created_at: { gte: since }, action: { in: ['strategy.manual_guide_regenerated'] } }, select: { details: true } }).catch(() => []);
 
   // Results: clicks, impressions and position of each published post over the last 28 days.
@@ -43,13 +44,13 @@ export async function gatherEvidence(days = 60) {
   } catch (e) {
     results = [`Search Console unavailable: ${e.message}`];
   }
-  return { rejections, holds, factChecks, repairs, guides: guides.map((g) => g.details), results };
+  return { rejections, holds, factChecks, repairs, guides: guides.map((g) => g.details), results, edits };
 }
 
 export async function learnLessons({ write = callClaude } = {}) {
   return timed('lessons', 'lessons', 'Learning from reviews and results', async () => {
     const e = await gatherEvidence();
-    const total = e.rejections.length + e.holds.length + e.repairs.length + e.results.length + e.factChecks.length;
+    const total = e.rejections.length + e.holds.length + e.repairs.length + e.results.length + e.factChecks.length + e.edits.length;
     if (!total) return { skipped: 'Nothing new to learn from yet' };
     const previous = String((await settings.get('writer_lessons')) || '');
     const { text } = await write(
@@ -57,7 +58,7 @@ export async function learnLessons({ write = callClaude } = {}) {
       [
         {
           role: 'user',
-          content: `Earlier lessons:\n${previous || '(none)'}\n\nReviewer rejections:\n${e.rejections.join('\n') || '(none)'}\n\nBlogs held by the checks:\n${e.holds.join('\n') || '(none)'}\n\nWriter repair issues:\n${e.repairs.join('\n') || '(none)'}\n\nFact checks:\n${e.factChecks.join('\n') || '(none)'}\n\nResults of published posts (last 28 days):\n${e.results.join('\n') || '(none)'}`.slice(0, 60000),
+          content: `Earlier lessons:\n${previous || '(none)'}\n\nReviewer rejections:\n${e.rejections.join('\n') || '(none)'}\n\nBlogs held by the checks:\n${e.holds.join('\n') || '(none)'}\n\nWriter repair issues:\n${e.repairs.join('\n') || '(none)'}\n\nFact checks:\n${e.factChecks.join('\n') || '(none)'}\n\nResults of published posts (last 28 days):\n${e.results.join('\n') || '(none)'}\n\nWhat the team changed in drafts by hand (edits and uploads):\n${e.edits.join('\n') || '(none)'}`.slice(0, 60000),
         },
       ],
       undefined,

@@ -13,6 +13,7 @@ import { DRAFT_TOKEN_ACTOR, hasDraftToken } from '@/lib/draftToken';
 import { authorNames, pickAuthor } from '@/lib/authors';
 import { requeueAfterDelete } from '@/lib/draftDelete';
 import { linkLiveTopic } from '@/lib/topics';
+import { recordChange } from '@/lib/contentChanges';
 
 export const runtime = 'nodejs';
 
@@ -57,7 +58,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
 export async function PATCH(req: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const nid = toId(id);
-  const { title, meta_description, content_html, status, cover_alt, author, if_updated_at, if_text_hash }: any = (await req.json().catch(() => ({}))) || {};
+  const { title, meta_description, content_html, status, cover_alt, author, if_updated_at, if_text_hash, change_source }: any = (await req.json().catch(() => ({}))) || {};
   const existing = await prisma.drafts.findUnique({ where: { id: nid } });
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   // Claude Code edits words only; approving, rejecting and publishing stay with a signed-in person.
@@ -116,6 +117,14 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   const { count } = await prisma.drafts.updateMany({ where: { id: nid, ...guard }, data });
   if (!count) return NextResponse.json(changedMeanwhile, { status: 409 });
   const updated: any = await prisma.drafts.findUnique({ where: { id: nid } });
+  // What changed in the words, how much and by whom: shown on the draft and learned from daily.
+  if (title != null || meta_description != null || content_html != null) {
+    await recordChange({
+      entityType: 'draft', entityId: nid, kind: change_source === 'word' ? 'upload' : 'edit', actor: viaToken ? DRAFT_TOKEN_ACTOR : await getActor(), title: updated.title,
+      before: { title: existing.title, meta: existing.meta_description, html: existing.content_html || '' },
+      after: { title: updated.title, meta: updated.meta_description, html: updated.content_html || '' },
+    }).catch(() => null);
+  }
   // A person's edit (dashboard or Claude Code) does not start the paid fact check again by itself.
   if (title != null || meta_description != null || content_html != null) await markEditedAsChecked(nid, viaToken ? 'Claude Code' : await getActor(), { before: { textHash: wordsHash(existing), stamp: existing.updated_at } });
 

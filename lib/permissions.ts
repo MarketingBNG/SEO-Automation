@@ -76,7 +76,7 @@ export const PAGES: { key: string; label: string }[] = [
   { key: 'keywords', label: 'Write a blog' }, { key: 'drafts', label: 'Drafts & Review' }, { key: 'audit', label: 'Check a blog' }, { key: 'renewal', label: 'Refresh a live blog' }, { key: 'training', label: 'Writing rules' },
   { key: 'sitecontent', label: 'Website Content' },
   { key: 'overall', label: 'Overall Report' }, { key: 'seo', label: 'SEO' }, { key: 'aeo', label: 'AEO' }, { key: 'geo', label: 'GEO' }, { key: 'meetings', label: 'Meeting insights' },
-  { key: 'associates', label: 'Associate Training' }, { key: 'team', label: 'Team & Roles' }, { key: 'activity', label: 'Activity Log' },
+  { key: 'associates', label: 'Associate Training' }, { key: 'team', label: 'Team & Roles' }, { key: 'activity', label: 'Activity Log' }, { key: 'learning', label: 'Learning' },
   { key: 'guide', label: 'Guide & map' },
   { key: 'settings', label: 'Settings' },
 ];
@@ -86,7 +86,7 @@ const HIDDEN_PAGES: Record<Role, string[]> = {
   manager: ['settings'],
   analyst: ['team', 'settings'],
   tester: ['team'],
-  user: ['sitecontent', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'team', 'settings'],
+  user: ['sitecontent', 'keywords', 'topics', 'drafts', 'audit', 'renewal', 'overall', 'seo', 'aeo', 'geo', 'training', 'meetings', 'activity', 'learning', 'team', 'settings'],
 };
 
 // What a person can see and do: their role's access (the admin can change it per role), plus extra

@@ -10,6 +10,7 @@ import { getActor } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
 import { inlineImageKeys, UPLOAD_PREFIX } from '@/lib/blogImages';
 import { blogFromWordHtml, dataImages } from '@/lib/wordImport';
+import { diffContent } from '@/lib/contentDiff';
 import { methodNotAllowed, toId } from '../../../_lib/http';
 
 export const runtime = 'nodejs';
@@ -116,12 +117,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
   }
 
+  // What the file changes compared with the saved blog, so the reviewer sees it before saving.
+  const changes = diffContent({ title: draft.title, meta: draft.meta_description, html: String(draft.content_html || '') }, { title: blog.title || draft.title, meta: blog.meta ?? draft.meta_description, html: content });
   return NextResponse.json({
     cover_changed: notes.some((n) => n.startsWith('The cover (banner) was replaced')),
     title: blog.title || draft.title || '',
     meta_description: blog.meta ?? draft.meta_description ?? '',
     content_html: content,
     notes,
+    changes: changes.kind === 'none' ? null : changes.summary,
+    changed_pct: changes.changedPct,
   });
 }
 export { methodNotAllowed as GET, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

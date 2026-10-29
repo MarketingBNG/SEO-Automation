@@ -158,6 +158,32 @@ model blog_audits {
   audit_status            String? // running | ready | failed (null for rows made before background audits)
   audit_error             String?
   rewrite_error           String?
+  previous_audit_id       Int? // the earlier upload of the same piece this one was compared with
+  changes_summary         String? // what changed since that earlier upload (lib/contentDiff.ts)
+  draft_id                Int? // the draft this audit was started from (Optimise for SEO, AEO and GEO)
+  mode                    String? // optimise: the rewrite keeps the author's text and adds only what SEO, AEO and GEO need
+}
+
+// Every change to a blog's words (a reviewer's edit, a Word upload, a re-upload in Check a blog, an
+// optimisation, a rewrite, a restore): who, when, how much and what (lib/contentDiff.ts), so the team
+// sees it and the writer learns from it (lib/learnFromChanges.ts).
+model content_changes {
+  id          Int     @id @default(autoincrement())
+  entity_type String // draft | audit
+  entity_id   Int
+  kind        String // edit | upload | reupload | optimise | rewrite | restore
+  actor       String?
+  title       String?
+  changed_pct Int
+  summary     String
+  report      String // JSON ChangeReport
+  before_html String? // JSON {title, meta, html} before an optimise or rewrite, for Restore
+  previous_id Int? // the audit this upload was compared with (re-uploads)
+  learned     Boolean @default(false)
+  created_at  String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([entity_type, entity_id])
+  @@index([learned])
 }
 
 model image_library {
