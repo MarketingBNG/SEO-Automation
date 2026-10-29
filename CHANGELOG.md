@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-10-29
+- (ops) Phones: the Blog Calendar shows one card per blog (title, cover, publish time, fact check, status, approve, pause, reschedule) instead of a table that needed sideways scrolling; card headers put the action button under the text instead of squeezing the text into a narrow column (Topics, Associate Training, every page with a header button); taps act at once on touch screens; people with animations turned off in their system get a still dashboard; the viewport covers phone notches. Checked with headless Chrome at 390px.
 - (seo) One goal for the whole dashboard: grow client conversions through blogs, SEO, AEO and GEO, built on three pillars, Visibility, Traction and Conversion (lib/goal.ts). The strategy plans each keyword and blog under a pillar (about 40/30/30) and states each pillar's aim for the month; the writer, LinkedIn articles, Topics, Associate Training and the Assistant all start from the goal. Home shows the goal; Monthly Strategy, Blog Calendar and Topics show the pillar.
 
 ## 2026-10-28
