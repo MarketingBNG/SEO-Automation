@@ -15,11 +15,11 @@ import { Octopus, type OctopusMood } from '@/components/shared/octopus';
 const ASSISTANT_SUGGESTIONS = [
   'Optimize a blog for SEO: I will paste it in my next message',
   'Make the changes in my attached file to a blog draft',
-  'Add a banner to the homepage (I will attach the image)',
+  'Make a Word file of my blog with SEO and internal links added',
   'Show my top Search Console queries for the last 28 days',
   'Which pages get impressions but very few clicks?',
   'Check the alt text of images on my latest blog post',
-  'What changes have you made to the website so far?',
+  'What changes have you made to my drafts so far?',
   'Show me today\'s keyword rankings',
   'Which blogs will be published this week?',
   'Which keywords dropped in ranking this week?',
@@ -333,7 +333,7 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
   async function submitDecisions(list: any[]) {
     const pending = conv?.pending || [];
     const risky = pending.filter((a: any) => a.risk === 'high' && list.find((d) => d.toolUseId === a.toolUseId && d.approve));
-    if (risky.length && !window.confirm(`High-risk change to the live website:\n\n${risky.map((a: any) => `- ${a.summary}`).join('\n')}\n\nApply it now?`)) return;
+    if (risky.length && !window.confirm(`High-risk change:\n\n${risky.map((a: any) => `- ${a.summary}`).join('\n')}\n\nApply it now?`)) return;
     setDecisions({});
     await stream('/api/assistant/decide', { conversationId: conv.id, decisions: list });
   }
@@ -536,8 +536,9 @@ export default function AssistantTab({ seed }: { seed: { text: string; nonce: nu
             <div className="mx-auto my-auto max-w-2xl py-8 text-center">
               <h3 className="text-xl font-semibold">{firstName ? `Hi ${firstName}! What should we work on?` : 'Hi! What should we work on?'}</h3>
               <p className="mt-2 text-sm text-muted-foreground">
-                Ask about your SEO data, or tell me what to change on usaindiacfo.com. Anything that changes the
-                website waits for your approval first, and every change can be undone.
+                Ask about your SEO data, have me edit a blog draft, or ask for a Word file of a blog with SEO and
+                links added. Changes to drafts wait for your approval first, and every change can be undone.
+                I do not change the website itself.
               </p>
               <div className="mt-6 grid gap-2 sm:grid-cols-2">
                 {suggestions.map((s) => (

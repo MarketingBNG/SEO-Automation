@@ -798,6 +798,37 @@ defineTool({
   },
 });
 
+// Pictures for a Word file. The converter would fetch every http(s) image from the server, so only
+// pictures already inside the HTML (data:) or stored on the dashboard (/api/uploads/..., and only
+// files this member may read) are kept; those are embedded. Every other <img> is dropped.
+export async function docImages(html: string, me: any): Promise<string> {
+  const { readFile, mimeFor } = await import('@/lib/storage');
+  const { canReadAssistantFile } = await import('./fileAccess');
+  const out: string[] = [];
+  let last = 0;
+  for (const m of html.matchAll(/<img\b[^>]*>/gi)) {
+    out.push(html.slice(last, m.index));
+    last = m.index! + m[0].length;
+    const tag = m[0].replace(/\s(srcset|sizes)=("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    const src = (tag.match(/\ssrc=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i) || []).slice(1).find((v) => v !== undefined) || '';
+    if (/^data:image\//i.test(src)) {
+      out.push(tag);
+      continue;
+    }
+    const up = src.match(/^\/api\/uploads\/([A-Za-z0-9._\/%-]+)$/);
+    let key = '';
+    try {
+      key = up ? decodeURIComponent(up[1]) : '';
+    } catch {}
+    if (!key || key.includes('..') || key.startsWith('/') || !(await canReadAssistantFile(me, key))) continue;
+    const buf = await readFile(key).catch(() => null);
+    if (!buf) continue;
+    out.push(tag.replace(src, `data:${mimeFor(key)};base64,${buf.toString('base64')}`));
+  }
+  out.push(html.slice(last));
+  return out.join('');
+}
+
 // A Word file made in the chat: the document the user asked for (a blog with SEO and links added, a
 // report, notes), saved privately for this member and linked in the reply. Nothing goes to the website.
 defineTool({
@@ -823,7 +854,7 @@ defineTool({
     const { saveFile } = await import('@/lib/storage');
     const { ownerStamp } = await import('./conversations');
     const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const buf = await htmlToDocx(`<h1>${esc(title)}</h1>${html}`);
+    const buf = await htmlToDocx(`<h1>${esc(title)}</h1>${await docImages(html, ctx?.me)}`);
     const filename = `${title.replace(/[^a-z0-9 ._-]+/gi, '').trim().replace(/\s+/g, '-').slice(0, 80) || 'document'}.docx`;
     const key = `assistant/docs/${Date.now()}-${filename}`;
     const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -842,7 +873,15 @@ async function undoChange(undo, { force = false }: { force?: boolean } = {}) {
   switch (undo.kind) {
     case 'restore_site_post': {
       // A technical fix on a website post (lib/strategy/fixer.ts): the saved fields go back.
-      const { updatePost } = await import('@/lib/site');
+      const { updatePost, getPost, postFieldsHash } = await import('@/lib/site');
+      if (undo.expectHash && !force) {
+        const current = await getPost(undo.id);
+        if (postFieldsHash(current, Object.keys(undo.fields || {})) !== undo.expectHash) {
+          const err: any = new Error('This post was changed on the website after this fix. Undoing now would also remove those later changes.');
+          err.code = 'CHANGED_SINCE';
+          throw err;
+        }
+      }
       await updatePost(undo.id, undo.fields || {});
       return 'Restored the previous version on the website.';
     }

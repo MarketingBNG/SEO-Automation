@@ -2,6 +2,7 @@
 // Publishing, updates, images, post lists and post reads all go through here. While
 // SITE_CONNECTOR_URL and SITE_CONNECTOR_SECRET are not set, every call fails with one clear message
 // (SITE_NOT_SET_UP): nothing is published anywhere else.
+import crypto from 'crypto';
 import { readFile, basename } from './storage';
 import {
   connectorOn,
@@ -63,6 +64,13 @@ const toPost = (p: SitePost & Record<string, any>): Post => ({
   featuredImage: p.featured_image ?? null,
   featuredImageAlt: p.featured_image_alt ?? null,
 });
+
+// The fields an update can set, as the post holds them now (for undo: what a fix wrote).
+const FIELD_OF: Record<string, (p: Post) => unknown> = { contentHtml: (p) => p.content, seoTitle: (p) => p.seoTitle, metaDescription: (p) => p.seoDescription, title: (p) => p.title, excerpt: (p) => p.excerpt };
+export function postFieldsHash(post: Post, keys: string[]): string {
+  const vals = [...keys].sort().map((k) => [k, FIELD_OF[k] ? FIELD_OF[k](post) ?? null : null]);
+  return crypto.createHash('sha1').update(JSON.stringify(vals)).digest('hex');
+}
 
 // Whether the website can be reached at all. Checked before steps that save anything, so a publish
 // that cannot go out changes nothing.
@@ -201,12 +209,28 @@ export async function livePosts({ full = false, fresh = false } = {}): Promise<P
   return out;
 }
 
-// Live posts whose title shares a word (3+ letters) with the text. full: with the article text.
+// Small words that say nothing about a post's topic.
+const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'how', 'what', 'why', 'when', 'your', 'you', 'are', 'from', 'into', 'about', 'can', 'does', 'this', 'that', 'its', 'our', 'all', 'new', 'not', 'who', 'which']);
+const topicWords = (text: string) => [...new Set(String(text || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w)))];
+
+// Live posts whose titles share the text's topic words, best first: each distinct word counts once,
+// as a whole word, and a post needs at least two of them (all of them when the text has fewer).
+// full: with the article text.
 export async function searchPosts(text: string, limit = 10, { full: withText = true } = {}): Promise<Post[]> {
   need();
-  const words = String(text || '').toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  const words = topicWords(text);
   if (!words.length) return [];
-  const hits = (await sitePosts()).filter((p) => isLive(p.status) && words.some((w) => String(p.title || '').toLowerCase().includes(w))).slice(0, limit);
+  const needed = Math.min(2, words.length);
+  const hits = (await sitePosts())
+    .filter((p) => isLive(p.status))
+    .map((p) => {
+      const title = new Set(topicWords(p.title));
+      return { p, score: words.filter((w) => title.has(w)).length };
+    })
+    .filter((h) => h.score >= needed)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((h) => h.p);
   if (!withText) return hits.map(toPost);
   const full = await Promise.all(hits.map((h) => (h.content ? h : sitePost(h.slug))));
   return full.filter((p): p is SitePost => Boolean(p)).map(toPost);

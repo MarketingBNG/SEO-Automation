@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { updatePost, publishPost, seoSlug, postStatus, siteConfigured, draftsRefused, SITE_NOT_SET_UP } from '@/lib/site';
+import { updatePost, publishPost, seoSlug, postStatus, postBySlug, siteConfigured, draftsRefused, SITE_NOT_SET_UP } from '@/lib/site';
+import { slugFromUrl } from '@/lib/siteConnector';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed, toId } from '../../../_lib/http';
@@ -49,13 +50,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const noDraft = draftsRefused(wpStatus);
   if (noDraft) return NextResponse.json({ error: noDraft }, { status: 400 });
 
+  // The live post this audit came from. An audit saved before the move to the custom website holds
+  // an id the website does not know: the post is found again by its address.
+  let livePostId: number | null = audit.wp_post_id || null;
+  if (livePostId) {
+    try {
+      if (!(await postStatus(livePostId))) {
+        const addr = audit.wp_post_url || audit.source_url;
+        const same = addr ? await postBySlug(slugFromUrl(addr)) : null;
+        livePostId = same?.id || null;
+      }
+    } catch (e: any) {
+      return NextResponse.json({ error: `The website could not be read (${String(e?.message || e).slice(0, 200)}), so nothing was sent. Try again in a few minutes.` }, { status: 502 });
+    }
+    if (!livePostId) {
+      const msg = `The live post this audit came from (${audit.wp_post_url || audit.source_url || `#${audit.wp_post_id}`}) could not be found on the website; nothing was sent.`;
+      await activity.log('audit.rewrite_publish_failed', { entityType: 'blog_audit', entityId: nid, details: `"${audit.rewrite_title || audit.title || ''}": ${msg}`, actor: await getActor() }).catch(() => {});
+      return NextResponse.json({ error: msg }, { status: 409 });
+    }
+  }
+
   try {
     let post: any;
     // A live post must never be switched to draft: that takes it off the website.
     const separateDraft = Boolean(audit.wp_post_id) && wpStatus === 'draft';
     if (audit.wp_post_id && !separateDraft) {
       // Existing post: keep its URL (no slug change), refresh content and the meta description.
-      post = await updatePost(audit.wp_post_id, {
+      post = await updatePost(livePostId as number, {
         title: audit.rewrite_title,
         contentHtml: faqAccordion(audit.rewrite_content_html),
         excerpt: audit.rewrite_meta || undefined,
@@ -89,7 +110,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // The separate draft's address and id are kept, so the audit page links to it after a reload.
     await prisma.blog_audits.update({
       where: { id: nid },
-      data: separateDraft ? { rewrite_status: 'sent_as_draft', rewrite_wp_draft_url: post.link || null, rewrite_wp_draft_id: post.id ?? null } : { rewrite_status: 'published', ...forgetDraft },
+      data: separateDraft ? { rewrite_status: 'sent_as_draft', rewrite_wp_draft_url: post.link || null, rewrite_wp_draft_id: post.id ?? null } : { rewrite_status: 'published', ...forgetDraft, ...(livePostId && livePostId !== audit.wp_post_id ? { wp_post_id: livePostId } : {}) },
     });
 
     await activity.log('audit.rewrite_published', {

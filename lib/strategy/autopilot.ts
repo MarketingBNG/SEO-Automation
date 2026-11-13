@@ -428,7 +428,18 @@ async function publishRowOnce(row, now, verify) {
     const freed = await freeSlug(fields.slug, checked.wp_post_id).catch(() => null);
     if (freed?.liveHolder) await activity.log('site.address_taken', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}": /${fields.slug}/ is already a live post (${freed.liveHolder.link}), so the new post gets another address.` });
     // Sent to the website earlier as a draft (from Drafts & Review): publish that post, not a second copy.
-    const existing = checked.wp_post_id ? await postStatus(checked.wp_post_id).catch(() => null) : null;
+    // Only "not on the website" (404) means it is gone; any other failure stops this publish (it is
+    // tried again on a later run), so a post that could not be read is never copied.
+    let existing: string | null = null;
+    try {
+      existing = checked.wp_post_id ? await postStatus(checked.wp_post_id) : null;
+    } catch (e: any) {
+      const why = `The website could not be read to find the copy sent earlier (${String(e?.message || e).slice(0, 160)}), so nothing was sent. It is tried again on the next run.`;
+      const first = row.status !== 'held' || holdChanged(row.hold_reasons, [why]);
+      await update(row.id, { status: 'held', hold_reasons: JSON.stringify([why]) });
+      if (first) await notify(`Blog held: ${row.title}`, why).catch(() => {});
+      return 'held';
+    }
     post = existing ? await updatePost(checked.wp_post_id, fields) : await publishPost(fields);
   }
   await prisma.drafts.update({

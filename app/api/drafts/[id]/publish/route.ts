@@ -21,10 +21,14 @@ import { wordsHash } from '@/lib/factCheckMark';
 
 export const runtime = 'nodejs';
 
-// 'publish' or 'draft', or null when the post is not on the website (or it cannot be read).
+// 'publish' or 'draft', or null only when the website says the post is not there (404). Any other
+// failure is thrown, so a publish never makes a second copy of a post it merely could not read.
 async function sitePostStatus(id: number): Promise<string | null> {
-  return postStatus(id).catch(() => null);
+  return postStatus(id);
 }
+
+const UNREADABLE = (e: any) => `The website could not be read (${String(e?.message || e).slice(0, 200)}), so nothing was sent. Try again in a few minutes.`;
+const LIVE_POST_MISSING = 'The live post could not be found on the website; nothing was sent. Check its address on the website, then try again.';
 
 // What the website holds now: live or not, the address, and whether the FAQ is in the box format.
 async function checkPost(id: number | null, wantSlug: string | undefined, hasFaq: boolean) {
@@ -52,7 +56,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 });
   // A blog sent to the website earlier as a draft (not live) can be sent again: the same post is
   // updated, so no second copy is made.
-  let wpLive = draft.wp_post_id && siteConfigured() ? await sitePostStatus(draft.wp_post_id) : null;
+  let wpLive: string | null = null;
+  try {
+    wpLive = draft.wp_post_id && siteConfigured() ? await sitePostStatus(draft.wp_post_id) : null;
+  } catch (e: any) {
+    return NextResponse.json({ error: UNREADABLE(e) }, { status: 502 });
+  }
   // A live blog can be sent again too: that updates the same live post (for example after an edit).
   if (draft.status !== 'approved' && !(draft.status === 'published' && draft.wp_post_id)) {
     return NextResponse.json({ error: 'Draft must be approved before publishing' }, { status: 400 });
@@ -107,11 +116,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // know: its live address finds the same post there, so it is updated rather than copied.
   const savedPostId = draft.wp_post_id;
   if (draft.wp_post_id && !wpLive && draft.wp_post_url) {
-    const same = await postBySlug(slugFromUrl(draft.wp_post_url)).catch(() => null);
+    let same;
+    try {
+      same = await postBySlug(slugFromUrl(draft.wp_post_url));
+    } catch (e: any) {
+      return NextResponse.json({ error: UNREADABLE(e) }, { status: 502 });
+    }
     if (same?.id) {
       draft.wp_post_id = same.id;
       wpLive = same.status;
     }
+  }
+  // Already live (published, or it has a live address) but its post is not found: a new post would
+  // be a second copy of it, so nothing is sent. A refresh finds its page by address below.
+  if (!wpLive && !refreshUrl && (draft.status === 'published' || draft.wp_post_url)) {
+    await activity.log('site.publish_failed', { entityType: 'draft', entityId: nid, details: `"${draft.title}": ${LIVE_POST_MISSING}`, actor: await getActor() }).catch(() => {});
+    return NextResponse.json({ error: LIVE_POST_MISSING }, { status: 409 });
   }
   // The website connector refuses drafts (it makes every saved post live): refused here, before the
   // paid checks, the author and cover saves and the image uploads.
@@ -187,6 +207,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         target = found.id;
       }
       // Already on the website (as a draft, or the refreshed page): update that post instead of making another one.
+      // A blog already live is never published as a new post (checked again: the read above may have changed).
+      if (!target && (draft.status === 'published' || draft.wp_post_url)) throw new Error(LIVE_POST_MISSING);
       const post = target ? await updatePost(target, fields) : await publishPost(fields);
       const seoSaved = Boolean(post.seoDescription);
 

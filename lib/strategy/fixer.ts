@@ -8,7 +8,7 @@
 import prisma from '../prisma';
 import * as activity from '../activity';
 import { sqlNow } from '../time';
-import { postBySlug, searchPosts, updatePost, siteConfigured, SITE_NOT_SET_UP, type Post } from '../site';
+import { postBySlug, searchPosts, updatePost, postFieldsHash, siteConfigured, SITE_NOT_SET_UP, type Post } from '../site';
 import { publicSite } from '../siteConnector';
 import { callClaude } from '../anthropic';
 import { notify } from '../notify';
@@ -45,9 +45,12 @@ async function findPost(url: string): Promise<Post | null> {
   return p && p.id && p.status === 'publish' ? p : null;
 }
 
-// Saved before each change; Undo in the dashboard puts these fields back (lib/assistant/tools.ts).
-async function saveUndo(summary: string, post: Post, fields: Record<string, any>) {
-  await prisma.site_changes.create({ data: { tool: 'technical_fix', summary, target_type: 'post', target_id: String(post.id), undo: JSON.stringify({ kind: 'restore_site_post', id: post.id, fields }) } });
+// Saved after each change: the old values, and a fingerprint of what the fix wrote (read back from
+// the website), so Undo in the dashboard (lib/assistant/tools.ts) puts the old values back only while
+// nobody has changed those fields since.
+async function saveUndo(summary: string, post: Post, fields: Record<string, any>, after: Post) {
+  const undo = { kind: 'restore_site_post', id: post.id, fields, expectHash: postFieldsHash(after, Object.keys(fields)) };
+  await prisma.site_changes.create({ data: { tool: 'technical_fix', summary, target_type: 'post', target_id: String(post.id), undo: JSON.stringify(undo) } });
 }
 
 async function writeText(kind: 'title' | 'meta', page: Post) {
@@ -99,19 +102,19 @@ export async function applyFix(task: any): Promise<{ status: 'applied' | 'manual
     const raw = String(post.content || '');
     const next = unwrapLinks(raw, target);
     if (next === raw) return { status: 'manual', result: 'The link is in the menu, sidebar or footer, not in the post text. A developer must remove it from the website template.' };
-    await saveUndo(`Removed broken link to ${target} on ${task.url}`, post, { contentHtml: raw });
-    await updatePost(post.id as number, { contentHtml: next });
+    const after = await updatePost(post.id as number, { contentHtml: next });
+    await saveUndo(`Removed broken link to ${target} on ${task.url}`, post, { contentHtml: raw }, after);
     return { status: 'applied', result: `Removed the broken link to ${target} (text kept)` };
   }
 
   if (kind === 'title' || kind === 'meta') {
     const value = await writeText(kind, post);
     if (kind === 'title') {
-      await saveUndo(`SEO title on ${task.url}`, post, { seoTitle: post.seoTitle || post.title });
-      await updatePost(post.id as number, { seoTitle: value });
+      const after = await updatePost(post.id as number, { seoTitle: value });
+      await saveUndo(`SEO title on ${task.url}`, post, { seoTitle: post.seoTitle || post.title }, after);
     } else {
-      await saveUndo(`Meta description on ${task.url}`, post, { metaDescription: post.seoDescription || '' });
-      await updatePost(post.id as number, { metaDescription: value });
+      const after = await updatePost(post.id as number, { metaDescription: value });
+      await saveUndo(`Meta description on ${task.url}`, post, { metaDescription: post.seoDescription || '' }, after);
     }
     return { status: 'applied', result: `${kind === 'title' ? 'SEO title' : 'Meta description'} set: ${value}` };
   }
@@ -120,8 +123,8 @@ export async function applyFix(task: any): Promise<{ status: 'applied' | 'manual
     const raw = String(post.content || '');
     if (/frequently asked questions/i.test(raw)) return { status: 'manual', result: 'The page already has an FAQ; it needs a fuller rewrite (add it to the blog refresh list).' };
     const next = await addFaq(post);
-    await saveUndo(`Added FAQ to thin page ${task.url}`, post, { contentHtml: raw });
-    await updatePost(post.id as number, { contentHtml: next });
+    const after = await updatePost(post.id as number, { contentHtml: next });
+    await saveUndo(`Added FAQ to thin page ${task.url}`, post, { contentHtml: raw }, after);
     return { status: 'applied', result: 'Added an FAQ built from the page text' };
   }
   return { status: 'manual', result: 'Unknown fix type' };

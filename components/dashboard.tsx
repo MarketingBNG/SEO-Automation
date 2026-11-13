@@ -53,7 +53,7 @@ const MonthRunning = dynamic(() => import('@/components/tabs/strategy-tab').then
 // links (/?tab=drafts) still work.
 const TABS = [
   { key: 'home', label: 'Home', icon: House, group: 'Start', hint: 'What waits for you today and what publishes next' },
-  { key: 'assistant', label: 'Assistant', icon: Bot, group: 'Start', hint: 'Ask anything, change the website' },
+  { key: 'assistant', label: 'Assistant', icon: Bot, group: 'Start', hint: 'Ask about your data, edit drafts, make Word files' },
   { key: 'guide', label: 'Guide & map', icon: BookOpen, group: 'Start', hint: 'Every page on one map, and a step-by-step guide for each role' },
 
   { key: 'strategy', label: 'Monthly Strategy', icon: CalendarRange, group: 'Plan', hint: 'The 30-day plan: keywords, blogs, fixes; approve it here' },
@@ -227,7 +227,7 @@ export default function Dashboard() {
               <Input
                 value={askText}
                 onChange={(e) => setAskText(e.target.value)}
-                placeholder="Ask anything, or tell the assistant what to change on the website"
+                placeholder="Ask anything, or ask for a Word file of your blog with SEO and links added"
                 aria-label="Ask the assistant"
                 className="pl-8"
               />

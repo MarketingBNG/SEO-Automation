@@ -19,6 +19,8 @@ const site = new Map<string, FakePost>();
 let nextId = 1;
 const calls: { action: string; data: any }[] = [];
 const outside: string[] = [];
+// Actions the fake website refuses (403: not retried), to test a post that cannot be read.
+const failActions = new Set<string>();
 process.env.SLACK_WEBHOOK_URL = '';
 globalThis.fetch = (async (url: any, init?: any) => {
   const u = String(url instanceof Request ? url.url : url);
@@ -33,6 +35,7 @@ globalThis.fetch = (async (url: any, init?: any) => {
   if (sig !== crypto.createHmac('sha256', SECRET).update(`${ts}\n${body}`).digest('hex')) return reply(401, { ok: false, error: 'bad signature' });
   const { action, data, nonce } = JSON.parse(body);
   if (!nonce) return reply(400, { ok: false, error: 'no nonce' });
+  if (failActions.has(action)) return reply(403, { ok: false, error: 'blocked for the test' });
   calls.push({ action, data });
   const now = '2026-11-10 10:00:00';
   switch (action) {
@@ -323,5 +326,130 @@ test('Drafts & Review: a blog published before the move is updated on the websit
   } finally {
     await prisma.drafts.deleteMany({ where: { id: draft.id } });
     await prisma.keywords.deleteMany({ where: { id: kw.id } });
+  }
+});
+
+test('related posts: titles must share at least two topic words as whole words, best first', async () => {
+  const s = await import('../lib/site');
+  site.clear();
+  const add = (slug: string, title: string) => site.set(slug, { id: nextId++, slug, title, content: `<p>${title}</p>`, excerpt: '', status: 'published', url: `/insights/${slug}/` });
+  add('nri-tax-return-guide', 'NRI tax return guide');
+  add('tax-return-deadlines', 'Tax return deadlines for the year');
+  add('tax-on-crypto', 'Tax on crypto');
+  add('syntax-tips', 'Syntax tips for returning users');
+  await withEnv(ON, async () => {
+    const titles = (await s.livePosts({ fresh: true }), await s.searchPosts('nri tax return', 6)).map((p) => p.title);
+    assert.deepEqual(titles, ['NRI tax return guide', 'Tax return deadlines for the year']);
+    assert.deepEqual((await s.searchPosts('crypto', 6)).map((p) => p.title), ['Tax on crypto'], 'one topic word: that word is enough');
+    assert.deepEqual(await s.searchPosts('the and for', 6), [], 'small words alone match nothing');
+  });
+});
+
+test('Drafts & Review: a live blog whose post cannot be found or read is never published as a second post', { skip: !db, timeout: 120000 }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const { POST } = await import('../app/api/drafts/[id]/publish/route');
+  const stamp = Date.now();
+  site.clear();
+  site.set('kept-guide', { id: 50, slug: 'kept-guide', title: 'Kept guide', content: '<p>Live.</p>', excerpt: '', status: 'published', url: '/insights/kept-guide/' });
+  const kw = await prisma.keywords.create({ data: { keyword: `missing guide ${stamp}`, status: 'done' } });
+  const missing = await prisma.drafts.create({ data: { keyword_id: kw.id, title: 'Missing guide', meta_description: 'Meta.', content_html: '<p>Text.</p>', status: 'published', wp_post_id: 1_000_000_999, wp_post_url: 'https://site.test/insights/moved-guide/', author: 'Amit Agarwal' } });
+  const kept = await prisma.drafts.create({ data: { keyword_id: kw.id, title: 'Kept guide', meta_description: 'Meta.', content_html: '<p>New.</p>', status: 'published', wp_post_id: 1_000_000_050, wp_post_url: 'https://site.test/insights/kept-guide/', author: 'Amit Agarwal' } });
+  const send = (id: number) => withEnv(ON, () => POST(new Request(`http://x/api/drafts/${id}/publish`, { method: 'POST', body: JSON.stringify({ wpStatus: 'publish' }) }) as any, { params: Promise.resolve({ id: String(id) }) }));
+  calls.length = 0;
+  try {
+    const gone: any = await send(missing.id);
+    assert.equal(gone.status, 409);
+    assert.match((await gone.json()).error, /could not be found on the website; nothing was sent/);
+    // The website answers with an error (not "not found"): nothing is sent either.
+    failActions.add('post.get');
+    const unreadable: any = await send(kept.id);
+    assert.equal(unreadable.status, 502);
+    assert.match((await unreadable.json()).error, /could not be read/);
+    assert.deepEqual(calls.filter((c) => c.action === 'post.create' || c.action === 'post.update'), []);
+    assert.equal((await prisma.drafts.findUnique({ where: { id: missing.id } }))!.wp_post_id, 1_000_000_999, 'the draft still points at its post');
+  } finally {
+    failActions.clear();
+    await prisma.drafts.deleteMany({ where: { id: { in: [missing.id, kept.id] } } });
+    await prisma.keywords.deleteMany({ where: { id: kw.id } });
+  }
+});
+
+test('Check a blog: an audit saved before the move replaces its live post found by address, or is refused', { skip: !db, timeout: 60000 }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const { POST } = await import('../app/api/audit/[id]/publish/route');
+  site.clear();
+  site.set('audited-post', { id: 60, slug: 'audited-post', title: 'Audited post', content: '<p>Old.</p>', excerpt: '', status: 'published', url: '/insights/audited-post/' });
+  const found = await prisma.blog_audits.create({ data: { title: 'Audited post', wp_post_id: 12, wp_post_url: 'https://site.test/insights/audited-post/', rewrite_title: 'Audited post', rewrite_content_html: '<p>Rewritten.</p>', rewrite_meta: 'Meta' } as any });
+  const lost = await prisma.blog_audits.create({ data: { title: 'Lost post', wp_post_id: 13, wp_post_url: 'https://site.test/insights/lost-post/', rewrite_title: 'Lost post', rewrite_content_html: '<p>Rewritten.</p>', rewrite_meta: 'Meta' } as any });
+  const send = (id: number) => withEnv(ON, () => POST(new Request(`http://x/api/audit/${id}/publish`, { method: 'POST', body: JSON.stringify({ wpStatus: 'publish' }) }) as any, { params: Promise.resolve({ id: String(id) }) }));
+  calls.length = 0;
+  try {
+    const ok: any = await send(found.id);
+    assert.equal(ok.status, 200, JSON.stringify(await ok.clone().json()));
+    assert.match(site.get('audited-post')!.content, /Rewritten/);
+    assert.equal((await prisma.blog_audits.findUnique({ where: { id: found.id } }))!.wp_post_id, 1_000_000_060, 'the website id is kept from now on');
+    const refused: any = await send(lost.id);
+    assert.equal(refused.status, 409);
+    assert.match((await refused.json()).error, /could not be found on the website; nothing was sent/);
+    assert.equal(calls.filter((c) => c.action === 'post.create').length, 0);
+  } finally {
+    await prisma.blog_audits.deleteMany({ where: { id: { in: [found.id, lost.id] } } });
+  }
+});
+
+test('undoing a technical fix restores the post only while nobody changed it since', { skip: !db, timeout: 60000 }, async () => {
+  const { default: prisma } = await import('../lib/prisma');
+  const { applyFix } = await import('../lib/strategy/fixer');
+  const { undoChange } = await import('../lib/assistant/tools');
+  site.clear();
+  const html = '<p>See <a href="https://old.test/page/">our guide</a>.</p>';
+  site.set('fix-me', { id: 70, slug: 'fix-me', title: 'Fix me', content: html, excerpt: '', status: 'published', url: '/insights/fix-me/' });
+  await withEnv(ON, async () => {
+    await s_live();
+    const r = await applyFix({ kind: 'broken_link', url: 'https://site.test/insights/fix-me/', issue: 'Broken link to https://old.test/page (404)' });
+    assert.equal(r.status, 'applied', r.result);
+    assert.equal(site.get('fix-me')!.content, '<p>See our guide.</p>');
+    const change = await prisma.site_changes.findFirst({ where: { tool: 'technical_fix', target_id: '1000000070' }, orderBy: { id: 'desc' } });
+    const undo = JSON.parse(change!.undo!);
+    try {
+      // Changed on the website after the fix (an internal link added): undo refuses unless forced.
+      site.set('fix-me', { ...site.get('fix-me')!, content: '<p>See our guide.</p><p>Related guide.</p>' });
+      await assert.rejects(undoChange(undo), (e: any) => e.code === 'CHANGED_SINCE');
+      assert.match(site.get('fix-me')!.content, /Related guide/);
+      // Back as the fix left it: undo restores the old text.
+      site.set('fix-me', { ...site.get('fix-me')!, content: '<p>See our guide.</p>' });
+      await undoChange(undo);
+      assert.equal(site.get('fix-me')!.content, html);
+    } finally {
+      await prisma.site_changes.deleteMany({ where: { id: change!.id } });
+    }
+  });
+});
+async function s_live() {
+  const s = await import('../lib/site');
+  await s.livePosts({ fresh: true });
+}
+
+test('a Word file from the assistant keeps only embedded or dashboard pictures, never fetches a web address', async () => {
+  const { docImages } = await import('../lib/assistant/tools');
+  const { saveFile, deleteFile } = await import('../lib/storage');
+  const key = `test/doc-image-${Date.now()}.png`;
+  await saveFile(key, Buffer.from('png bytes'), 'image/png');
+  outside.length = 0;
+  try {
+    const out = await docImages(
+      '<p>A</p><img src="http://169.254.169.254/latest/meta-data/" alt="x"><img src="data:image/png;base64,AAAA" alt="d">' +
+        `<img src="/api/uploads/${key}" srcset="https://evil.test/a.png 2x" alt="mine"><img src="/api/uploads/assistant/docs/1-secret.png" alt="theirs"><img src="/api/uploads/../../etc/passwd">`,
+      null
+    );
+    assert.ok(!out.includes('169.254'), 'web address dropped');
+    assert.ok(out.includes('src="data:image/png;base64,AAAA"'), 'embedded picture kept');
+    assert.ok(out.includes(`src="data:image/png;base64,${Buffer.from('png bytes').toString('base64')}"`), 'dashboard picture embedded');
+    assert.ok(!out.includes('evil.test') && !out.includes('srcset'), 'srcset dropped');
+    assert.ok(!out.includes('secret') && !out.includes('passwd'), "someone else's file and odd paths dropped");
+    assert.equal((out.match(/<img/g) || []).length, 2);
+    assert.deepEqual(outside, []);
+  } finally {
+    await deleteFile(key);
   }
 });
