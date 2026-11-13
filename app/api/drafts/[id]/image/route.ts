@@ -13,7 +13,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
 const EXT: Record<string, string> = { png: '.png', jpeg: '.jpg', jpg: '.jpg', webp: '.webp', gif: '.gif' };
 
 // POST (multipart): image + alt? replaces the cover (featured image). The alt text says what the
-// picture shows; it goes to WordPress with the image. Empty keeps the alt text already saved.
+// picture shows; it goes to the website with the image. Empty keeps the alt text already saved.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const nid = toId(id);

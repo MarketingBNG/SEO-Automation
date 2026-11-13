@@ -297,7 +297,7 @@ async function sendMessage({ conversationId, text, imageIds = [], actor = null, 
     : [];
   for (const img of images) content.push(imageBlockFor(img.id));
   const imageNotes = images
-    .map((img) => `[Attached image_id ${img.id}: ${img.filename}${img.width ? `, ${img.width}x${img.height}px` : ''}. To put it on the website, upload it with wp_upload_image using image_id ${img.id}.]`)
+    .map((img) => `[Attached image_id ${img.id}: ${img.filename}${img.width ? `, ${img.width}x${img.height}px` : ''}.]`)
     .join('\n');
   content.push({ type: 'text', text: [text || '', imageNotes].filter(Boolean).join('\n\n') || '(image attached)' });
   conv.messages.push({ role: 'user', content });

@@ -134,7 +134,7 @@ export function actionFor(method: string, path: string): Action | null {
   if (!write) {
     // The connection tests from Settings make live third-party calls and show account details
     // (before the reports rule, which would let /api/gsc/test and /api/seranking/test through).
-    if (/^\/api\/(serphouse|surfer|bing|wordpress|zoho|gbp|seranking|gsc)\/test(\/|$)/.test(p)) return 'settings.change';
+    if (/^\/api\/(serphouse|surfer|bing|site|zoho|gbp|seranking|gsc)\/test(\/|$)/.test(p)) return 'settings.change';
     // The Meeting insights page checks its Fireflies connection (shows the connected name).
     if (/^\/api\/fireflies\/test(\/|$)/.test(p)) return 'reports.view';
     if (/^\/api\/performance\/download|^\/api\/audit\/[^/]+\/download/.test(p)) return 'reports.download';
@@ -161,7 +161,7 @@ export function actionFor(method: string, path: string): Action | null {
   if (/^\/api\/(ai-credits|agent)/.test(p)) return 'credits.change';
   if (/^\/api\/team\/access/.test(p)) return 'team.roles';
   if (/^\/api\/team/.test(p)) return 'team.view'; // finer checks (roles, who can be blocked) in the route
-  if (/^\/api\/(settings|gsc|ga4|gbp|zoho|wordpress|fireflies|bing|surfer\/test|serphouse\/test|seranking\/test)/.test(p)) return 'settings.change';
+  if (/^\/api\/(settings|gsc|ga4|gbp|zoho|site\/test|fireflies|bing|surfer\/test|serphouse\/test|seranking\/test)/.test(p)) return 'settings.change';
   return 'content.work';
 }
 

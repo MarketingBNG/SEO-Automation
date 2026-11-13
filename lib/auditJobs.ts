@@ -5,7 +5,7 @@
 import prisma from './prisma';
 import { auditBlog, rewriteBlog } from './anthropic';
 import { wordCount } from './validation';
-import { getPost } from './wordpress';
+import { getPost } from './site';
 import * as activity from './activity';
 import { startTimer, endTimer } from './jobTimer';
 import { parseAuditRow } from './audits';
@@ -32,8 +32,8 @@ export async function startAudit({ title, contentHtml, sourceUrl, wpPostId, acto
   let resolvedUrl = sourceUrl || null;
   if (wpPostId) {
     const post = await getPost(wpPostId);
-    content = post.content.rendered;
-    resolvedTitle = resolvedTitle || post.title.rendered;
+    content = post.content;
+    resolvedTitle = resolvedTitle || post.title;
     resolvedUrl = post.link;
   } else if (sourceUrl && !content) {
     const pageRes = await safeFetchText(sourceUrl, { timeoutMs: 20000 });

@@ -19,7 +19,8 @@ export const AREAS: Record<string, string> = {
   team: 'Team and roles',
   auth: 'Sign-ins',
   settings: 'Settings and connections',
-  wordpress: 'Settings and connections',
+  // Old action names (rows logged before the move to the custom website) still read as Website.
+  wordpress: 'Website',
   gbp: 'Settings and connections',
   zoho: 'Settings and connections',
   surfer: 'Settings and connections',

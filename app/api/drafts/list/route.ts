@@ -30,7 +30,7 @@ export async function GET() {
   const sched = admin ? await prisma.blog_schedule.findMany({ where: { draft_id: { in: ids } } }) : [];
   const byDraft = new Map(sched.map((s) => [s.draft_id, s]));
   // When each published draft actually went to the website (from the activity log).
-  const pubLog = admin ? await prisma.activity_log.findMany({ where: { action: { in: ['wordpress.published', 'schedule.published'] }, entity_type: 'draft', entity_id: { in: ids } }, select: { entity_id: true, created_at: true }, orderBy: { id: 'asc' } }) : [];
+  const pubLog = admin ? await prisma.activity_log.findMany({ where: { action: { in: ['site.published', 'wordpress.published', 'schedule.published'] }, entity_type: 'draft', entity_id: { in: ids } }, select: { entity_id: true, created_at: true }, orderBy: { id: 'asc' } }) : [];
   const publishedAt = new Map(pubLog.map((l) => [l.entity_id, l.created_at]));
   const ist = (s: string) => new Date(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z')).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
   return NextResponse.json(

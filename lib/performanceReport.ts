@@ -4,9 +4,9 @@ import { sqlNowOffset } from './time';
 import * as questionBankMod from './questionBank';
 import { querySearchAnalytics, googleAuth } from './searchConsole';
 import { eventsAffecting } from './seoCalendar';
-import { wpRequest } from './wordpress';
+import { livePosts } from './site';
 import { listSites, getSiteRankings, oneRowPerKeyword } from './seranking';
-// Performance of the site in three lenses, computed in code from Search Console, GA4, WordPress,
+// Performance of the site in three lenses, computed in code from Search Console, GA4, the website,
 // SE Ranking, the crawl and the latest strategy run. No AI calls, so it is free and always exact.
 //   SEO: rankings and organic traffic (classic blue links).
 //   AEO: answer engines: question searches, People Also Ask, FAQ coverage.
@@ -81,19 +81,14 @@ async function ga4Report(body) {
 }
 const gaDate = (v) => `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
 
-async function wordpressPosts() {
-  const posts: any[] = [];
-  for (let page = 1; page <= 6; page++) {
-    const { json } = await wpRequest('GET', '/wp/v2/posts', { query: { per_page: 100, page, status: 'publish', _fields: 'id,link,modified,content' } });
-    posts.push(...json);
-    if (json.length < 100) break;
-  }
-  return posts;
+// The website's live posts with their text (FAQ and freshness counts).
+async function sitePosts() {
+  return livePosts({ full: true });
 }
 
 function contentStats(posts) {
   const now = Date.now();
-  const withFaq = posts.filter((p) => /<h[2-4][^>]*>(?:\s|<[^>]+>)*(FAQ|Frequently Asked Questions)/i.test(p.content?.rendered || '')).length;
+  const withFaq = posts.filter((p) => /<h[2-4][^>]*>(?:\s|<[^>]+>)*(FAQ|Frequently Asked Questions)/i.test(p.content || '')).length;
   const fresh90 = posts.filter((p) => now - Date.parse(p.modified) <= 90 * DAY).length;
   const fresh365 = posts.filter((p) => now - Date.parse(p.modified) <= 365 * DAY).length;
   const stale = posts.filter((p) => now - Date.parse(p.modified) > 730 * DAY).length;
@@ -138,7 +133,7 @@ async function gatherPerformance(days = 28) {
         limit: 5000,
       })
     ),
-    safe('wordpress', wordpressPosts),
+    safe('website', sitePosts),
   ]);
 
   const dayRows = (daily || []).map((r) => ({ date: r.keys[0], clicks: r.clicks, impressions: r.impressions, position: r.position }));
@@ -256,7 +251,7 @@ async function gatherPerformance(days = 28) {
     kpis: [
       kpi('Clicks from question searches', qClicksNow, qClicksBefore, { note: 'Searches that ask a question (how, what, can...)' }),
       kpi('Impressions on question searches', qImprNow, qImprBefore),
-      kpi('Blog posts with an FAQ', stats?.withFaq ?? 0, stats?.withFaq ?? 0, { note: stats ? `${stats.faqPct}% of ${stats.posts} published posts` : 'WordPress not reachable' }),
+      kpi('Blog posts with an FAQ', stats?.withFaq ?? 0, stats?.withFaq ?? 0, { note: stats ? `${stats.faqPct}% of ${stats.posts} published posts` : 'Website not reachable' }),
       kpi('Google questions in the question bank', bank.total, bank.total, { note: `${bank.newCount} confirmed new in ${days} days` }),
       kpi('Google questions answered in recent drafts', paaUsed, paaUsed, { note: paaTotal ? `${paaUsed} of ${paaTotal} in drafts from the last 90 days` : 'No recent drafts yet' }),
     ],
@@ -306,7 +301,7 @@ async function gatherPerformance(days = 28) {
       kpi('Visits from AI assistants', aiNow, aiBefore, { note: 'ChatGPT, Gemini, Claude, Perplexity, Copilot (GA4)' }),
       kpi('Conversions from AI visits', aiConvNow, aiConvBefore),
       kpi('Brand-name searches (clicks)', brandNow, brandBefore, { note: 'People who search for USAIndiaCFO after seeing it mentioned' }),
-      kpi('Posts updated in the last 90 days', stats?.fresh90 ?? 0, stats?.fresh90 ?? 0, { note: stats ? `${stats.fresh90Pct ?? 0}% of posts. AI answers favour recently updated pages` : 'WordPress not reachable' }),
+      kpi('Posts updated in the last 90 days', stats?.fresh90 ?? 0, stats?.fresh90 ?? 0, { note: stats ? `${stats.fresh90Pct ?? 0}% of posts. AI answers favour recently updated pages` : 'Website not reachable' }),
       kpi('AI Overviews that cite us', overview?.citingUs ?? 0, overview?.citingUs ?? 0, { note: overview ? `of ${overview.withAiOverview} with an AI Overview, ${overview.checked} keywords checked ${String(overview.checkedAt).slice(0, 10)}` : 'Generate a strategy to run this check' }),
     ],
     series: {
@@ -358,6 +353,6 @@ async function cachedPerformance(days = 28, { fresh = false }: any = {}) {
   return data;
 }
 
-export { gatherPerformance, cachedPerformance, windows, weekBuckets, bucketSum, sumRange, inRange, pct, round, ga4Report, gaDate, wordpressPosts, addDays, iso };
+export { gatherPerformance, cachedPerformance, windows, weekBuckets, bucketSum, sumRange, inRange, pct, round, ga4Report, gaDate, sitePosts, addDays, iso };
 
 // Shared with lib/blogAnalytics.js

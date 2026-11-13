@@ -132,7 +132,7 @@ export async function businessResults({ days = 90 } = {}) {
   };
 }
 
-// Paste once into the website (WordPress > WPCode or the theme's footer). It remembers the first
+// Added once to the website's footer by the developer. It remembers the first
 // page and UTM tags of a visit, fills hidden fields on every form, passes the tags to Calendly links
 // and adds the page to WhatsApp messages, so Zoho records where each lead came from.
 export const TRACKING_SNIPPET = `<script>

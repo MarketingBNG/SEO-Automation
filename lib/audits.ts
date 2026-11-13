@@ -1,7 +1,7 @@
 import prisma from './prisma';
 import { auditBlog } from './anthropic';
 import { wordCount } from './validation';
-import { getPost } from './wordpress';
+import { getPost } from './site';
 import * as activity from './activity';
 import { safeFetchText } from './safeFetch';
 
@@ -25,17 +25,17 @@ function titleFromHtml(html) {
   return text.split(/\s[|–-]\s/)[0].slice(0, 120) || null;
 }
 
-// Runs a full audit on pasted content, a public URL, or an existing WordPress post, and stores it.
+// Runs a full audit on pasted content, a public URL, or a post on the website, and stores it.
 export async function createAudit({ title, contentHtml, sourceUrl, wpPostId }) {
   let content = contentHtml;
   let resolvedTitle = title;
   let resolvedUrl = sourceUrl || null;
 
   if (wpPostId) {
-    // Clean source: the post's actual content via the WordPress API, no page-chrome noise.
+    // Clean source: the post's actual content from the website connector, no page-chrome noise.
     const post = await getPost(wpPostId);
-    content = post.content.rendered;
-    resolvedTitle = resolvedTitle || post.title.rendered;
+    content = post.content;
+    resolvedTitle = resolvedTitle || post.title;
     resolvedUrl = post.link;
   } else if (sourceUrl && !content) {
     const pageRes = await safeFetchText(sourceUrl, { timeoutMs: 20000 });

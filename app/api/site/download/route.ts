@@ -5,7 +5,7 @@ import { methodNotAllowed } from '../../_lib/http';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// GET /api/wordpress/download?url=<live post on the company site>: that post as a Word file.
+// GET /api/site/download?url=<live post on the company site>: that post as a Word file.
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get('url') || '';
   try {

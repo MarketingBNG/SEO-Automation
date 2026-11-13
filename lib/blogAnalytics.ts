@@ -1,10 +1,11 @@
 // @ts-nocheck -- PORT NOTE: ported 1:1 from untyped JS; type checking disabled for this file only (logic unchanged).
 import * as perf from './performanceReport';
 import { querySearchAnalytics } from './searchConsole';
-import { wpRequest } from './wordpress';
+import { livePosts } from './site';
+import { publicSite } from './siteConnector';
 // Analytics for ONE blog (by URL) and a league table of all blogs: clicks, impressions, position,
 // visits, engagement, conversions, and the exact keywords (Google searches) the page ranks for,
-// each compared with the previous period. Read-only, from Search Console, GA4 and WordPress.
+// each compared with the previous period. Read-only, from Search Console, GA4 and the website.
 
 
 const { windows, weekBuckets, bucketSum, sumRange, inRange, pct, round, ga4Report, gaDate, addDays } = perf;
@@ -14,7 +15,7 @@ const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const decode = (s) => String(s || '').replace(/&#8217;|&rsquo;/g, "'").replace(/&#8211;|&#8212;|&ndash;|&mdash;/g, '-').replace(/&#038;|&amp;/g, '&').replace(/&#8220;|&#8221;|&quot;/g, '"').replace(/&#8230;/g, '...');
 
 function siteHost() {
-  return new URL(process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').hostname.replace(/^www\./, '');
+  return new URL(publicSite()).hostname.replace(/^www\./, '');
 }
 
 // Accepts only URLs on our own site; returns { url, path }.
@@ -61,7 +62,7 @@ async function getBlogAnalytics(inputUrl, { days = 28, keyword = '', fresh = fal
 async function blogAnalytics(inputUrl, { days = 28, keyword = '' }: any = {}) {
   const { url, path } = parseBlogUrl(inputUrl);
   const live = isLive(inputUrl);
-  if (!live) return { url, live: false, message: 'This page is not live yet (it is a WordPress draft or preview), so Google has no data for it. Analytics appear a few days after it is published.' };
+  if (!live) return { url, live: false, message: 'This page is not live yet (it is a draft or preview), so Google has no data for it. Analytics appear a few days after it is published.' };
 
   const w = windows(days);
   const buckets = weekBuckets(w.end, w.weeks);
@@ -199,15 +200,7 @@ async function blogTable({ days = 28 }: any = {}) {
     safe('pages', () => querySearchAnalytics({ ...w.current, dimensions: ['page'], rowLimit: 2000 })),
     safe('pagesBefore', () => querySearchAnalytics({ ...w.previous, dimensions: ['page'], rowLimit: 2000 })),
     safe('keywords', () => querySearchAnalytics({ ...w.current, dimensions: ['page', 'query'], rowLimit: 25000 })),
-    safe('wordpress', async () => {
-      const out: any[] = [];
-      for (let page = 1; page <= 6; page++) {
-        const { json } = await wpRequest('GET', '/wp/v2/posts', { query: { per_page: 100, page, status: 'publish', _fields: 'id,link,title,date,modified' } });
-        out.push(...json);
-        if (json.length < 100) break;
-      }
-      return out;
-    }),
+    safe('website', () => livePosts()),
   ]);
   const norm = (u) => u.replace(/\/+$/, '');
   const prevMap = new Map((prev || []).map((r) => [norm(r.keys[0]), r]));
@@ -224,10 +217,10 @@ async function blogTable({ days = 28 }: any = {}) {
     const b = prevMap.get(k);
     const qs = (topQ.get(k) || []).filter((q) => !BRAND.test(q.query)).sort((a, b2) => b2.impressions - a.impressions);
     return {
-      title: decode(p.title?.rendered) || p.link,
+      title: decode(p.title) || p.link,
       url: p.link,
-      published: String(p.date).slice(0, 10),
-      modified: String(p.modified).slice(0, 10),
+      published: String(p.date || '').slice(0, 10),
+      modified: String(p.modified || '').slice(0, 10),
       clicks: c?.clicks || 0,
       clicksBefore: b?.clicks || 0,
       change: (c?.clicks || 0) - (b?.clicks || 0),

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRanking } from '@/lib/serphouse';
+import { publicHost } from '@/lib/siteConnector';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed } from '../../_lib/http';
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
   if (!keyword) return NextResponse.json({ error: 'keyword is required' }, { status: 400 });
 
   try {
-    const siteUrl = process.env.WORDPRESS_SITE_URL || 'usaindiacfo.com';
+    const siteUrl = publicHost();
     const result: any = await checkRanking(keyword, siteUrl);
     await activity.log('serphouse.checked', {
       entityType: 'serphouse',

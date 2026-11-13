@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { updatePost, publishPost, seoSlug, wpRequest } from '@/lib/wordpress';
+import { updatePost, publishPost, seoSlug, postStatus, siteConfigured, draftsRefused, SITE_NOT_SET_UP } from '@/lib/site';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed, toId } from '../../../_lib/http';
@@ -8,19 +8,15 @@ import { faqAccordion } from '@/lib/strategy/core';
 
 export const runtime = 'nodejs';
 
-// Publishes an audit's rewrite. If the audit came from an existing WP post (wp_post_id set),
-// 'publish' REPLACES that post in place and 'draft' makes a separate draft post, so the live post
-// stays online and unchanged. Otherwise it creates a new post.
-// The separate draft saved earlier is still in WordPress and not live (not trashed, deleted or published).
-// Only a real 404 or 410 means it is gone: any other failure (timeout, 5xx, 401) is thrown, so the
-// save fails and can be retried instead of making a second draft and losing track of the first.
+// Publishes an audit's rewrite to the website. If the audit came from a live post (wp_post_id set),
+// 'publish' REPLACES that post in place. 'draft' (only while the website keeps drafts hidden,
+// SITE_CONNECTOR_DRAFTS=on) makes a separate website draft, so the live post stays online and
+// unchanged. Otherwise it creates a new post.
+// The separate draft saved earlier is still on the website and not live. Only "not on the website"
+// means it is gone: any other failure (timeout, 5xx) is thrown, so the save fails and can be retried
+// instead of making a second draft and losing track of the first.
 async function draftStillThere(id: number): Promise<boolean> {
-  const r: any = await wpRequest('GET', `/wp/v2/posts/${id}`, { query: { context: 'edit', _fields: 'status' } }).catch((e: any) => {
-    if (e?.status === 404 || e?.status === 410 || e?.code === 'rest_post_invalid_id') return null;
-    throw e;
-  });
-  const st = r?.json?.status;
-  return Boolean(st) && st !== 'trash' && st !== 'publish';
+  return (await postStatus(id)) === 'draft';
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -43,6 +39,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'wpStatus must be "publish" or "draft".' }, { status: 400 });
   }
 
+  // Without the website connection nothing can go out.
+  if (!siteConfigured()) {
+    await activity
+      .log('audit.rewrite_publish_failed', { entityType: 'blog_audit', entityId: nid, details: `"${audit.rewrite_title || audit.title || ''}": ${SITE_NOT_SET_UP}`, actor: await getActor() })
+      .catch(() => {});
+    return NextResponse.json({ error: SITE_NOT_SET_UP }, { status: 503 });
+  }
+  const noDraft = draftsRefused(wpStatus);
+  if (noDraft) return NextResponse.json({ error: noDraft }, { status: 400 });
+
   try {
     let post: any;
     // A live post must never be switched to draft: that takes it off the website.
@@ -57,7 +63,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         metaDescription: audit.rewrite_meta,
       } as any);
     } else if (separateDraft && audit.rewrite_wp_draft_id && (await draftStillThere(audit.rewrite_wp_draft_id))) {
-      // Sent as a separate draft before: that draft is updated, so no second WordPress draft is made.
+      // Sent as a separate draft before: that draft is updated, so no second website draft is made.
       post = await updatePost(audit.rewrite_wp_draft_id, {
         title: audit.rewrite_title,
         contentHtml: faqAccordion(audit.rewrite_content_html),
@@ -76,17 +82,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       } as any);
     }
 
-    // The live post now carries the rewrite, so a separate draft sent earlier is moved to the trash
-    // (only while it is still a draft) and forgotten. A failure here keeps its id, and the publish stands.
-    let forgetDraft = {};
-    if (!separateDraft && audit.wp_post_id && audit.rewrite_wp_draft_id) {
-      try {
-        if (await draftStillThere(audit.rewrite_wp_draft_id)) await wpRequest('DELETE', `/wp/v2/posts/${audit.rewrite_wp_draft_id}`);
-        forgetDraft = { rewrite_wp_draft_id: null, rewrite_wp_draft_url: null };
-      } catch (e: any) {
-        console.error('Audit publish: the separate draft could not be trashed:', e?.message || e);
-      }
-    }
+    // The live post now carries the rewrite, so a separate draft sent earlier is forgotten (the
+    // website offers no delete: it stays hidden there as a draft).
+    const forgetDraft = !separateDraft && audit.wp_post_id && audit.rewrite_wp_draft_id ? { rewrite_wp_draft_id: null, rewrite_wp_draft_url: null } : {};
 
     // The separate draft's address and id are kept, so the audit page links to it after a reload.
     await prisma.blog_audits.update({

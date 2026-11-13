@@ -2,7 +2,7 @@
 
 // Images inside the article. The writer marks where a visual would help; here the team uploads an
 // image for each spot (with alt text), removes a suggestion, or adds an image after any section.
-// Images are stored on the dashboard and go to the WordPress Media Library when the blog publishes.
+// Images are stored on the dashboard and are uploaded to the website when the blog publishes.
 import { useCallback, useEffect, useState } from 'react';
 import { ImagePlus, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -93,7 +93,7 @@ export function ArticleImages({ draftId, dirty, published, refreshKey, onChanged
       <div>
         <div className="text-sm font-medium">Images in the article</div>
         <p className="text-xs text-muted-foreground">
-          The cover image is added automatically. Inside the article the writer only marks where a visual would help; it never invents one. Upload an image for each spot (or remove the spot), or add an image after any section. Images go to the WordPress Media Library when the blog publishes. A blog does not publish while a suggestion is still in the text.
+          The cover image is added automatically. Inside the article the writer only marks where a visual would help; it never invents one. Upload an image for each spot (or remove the spot), or add an image after any section. Images are uploaded to the website when the blog publishes. A blog does not publish while a suggestion is still in the text.
         </p>
         {dirty && <p className="text-xs text-amber-600 dark:text-amber-400">Save your text changes first; placing an image edits the saved article.</p>}
         {published && <p className="text-xs text-muted-foreground">This blog is live. Change its images on the website through the assistant.</p>}

@@ -18,8 +18,9 @@ import { SAFEGUARDS } from './core';
 import { AUTOMATION, technicalFixesFromCrawl, calendarSlots, parseJson } from './generate';
 import { fixKind } from './fixer';
 import { strategyView, latestCrawl, trackStrategyKeywords } from './service';
+import { publicSite } from '../siteConnector';
 
-const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
+const SITE = () => publicSite();
 const HOST = () => SITE().replace(/^https?:\/\//, '').replace(/^www\./, '');
 const dom = (s: string) => String(s || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase();
 

@@ -11,8 +11,8 @@ import { CreditPausedError, isCreditError, assertCredits } from '../aiCredits';
 import { aiMode, isAutomatic, TestingModeError } from '../aiQueue';
 import { withReplay, clearReplay, markAiWait } from '../aiReplay';
 import { claimPublish, publishingRows } from './publishLock';
-import { connectorOn, authorSlug, siteOrigin } from '../siteConnector';
-import { publishPost, updatePost, seoSlug, wpRequest, uploadMedia, freeSlug } from '../wordpress';
+import { authorSlug, siteOrigin, publicSite, slugFromUrl } from '../siteConnector';
+import { publishPost, updatePost, seoSlug, uploadImage, freeSlug, searchPosts, postBySlug, postStatus, siteConfigured, SITE_NOT_SET_UP } from '../site';
 import { listSites, getSiteRankings, addTrackedKeyword } from '../seranking';
 import { getTermsForKeyword } from '../surfer';
 import { submitIndexNow, resubmitSitemap } from '../indexing';
@@ -24,8 +24,7 @@ import { syncMeetings } from '../clientInsights';
 import { runFixes } from './fixer';
 import { runOutreach, checkOutreachLinks } from './outreach';
 import { stopSupersededRows } from './replaced';
-import { runSpeedFixes } from './speed';
-import { authorNames, pickAuthor, wpAuthorId } from '../authors';
+import { authorNames, pickAuthor } from '../authors';
 import { makeCover, coverAlt } from '../cover';
 import { publishDraftImages } from '../inlineMedia';
 import { saveFile } from '../storage';
@@ -36,7 +35,7 @@ import { submitToBing } from '../bing';
 import { withByline, expertSchema } from '../byline';
 import { startTimer, endTimer, timed, setStage } from '../jobTimer';
 
-const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
+const SITE = () => publicSite();
 const HOST = () => SITE().replace(/^https?:\/\//, '').replace(/^www\./, '');
 // Drafts are written 72 hours before the slot so the 48-hour review can start on time.
 const DRAFT_LEAD_HOURS = 72;
@@ -158,10 +157,10 @@ async function publishingPaused() {
     const serverErrors = problems.filter((p) => (p.issues || []).some((i) => /^5\d\d status/.test(i))).length;
     if (serverErrors > 0) return `latest crawl has ${serverErrors} URL(s) with 5xx server errors`;
   }
-  // No default domain here: a local or test server must not fetch the live site. A server that
-  // publishes through the site connector checks the connector's site.
+  // No default domain here: a local or test server must not fetch the live site. Without SITE_URL
+  // the website connection's own site is checked.
   const origin = siteOrigin();
-  if (!origin) return 'neither WORDPRESS_SITE_URL nor the site connector is set, so the site cannot be checked';
+  if (!origin) return 'neither SITE_URL nor the website connection is set, so the site cannot be checked';
   try {
     const res = await fetch(`${origin}/robots.txt`, { signal: AbortSignal.timeout(15000) });
     if (res.status >= 500) return `site returned ${res.status}`;
@@ -222,10 +221,10 @@ export function afterPublishSummary(log: any): string {
 // Adds a link to the new post from 2 to 3 older related posts.
 async function addInternalLinks(newUrl, title, keyword) {
   const words = keyword.split(/\s+/).filter((w) => w.length > 3).slice(0, 3).join(' ');
-  const { json: posts } = await wpRequest('GET', '/wp/v2/posts', { query: { search: words || keyword, per_page: 6, context: 'edit', _fields: 'id,link,content' } });
+  const posts = await searchPosts(words || keyword, 6);
   const done = [];
-  for (const p of (posts || []).filter((x) => x.link !== newUrl).slice(0, 3)) {
-    const raw = p.content?.raw || '';
+  for (const p of posts.filter((x) => x.link !== newUrl && x.id).slice(0, 3)) {
+    const raw = p.content || '';
     if (!raw || raw.includes(newUrl)) continue;
     const add = `\n<p>Related guide: <a href="${newUrl}">${title}</a></p>\n`;
     const idx = raw.search(/<h2[^>]*>\s*(frequently asked questions|faqs?)/i);
@@ -355,8 +354,12 @@ async function publishRowOnce(row, now, verify) {
     return 'held';
   }
   const reasons = [];
-  const paused = await publishingPaused();
-  if (paused) reasons.push(`Auto-publishing paused: ${paused}.`);
+  // Nothing can go out without the website connection: the blog is held with that reason (not failed),
+  // no paid check runs, and it publishes on the first run after the connection is set up.
+  const noSite = siteConfigured() ? null : SITE_NOT_SET_UP;
+  if (noSite) reasons.push(noSite);
+  const paused = noSite || (await publishingPaused());
+  if (paused && !noSite) reasons.push(`Auto-publishing paused: ${paused}.`);
   if (draft.status === 'rejected') reasons.push('Reviewer rejected the draft.');
   // A blog a person reviewed or approved is not fact-checked again: the check at generation time
   // stands, and edits made in review are the reviewer's call. It publishes at its slot.
@@ -392,22 +395,20 @@ async function publishRowOnce(row, now, verify) {
   const reviewed = Boolean(row.reviewed_at) || draft.status === 'approved' || Boolean(row.review_started && draft.updated_at > row.review_started && draft.updated_at !== (row.fact_check ? JSON.parse(row.fact_check).stamp : null));
   let post;
   let authorName = row.author || checked.author || null;
-  let authorId: number | null = null;
   if (!row.refresh_url) authorName = authorName || pickAuthor(await authorNames());
-  // Images a person placed in the article move to the WordPress Media Library first.
+  // Images a person placed in the article are uploaded to the website first.
   const inline = await publishDraftImages(checked.id, checked.content_html || '');
-  // The cover (uploaded, or the branded one made from the title and author) goes to the Media
-  // Library with its alt text, so Google reads what the picture shows; its address also goes into
-  // the article schema.
+  // The cover (uploaded, or the branded one made from the title and author) goes to the website
+  // with its alt text, so Google reads what the picture shows; its address also goes into the
+  // article schema.
   let cover: { id: number; url: string } | null = null;
   if (!row.refresh_url) {
-    authorId = await wpAuthorId(authorName).catch(() => null);
     let imageKey = checked.featured_image_path || (await import('../coverPhoto').then((m) => m.ensurePhotoCover(checked.id)).catch(() => null));
     if (!imageKey) {
       imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(row.main_keyword)}.png`, await makeCover(checked.title, authorName), 'image/png').catch(() => null);
       if (imageKey) await prisma.drafts.update({ where: { id: checked.id }, data: { featured_image_path: imageKey } });
     }
-    cover = imageKey ? await uploadMedia(imageKey, { altText: coverAlt(checked), title: checked.title }).catch(() => null) : null;
+    cover = imageKey ? await uploadImage(imageKey, { altText: coverAlt(checked) }).catch(() => null) : null;
   }
   // Published meanwhile by another path (Publish in Drafts & Review): not sent a second time.
   const latest = await prisma.drafts.findUnique({ where: { id: checked.id }, select: { status: true, wp_post_id: true, wp_post_url: true } });
@@ -418,17 +419,17 @@ async function publishRowOnce(row, now, verify) {
   if (latest?.wp_post_id) checked.wp_post_id = latest.wp_post_id;
   const html = `${withByline(faqAccordion(inline.html), authorName, row.expert_reviewer)}\n${faqSchema(checked.content_html) || ''}\n${expertSchema({ title: checked.title, author: authorName, reviewer: row.expert_reviewer, image: cover?.url || null }) || ''}`;
   if (row.refresh_url) {
-    const { json: found } = await wpRequest('GET', '/wp/v2/posts', { query: { slug: new URL(row.refresh_url).pathname.split('/').filter(Boolean).pop(), _fields: 'id,link' } });
-    if (!found?.[0]) throw new Error(`Refresh target not found: ${row.refresh_url}`);
-    post = await updatePost(found[0].id, { title: checked.title, contentHtml: html, excerpt: checked.meta_description, metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, status: 'publish' });
+    const found = await postBySlug(slugFromUrl(row.refresh_url));
+    if (!found?.id) throw new Error(`Refresh target not found: ${row.refresh_url}`);
+    post = await updatePost(found.id, { title: checked.title, contentHtml: html, excerpt: checked.meta_description, metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, status: 'publish' });
   } else {
-    const fields = { title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredMediaId: cover?.id, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, author: authorId || undefined, authorName };
-    // The planned address must be free: a copy that was never live is moved to the trash.
+    const fields = { title: checked.title, contentHtml: html, excerpt: checked.meta_description, featuredImageUrl: cover?.url, featuredImageAlt: cover ? coverAlt(checked) : undefined, status: 'publish', slug: seoSlug(row.main_keyword), metaDescription: checked.meta_description, focusKeyphrase: row.main_keyword, authorName };
+    // A live post already at the planned address is left alone: the new post gets -2.
     const freed = await freeSlug(fields.slug, checked.wp_post_id).catch(() => null);
-    if (freed?.trashed.length) await activity.log('wordpress.duplicate_trashed', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}": moved WordPress post(s) ${freed.trashed.map((x) => `#${x}`).join(', ')} (never live) to the trash to free /${fields.slug}/` });
-    // Sent to WordPress earlier as a draft (from Drafts & Review): publish that post, not a second copy.
-    const existing = checked.wp_post_id ? await wpRequest('GET', `/wp/v2/posts/${checked.wp_post_id}`, { query: { context: 'edit', _fields: 'status' } }).then((r: any) => r.json?.status).catch(() => null) : null;
-    post = existing && existing !== 'trash' ? await updatePost(checked.wp_post_id, fields) : await publishPost(fields);
+    if (freed?.liveHolder) await activity.log('site.address_taken', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}": /${fields.slug}/ is already a live post (${freed.liveHolder.link}), so the new post gets another address.` });
+    // Sent to the website earlier as a draft (from Drafts & Review): publish that post, not a second copy.
+    const existing = checked.wp_post_id ? await postStatus(checked.wp_post_id).catch(() => null) : null;
+    post = existing ? await updatePost(checked.wp_post_id, fields) : await publishPost(fields);
   }
   await prisma.drafts.update({
     where: { id: checked.id },
@@ -438,13 +439,11 @@ async function publishRowOnce(row, now, verify) {
   // After publish: each step is independent and its result is logged.
   const log: any = await afterPublish(post.link, checked.title, row.main_keyword);
 
-  if (inline.uploaded.length) log.inlineImages = { ok: true, result: `${inline.uploaded.length} image(s) in the Media Library${inline.uploaded.some((u) => u.reused) ? ' (some reused from an earlier attempt)' : ''}` };
-  if (!row.refresh_url) log.cover = cover ? { ok: true, result: `Cover in the Media Library with alt text "${coverAlt(checked)}"` } : { ok: false, result: 'The cover could not be uploaded, so the post has no featured image. Upload one in Drafts & Review and republish, or set it in WordPress.' };
+  if (inline.uploaded.length) log.inlineImages = { ok: true, result: `${inline.uploaded.length} image(s) uploaded to the website${inline.uploaded.some((u) => u.reused) ? ' (some reused from an earlier attempt)' : ''}` };
+  if (!row.refresh_url) log.cover = cover ? { ok: true, result: `Cover uploaded to the website with alt text "${coverAlt(checked)}"` } : { ok: false, result: 'The cover could not be uploaded, so the post has no featured image. Upload one in Drafts & Review and publish again.' };
   log.author = !authorName
     ? undefined
-    : connectorOn()
-      ? { ok: Boolean(authorSlug(authorName)), result: authorSlug(authorName) ? `${authorName} (website author ${authorSlug(authorName)})` : `${authorName} is not an author on the website yet, so the website's default author was used` }
-      : { ok: Boolean(authorId), result: authorId ? `${authorName} (WordPress user ${authorId})` : `${authorName} is not a WordPress user yet, so the default author was used` };
+    : { ok: Boolean(authorSlug(authorName)), result: authorSlug(authorName) ? `${authorName} (website author ${authorSlug(authorName)})` : `${authorName} is not an author on the website yet, so the website's default author was used` };
   await update(row.id, { status: 'published', approval_mode: reviewed ? 'reviewed' : 'auto', wp_post_url: post.link, post_publish_log: JSON.stringify(log), hold_reasons: null, author: authorName });
   await activity.log('schedule.published', { entityType: 'draft', entityId: checked.id, details: `"${checked.title}" ${reviewed ? `approved by a reviewer${row.expert_reviewer ? ` (${row.expert_reviewer})` : ''}` : 'auto-approved after 48 hours with no rejection'}, by ${authorName || 'the default author'}: ${post.link}` });
   return 'published';
@@ -672,12 +671,7 @@ async function runDailyOnce(now: Date, { maxDrafts = 1, verify = verifyAndCorrec
     summary.outreach = await checkOutreachLinks(now).catch((e) => ({ verified: 0, error: e.message }));
     if (!summary.outreach?.error) await settings.set('last_outreach_link_check', today);
   }
-  // Speed: page cache plugin and WebP images, once per day (only while a strategy is approved).
-  if ((await settings.get('last_speed_run')) !== today && (await prisma.seo_strategies.count({ where: { status: 'approved' } }))) {
-    summary.speed = await runSpeedFixes().catch((e) => ({ error: e.message }));
-    if (!summary.speed?.error) await settings.set('last_speed_run', today);
-  }
-  // Live website checks (AI text on posts, sitemap in robots.txt, attachment pages), once per day.
+  // Live website checks (AI text on posts, sitemap in robots.txt), once per day.
   if ((await settings.get('last_site_check')) !== today) {
     const { runSiteChecks } = await import('../siteChecks');
     summary.siteChecks = await runSiteChecks().catch((e) => ({ error: e.message }));

@@ -52,8 +52,8 @@ const NAMED_ENTITIES = {
   sect: '§', para: '¶', euro: '€', pound: '£', cent: '¢', rarr: '→', larr: '←', shy: '',
 };
 
-// Decodes numeric (&#8217; &#x2019;) and common named (&rsquo; &amp;) HTML entities. WordPress
-// stores rendered titles and content this way, so text checks and the UI need the real characters.
+// Decodes numeric (&#8217; &#x2019;) and common named (&rsquo; &amp;) HTML entities. Pasted and
+// imported titles and content often arrive this way, so text checks and the UI need the real characters.
 function decodeEntities(str) {
   return String(str || '').replace(/&(#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi, (match, code) => {
     if (code[0] === '#') {
@@ -268,10 +268,10 @@ async function validateDraft({ title, meta, content, facts, keyword, paaQuestion
   }
 
   // Decoded, so &#8212; and &mdash; count too. "--" is checked on the text only (not the HTML,
-  // where it appears in comments), since WordPress turns it into a dash on the page.
+  // where it appears in comments), since the website may turn it into a dash on the page.
   const hasDash = (s) => /—/.test(decodeEntities(s)) || /--/.test(plainText(s));
   if (hasDash(content) || hasDash(title) || hasDash(meta)) {
-    issues.push('Contains em dashes (or "--", which WordPress turns into a dash). Replace each one with a comma, colon, full stop or parentheses.');
+    issues.push('Contains em dashes (or "--", which can show as a dash on the page). Replace each one with a comma, colon, full stop or parentheses.');
   }
 
   if (/\[verify/i.test(content || '')) {
@@ -279,7 +279,7 @@ async function validateDraft({ title, meta, content, facts, keyword, paaQuestion
   }
 
   if (/<h1[\s>]/i.test(content || '')) {
-    issues.push('The body contains an <h1>. WordPress uses the post title as the H1; start body headings at <h2>.');
+    issues.push('The body contains an <h1>. The website uses the post title as the H1; start body headings at <h2>.');
   }
 
   if (!FAQ_HEADING.test(content || '')) {

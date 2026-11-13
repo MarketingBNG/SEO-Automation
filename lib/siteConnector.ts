@@ -5,11 +5,21 @@
 // X-Dashboard-Signature = HMAC-SHA256(SITE_CONNECTOR_SECRET, timestamp + "\n" + raw JSON body).
 // Body: { action, data, nonce }. The site rejects anything unsigned, older than 5 minutes, or sent twice.
 //
-// Switched on by SITE_CONNECTOR_URL and SITE_CONNECTOR_SECRET (Coolify). While they are set, the
-// WordPress helpers in lib/wordpress.ts send their work here instead of to WordPress.
+// Switched on by SITE_CONNECTOR_URL and SITE_CONNECTOR_SECRET (Coolify). It is the only way the
+// dashboard reads or changes the website (lib/site.ts): without it nothing is published.
 import crypto from 'crypto';
 
 export const connectorOn = () => Boolean(process.env.SITE_CONNECTOR_URL && process.env.SITE_CONNECTOR_SECRET);
+
+// The one message for every website action while the connector is not set up.
+export const SITE_NOT_SET_UP = 'The website connection is not set up. Add SITE_CONNECTOR_URL and SITE_CONNECTOR_SECRET in Coolify.';
+export class SiteNotSetUpError extends Error {
+  status = 503;
+  code = 'SITE_NOT_SET_UP';
+  constructor() {
+    super(SITE_NOT_SET_UP);
+  }
+}
 
 // Values the site accepts (from the developer). Override with a comma-separated env value.
 const list = (env: string | undefined, fallback: string[]) => (env ? env.split(',').map((s) => s.trim()).filter(Boolean) : fallback);
@@ -19,12 +29,16 @@ export const SITE_AUTHORS = () => list(process.env.SITE_CONNECTOR_AUTHORS, ['aks
 // confirmed that "draft" stays hidden (SITE_CONNECTOR_DRAFTS=on).
 export const draftsAllowed = () => process.env.SITE_CONNECTOR_DRAFTS === 'on';
 
-// The live site's origin for checks that fetch it (robots.txt, Bing): WORDPRESS_SITE_URL, else the
+// The website's public address, as set: SITE_URL (the old name WORDPRESS_SITE_URL is still read, so
+// a server that has only the old variable keeps working). '' when neither is set.
+export const siteUrlSetting = () => (process.env.SITE_URL || process.env.WORDPRESS_SITE_URL || '').trim().replace(/\/+$/, '');
+
+// The live site's origin for checks that fetch it (robots.txt, Bing, IndexNow): SITE_URL, else the
 // connector's own site when the connector is set up. '' when neither is (a local or test server,
 // which must not fetch the live site).
 export function siteOrigin(): string {
-  const wp = (process.env.WORDPRESS_SITE_URL || '').trim().replace(/\/+$/, '');
-  if (wp) return wp;
+  const set = siteUrlSetting();
+  if (set) return set;
   if (!connectorOn()) return '';
   try {
     return new URL(String(process.env.SITE_CONNECTOR_URL)).origin;
@@ -33,10 +47,14 @@ export function siteOrigin(): string {
   }
 }
 
+// The public address for links, hosts and labels: siteOrigin(), else the company's domain.
+export const publicSite = () => siteOrigin() || 'https://usaindiacfo.com';
+export const publicHost = () => publicSite().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+
 export async function connectorCall(action: string, data: Record<string, unknown> = {}): Promise<any> {
   const url = process.env.SITE_CONNECTOR_URL;
   const secret = process.env.SITE_CONNECTOR_SECRET;
-  if (!url || !secret) throw new Error('The website connector is not set up (SITE_CONNECTOR_URL and SITE_CONNECTOR_SECRET in Coolify).');
+  if (!url || !secret) throw new SiteNotSetUpError();
   let lastErr: any;
   for (let attempt = 0; attempt < 3; attempt++) {
     // The site accepts each signed request once: a random nonce makes every request (and every
@@ -109,10 +127,10 @@ export async function sitePost(slug: string): Promise<SitePost | null> {
   }
 }
 
-// The dashboard keeps numeric post ids (wp_post_id). Ids saved in the WordPress days are still in the
-// database and are small numbers like the site's own, so one could point at an unrelated post on the
-// new site. The site's ids are therefore handed to the dashboard moved up by ID_OFFSET: an old
-// WordPress id is never mistaken for a site post (it reads as "not on the website").
+// The dashboard keeps numeric post ids (the wp_post_id columns). Ids saved before the move to the
+// custom website are still in the database and are small numbers like the site's own, so one could
+// point at an unrelated post on the new site. The site's ids are therefore handed to the dashboard
+// moved up by ID_OFFSET: an old id is never mistaken for a site post (it reads as "not on the website").
 const ID_OFFSET = 1_000_000_000;
 export const toDashId = (siteId: number | null) => (siteId == null ? null : ID_OFFSET + siteId);
 
@@ -120,7 +138,7 @@ export const toDashId = (siteId: number | null) => (siteId == null ? null : ID_O
 export async function slugForId(id: number | string): Promise<string> {
   if (typeof id === 'string' && !/^\d+$/.test(id)) return id;
   const n = Number(id);
-  if (!(n > ID_OFFSET)) throw Object.assign(new Error(`Post #${id} is from the old WordPress site, not the new website.`), { status: 404 });
+  if (!(n > ID_OFFSET)) throw Object.assign(new Error(`Post #${id} is from the old website, not the current one.`), { status: 404 });
   const siteId = n - ID_OFFSET;
   const hit = (await sitePosts()).find((p) => p.id === siteId) || (await sitePosts(true)).find((p) => p.id === siteId);
   if (!hit) throw Object.assign(new Error(`Post #${id} is not on the website.`), { status: 404 });
@@ -152,7 +170,7 @@ export function authorSlug(name: string | null | undefined): string | null {
   return SITE_AUTHORS().includes(slug) ? slug : null;
 }
 
-export const siteStatus = (wpStatus?: string) => (wpStatus === 'draft' || wpStatus === 'pending' || wpStatus === 'private' ? 'draft' : 'published');
+export const siteStatus = (status?: string) => (status === 'draft' || status === 'pending' || status === 'private' ? 'draft' : 'published');
 
 // ---------- Images ----------
 

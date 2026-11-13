@@ -18,8 +18,7 @@ const PDF = 'application/pdf';
 const MAX_BYTES = 15 * 1024 * 1024;
 const MAX_DOC_CHARS = 80000;
 
-// Saves a file attached in the assistant chat. Images: the original (what gets uploaded to
-// WordPress) plus a downscaled JPEG copy for the AI to look at. Word documents: converted to HTML
+// Saves a file attached in the assistant chat. Images: the original plus a downscaled JPEG copy for the AI to look at. Word documents: converted to HTML
 // and returned, so the text travels inside the chat message (e.g. a blog to audit). PDF and text
 // files the same way.
 export async function POST(req: NextRequest) {

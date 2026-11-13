@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import prisma from '@/lib/prisma';
-import { wpRequest, uploadMedia, refreshYoast } from '@/lib/wordpress';
+import { searchPosts, livePosts, getPost, findPostByUrl } from '@/lib/site';
 import { querySearchAnalytics, comparisonRanges } from '@/lib/searchConsole';
 import { getSummary, getTopLandingPages } from '@/lib/ga4';
 import { listSites, getSiteRankings, researchKeywords } from '@/lib/seranking';
@@ -12,21 +12,13 @@ import { getLeadSourceBreakdown } from '@/lib/zoho';
 import { recordQuestions, summary as questionBankSummary } from '@/lib/questionBank';
 import { createAudit } from '@/lib/audits';
 import { sqlNow } from '@/lib/time';
-import { ownImageIds } from './fileAccess';
 import type { Action } from '@/lib/permissions';
 
 // Every tool is either 'read' (runs immediately) or 'write' (only runs after the human approves
 // it in the dashboard). A write tool's run() returns { result, change } where change describes how
 // to reverse it; the engine records that in site_changes so the dashboard can offer Undo.
 
-const TYPE_ROUTES: Record<string, string> = { post: '/wp/v2/posts', page: '/wp/v2/pages' };
 const MAX_RESULT_CHARS = 40000;
-
-function route(type) {
-  const r = TYPE_ROUTES[type];
-  if (!r) throw new Error(`type must be "post" or "page", got "${type}"`);
-  return r;
-}
 
 function hash(str) {
   return crypto.createHash('sha1').update(String(str || '')).digest('hex');
@@ -46,15 +38,6 @@ function snippet(str, max = 160) {
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
-function decode(str) {
-  return String(str || '')
-    .replace(/&#8212;/g, '-')
-    .replace(/&#8211;/g, '-')
-    .replace(/&#038;|&amp;/g, '&')
-    .replace(/&#8217;/g, "'")
-    .replace(/&quot;/g, '"');
-}
-
 function countOccurrences(haystack, needle) {
   if (!needle) return 0;
   let count = 0;
@@ -66,73 +49,6 @@ function countOccurrences(haystack, needle) {
   return count;
 }
 
-// Top-level WPBakery rows ([vc_row]...[/vc_row]); inner rows use [vc_row_inner] so rows don't nest.
-function wpbakeryRows(content) {
-  const rows: any[] = [];
-  const openRe = /\[vc_row(?=[\s\]])/g;
-  let match;
-  while ((match = openRe.exec(content))) {
-    const start = match.index;
-    const closeIdx = content.indexOf('[/vc_row]', start);
-    if (closeIdx === -1) break;
-    const end = closeIdx + '[/vc_row]'.length;
-    const body = content.slice(start, end);
-    rows.push({
-      index: rows.length,
-      start,
-      end,
-      text: snippet(body, 140),
-      images: (body.match(/vc_single_image|<img\s/g) || []).length,
-    });
-    openRe.lastIndex = end;
-  }
-  return rows;
-}
-
-function isWpbakery(content) {
-  return /\[vc_row[\s\]]/.test(content || '');
-}
-
-async function getRaw(type, id) {
-  const { json } = await wpRequest('GET', `${route(type)}/${id}`, { query: { context: 'edit' } });
-  return {
-    id: json.id,
-    type,
-    title: json.title?.raw ?? '',
-    content: json.content?.raw ?? '',
-    excerpt: json.excerpt?.raw ?? '',
-    slug: json.slug,
-    status: json.status,
-    link: json.link,
-    featured_media: json.featured_media,
-    categories: json.categories,
-    tags: json.tags,
-    parent: json.parent,
-    modified: json.modified,
-    meta: json.meta || {},
-  };
-}
-
-function insertionIndex(content, { position, row_index, anchor_text }: any) {
-  if (position === 'top') return 0;
-  if (position === 'bottom') return content.length;
-  if (position === 'before_row' || position === 'after_row') {
-    const rows = wpbakeryRows(content);
-    if (!rows.length) throw new Error('This content has no WPBakery rows; use top, bottom, before_text or after_text.');
-    const row = rows[row_index];
-    if (!row) throw new Error(`row_index ${row_index} does not exist (this page has ${rows.length} rows, 0-${rows.length - 1}).`);
-    return position === 'before_row' ? row.start : row.end;
-  }
-  if (position === 'before_text' || position === 'after_text') {
-    const n = countOccurrences(content, anchor_text);
-    if (n === 0) throw new Error('anchor_text was not found in the raw content. Copy it exactly from wp_get_content.');
-    if (n > 1) throw new Error(`anchor_text appears ${n} times; use a longer, unique anchor.`);
-    const idx = content.indexOf(anchor_text);
-    return position === 'before_text' ? idx : idx + anchor_text.length;
-  }
-  throw new Error(`Unknown position "${position}"`);
-}
-
 function contextAround(content, idx, radius = 120) {
   return {
     before: content.slice(Math.max(0, idx - radius), idx),
@@ -140,106 +56,19 @@ function contextAround(content, idx, radius = 120) {
   };
 }
 
-function fieldDiffPreview(before, after) {
-  const rows: any[] = [];
-  for (const [key, next] of Object.entries(after)) {
-    const prev = before[key];
-    if (key === 'content') {
-      rows.push({ field: 'content', before: `${String(prev || '').length} characters`, after: `${String(next || '').length} characters` });
-    } else {
-      rows.push({ field: key, before: prev === undefined ? '' : JSON.stringify(prev), after: JSON.stringify(next) });
-    }
-  }
-  return rows;
-}
-
-function escapeAttr(str) {
-  return String(str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+function decode(str) {
+  return String(str || '')
+    .replace(/&#8212;/g, '-')
+    .replace(/&#8211;/g, '-')
+    .replace(/&#038;|&amp;/g, '&')
+    .replace(/&#8217;/g, "'")
+    .replace(/&quot;/g, '"');
 }
 
 const TOOLS: any[] = [];
-// Reviewer placeholders the writing playbook uses. They are fine in a WordPress draft, but must
-// never reach a live page, so any website write that would put one on a public page is refused.
-const PLACEHOLDER = /\[(PRACTITIONER NOTE NEEDED|VERIFY|AUTHOR NAME|REVIEWER NAME|VISUAL SUGGESTION)/i;
-const PLACEHOLDER_ALL = /\[(?:PRACTITIONER NOTE NEEDED|VERIFY|AUTHOR NAME|REVIEWER NAME|VISUAL SUGGESTION)[^\]\n]{0,160}\]?/gi;
-// Statuses visitors can see ('future' goes live by itself on its scheduled date).
-const PUBLIC_STATUSES = new Set(['publish', 'future']);
-const PLACEHOLDER_HELP =
-  'Replace each one with the real text first (ask the user for it if you do not have it), or keep the post as a draft. Placeholders are fine in draft, pending and private posts.';
-
-function countPlaceholders(texts) {
-  const counts = new Map<string, number>();
-  for (const t of texts) {
-    for (const m of String(t || '').match(PLACEHOLDER_ALL) || []) counts.set(m, (counts.get(m) || 0) + 1);
-  }
-  return counts;
-}
-
-// What visitors and search engines see of a post or page.
-function publicTexts(post) {
-  const meta = post.meta || {};
-  return [post.title, post.content, post.excerpt, meta._yoast_wpseo_title, meta._yoast_wpseo_metadesc];
-}
-
-// Placeholders this write would newly show on a public page. It checks the post as it will be
-// after the write (current fields with the new ones applied, and the resulting status), not the
-// tool input, so publishing a draft or restoring a revision is caught, while replacing a
-// placeholder or editing a draft is not blocked. Placeholders that were already live before the
-// change are not counted again, so they can be filled in one at a time.
-function newPublicPlaceholders(current, body) {
-  const before = current || {};
-  const status = body.status ?? before.status ?? 'draft';
-  if (!PUBLIC_STATUSES.has(status)) return [];
-  const after = { ...before, ...body, meta: { ...(before.meta || {}), ...(body.meta || {}) } };
-  const live = PUBLIC_STATUSES.has(before.status) ? countPlaceholders(publicTexts(before)) : new Map();
-  const found: string[] = [];
-  for (const [text, n] of countPlaceholders(publicTexts(after))) if (n > (live.get(text) || 0)) found.push(text);
-  return found;
-}
-
-function placeholderProblem(current, body) {
-  const found = newPublicPlaceholders(current, body);
-  if (!found.length) return null;
-  const list = found.slice(0, 5).map((t) => `"${t}"`).join(', ');
-  return `This would put reviewer placeholders on a live page: ${list}${found.length > 5 ? ` and ${found.length - 5} more` : ''}. ${PLACEHOLDER_HELP}`;
-}
-
-// Every post and page write goes through these two, so the placeholder rule is always checked
-// against what the page will really contain afterwards.
-async function savePost(type, id, current, body) {
-  const problem = placeholderProblem(current, body);
-  if (problem) throw new Error(problem);
-  return wpRequest('POST', `${route(type)}/${id}`, { body });
-}
-
-async function createPost(type, body) {
-  const problem = placeholderProblem(null, body);
-  if (problem) throw new Error(problem);
-  return wpRequest('POST', route(type), { body });
-}
-
-// Other website writes (media details, menus, categories and tags, site settings) have no draft
-// state and are public at once, so their text inputs are checked directly. Tools that write posts
-// or pages set postWrite and are checked on their final state by savePost / createPost instead.
-function placeholderGuard(tool) {
-  if (tool.kind !== 'write' || !tool.name.startsWith('wp_') || tool.postWrite) return tool;
-  const run = tool.run;
-  return {
-    ...tool,
-    run: async (input, ctx) => {
-      const texts = Object.values(input || {}).filter((v) => typeof v === 'string');
-      if (texts.some((t) => PLACEHOLDER.test(t))) {
-        throw new Error(
-          'This text still contains a reviewer placeholder ([AUTHOR NAME], [REVIEWER NAME], [PRACTITIONER NOTE NEEDED], [VISUAL SUGGESTION] or [VERIFY]), and this change is public as soon as it runs. Ask the user for the real text, then try again.'
-        );
-      }
-      return run(input, ctx);
-    },
-  };
-}
 
 function defineTool(tool: any) {
-  TOOLS.push(placeholderGuard({ risk: 'low', ...tool }));
+  TOOLS.push({ risk: 'low', ...tool });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -346,7 +175,7 @@ defineTool({
 // ---------------------------------------------------------------------------------------------
 // Blog drafts in the dashboard (Drafts & Review), whatever their status: in review, rejected,
 // approved, or paused / rescheduled on the monthly calendar. These change only the dashboard copy;
-// a blog already on the website is changed there with the wp_ tools.
+// a blog already on the website is updated by publishing it again from Drafts & Review.
 // ---------------------------------------------------------------------------------------------
 
 const DRAFT_FIELDS = ['title', 'meta_description', 'content_html'] as const;
@@ -364,7 +193,7 @@ const wordsIn = (html) => plainText(html).split(' ').filter(Boolean).length;
 
 function draftNote(draft) {
   return draft.wp_post_url
-    ? `This blog is already on the website (${draft.wp_post_url}). This changes only the dashboard copy; change the live post with the wp_ tools (post id ${draft.wp_post_id || 'see wp_post_url'}).`
+    ? `This blog is already on the website (${draft.wp_post_url}). This changes only the dashboard copy; to update the live post, publish the draft again from Drafts & Review ("Update the live post").`
     : null;
 }
 
@@ -480,7 +309,7 @@ defineTool({
           : { field: f.replace('_', ' '), before: draft[f] || '', after: i[f] }
       ),
       problem: fields.length ? null : 'Nothing to change.',
-      warnings: [lostImages ? `${lostImages} image(s) in the current article are not in the new one and would be removed.` : '', /<h1\b/i.test(i.content_html || '') ? 'The new article has an <h1>; WordPress prints the title as the H1, so start at <h2>.' : '', draftNote(draft) || ''].filter(Boolean),
+      warnings: [lostImages ? `${lostImages} image(s) in the current article are not in the new one and would be removed.` : '', /<h1\b/i.test(i.content_html || '') ? 'The new article has an <h1>; the website prints the title as the H1, so start at <h2>.' : '', draftNote(draft) || ''].filter(Boolean),
     };
   },
   run: async (i) => {
@@ -737,939 +566,45 @@ defineTool({
 });
 
 // ---------------------------------------------------------------------------------------------
-// Website (WordPress) - read
+// Website - read only, through the website connection (nothing on the website is changed here)
 // ---------------------------------------------------------------------------------------------
 
 defineTool({
-  name: 'wp_search_content',
+  name: 'website_search_posts',
   kind: 'read',
   description:
-    'Find blog posts and/or pages on usaindiacfo.com by keyword (searches titles and content). Returns id, type, title, status, link, last modified. Use this to find the id before reading or editing anything.',
+    'Find live blog posts on usaindiacfo.com whose title shares words with the query. Returns id, title, link, last modified. Read only.',
   input_schema: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: 'Search text; omit to list the most recent' },
-      type: { type: 'string', enum: ['post', 'page', 'any'] },
-      per_page: { type: 'integer', minimum: 1, maximum: 100 },
+      query: { type: 'string', description: 'Words from the title; omit to list the most recent' },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
     },
     required: [],
     additionalProperties: false,
   },
-  summarize: (i) => `Search website ${i.type && i.type !== 'any' ? `${i.type}s` : 'content'}${i.query ? ` for "${i.query}"` : ''}`,
-  run: async ({ query, type = 'any', per_page = 20 }) => {
-    const types = type === 'any' ? ['post', 'page'] : [type];
-    const out: any[] = [];
-    for (const t of types) {
-      const { json } = await wpRequest('GET', route(t), {
-        query: {
-          search: query,
-          per_page,
-          status: 'publish,draft,pending,private,future',
-          orderby: query ? 'relevance' : 'modified',
-          _fields: 'id,title,link,status,modified,slug',
-        },
-      });
-      for (const p of json as any[]) out.push({ id: p.id, type: t, title: decode(p.title?.rendered), status: p.status, slug: p.slug, link: p.link, modified: p.modified });
-    }
-    return out;
+  summarize: (i) => `Search the website's posts${i.query ? ` for "${i.query}"` : ''}`,
+  run: async ({ query, limit = 20 }) => {
+    const posts = query ? await searchPosts(query, limit, { full: false }) : (await livePosts()).sort((a, b) => String(b.modified || '').localeCompare(String(a.modified || ''))).slice(0, limit);
+    return posts.map((p) => ({ id: p.id, title: decode(p.title), slug: p.slug, link: p.link, modified: p.modified }));
   },
 });
 
 defineTool({
-  name: 'wp_get_content',
+  name: 'website_get_post',
   kind: 'read',
-  description:
-    'Read one post or page exactly as stored (raw content, not rendered), plus title, slug, status, excerpt, featured image id, categories, tags and Yoast SEO fields if exposed. Pages built with WPBakery also get an outline of their top-level rows (row_index + text preview) so you can target an insertion point. ALWAYS read before editing.',
+  description: 'Read one live blog post on usaindiacfo.com (by id from website_search_posts, or by its address): title, content, SEO title, meta description, focus keyphrase, cover image. Read only.',
   input_schema: {
     type: 'object',
-    properties: { id: { type: 'integer' }, type: { type: 'string', enum: ['post', 'page'] } },
-    required: ['id', 'type'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `Read ${i.type} #${i.id}`,
-  run: async ({ id, type }) => {
-    const raw = await getRaw(type, id);
-    const builder = isWpbakery(raw.content) ? 'wpbakery' : 'html';
-    const yoast = Object.fromEntries(Object.entries(raw.meta).filter(([k]) => k.startsWith('_yoast')));
-    return {
-      ...raw,
-      meta: undefined,
-      yoast: Object.keys(yoast).length ? yoast : 'not exposed via REST (the one-time Yoast REST snippet is not installed)',
-      builder,
-      outline: builder === 'wpbakery' ? wpbakeryRows(raw.content).map(({ index, text, images }) => ({ row_index: index, text, images })) : undefined,
-      content_length: raw.content.length,
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_list_media',
-  kind: 'read',
-  description: 'Search the WordPress Media Library (images) by keyword. Returns id, title, URL, alt text, dimensions.',
-  input_schema: {
-    type: 'object',
-    properties: { search: { type: 'string' }, per_page: { type: 'integer', minimum: 1, maximum: 100 } },
+    properties: { id: { type: 'integer' }, url: { type: 'string' } },
     required: [],
     additionalProperties: false,
   },
-  summarize: (i) => `Search media library${i.search ? ` for "${i.search}"` : ''}`,
-  run: async ({ search, per_page = 20 }) => {
-    const { json } = await wpRequest('GET', '/wp/v2/media', {
-      query: { search, per_page, _fields: 'id,title,source_url,alt_text,mime_type,date,media_details' },
-    });
-    return json.map((m) => ({
-      id: m.id,
-      title: decode(m.title?.rendered),
-      url: m.source_url,
-      alt_text: m.alt_text,
-      mime_type: m.mime_type,
-      width: m.media_details?.width,
-      height: m.media_details?.height,
-      date: m.date,
-    }));
-  },
-});
-
-defineTool({
-  name: 'wp_list_menus',
-  kind: 'read',
-  description: 'List navigation menus and which theme location each one is assigned to (e.g. the header menu).',
-  input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
-  summarize: () => 'List website menus',
-  run: async () => (await wpRequest('GET', '/wp/v2/menus', { query: { _fields: 'id,name,locations', per_page: 100 } })).json,
-});
-
-defineTool({
-  name: 'wp_get_menu_items',
-  kind: 'read',
-  description: 'List the items of one navigation menu: id, title, URL, parent item, order.',
-  input_schema: { type: 'object', properties: { menu_id: { type: 'integer' } }, required: ['menu_id'], additionalProperties: false },
-  summarize: (i) => `Read menu #${i.menu_id}`,
-  run: async ({ menu_id }) => {
-    const { json } = await wpRequest('GET', '/wp/v2/menu-items', {
-      query: { menus: menu_id, per_page: 100, _fields: 'id,title,url,parent,menu_order,object,object_id,type' },
-    });
-    return json.map((m) => ({ ...m, title: decode(m.title?.rendered ?? m.title) }));
-  },
-});
-
-const SETTINGS_READ_KEYS = ['title', 'description', 'url', 'show_on_front', 'page_on_front', 'page_for_posts', 'posts_per_page', 'timezone', 'date_format', 'default_category'];
-const SETTINGS_WRITE_KEYS = ['title', 'description', 'show_on_front', 'page_on_front', 'page_for_posts', 'posts_per_page', 'default_category'];
-
-defineTool({
-  name: 'wp_get_site_settings',
-  kind: 'read',
-  description: 'Read core site settings: site title, tagline, which page is the homepage and the blog page, posts per page, timezone.',
-  input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
-  summarize: () => 'Read site settings',
-  run: async () => {
-    const { json } = await wpRequest('GET', '/wp/v2/settings');
-    return Object.fromEntries(SETTINGS_READ_KEYS.map((k) => [k, json[k]]));
-  },
-});
-
-defineTool({
-  name: 'wp_list_terms',
-  kind: 'read',
-  description: 'List blog categories or tags (id, name, slug, post count).',
-  input_schema: {
-    type: 'object',
-    properties: { taxonomy: { type: 'string', enum: ['category', 'tag'] }, search: { type: 'string' } },
-    required: ['taxonomy'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `List ${i.taxonomy === 'tag' ? 'tags' : 'categories'}`,
-  run: async ({ taxonomy, search }) => {
-    const r = taxonomy === 'tag' ? '/wp/v2/tags' : '/wp/v2/categories';
-    return (await wpRequest('GET', r, { query: { search, per_page: 100, _fields: 'id,name,slug,count,parent' } })).json;
-  },
-});
-
-defineTool({
-  name: 'wp_list_plugins',
-  kind: 'read',
-  description: 'List installed WordPress plugins with active/inactive status and version.',
-  input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
-  summarize: () => 'List plugins',
-  run: async () =>
-    (await wpRequest('GET', '/wp/v2/plugins', { query: { _fields: 'plugin,name,status,version' } })).json.map((p) => ({
-      ...p,
-      name: decode(p.name),
-    })),
-});
-
-defineTool({
-  name: 'wp_list_revisions',
-  kind: 'read',
-  description: 'List saved WordPress revisions of a post or page (id, date) so an older version can be restored.',
-  input_schema: {
-    type: 'object',
-    properties: { id: { type: 'integer' }, type: { type: 'string', enum: ['post', 'page'] } },
-    required: ['id', 'type'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `List revisions of ${i.type} #${i.id}`,
-  run: async ({ id, type }) =>
-    (await wpRequest('GET', `${route(type)}/${id}/revisions`, { query: { per_page: 15, _fields: 'id,date,author,title' } })).json.map((r) => ({
-      id: r.id,
-      date: r.date,
-      title: decode(r.title?.rendered),
-    })),
-});
-
-// ---------------------------------------------------------------------------------------------
-// Website (WordPress) - write (every one of these waits for human approval)
-// ---------------------------------------------------------------------------------------------
-
-async function restoreFieldsChange(type, id, before, afterContent, summary) {
-  return {
-    summary,
-    targetType: type,
-    targetId: String(id),
-    undo: { kind: 'restore_fields', type, id, fields: before, expectHash: afterContent !== undefined ? hash(afterContent) : undefined },
-  };
-}
-
-defineTool({
-  name: 'wp_create_post',
-  kind: 'write',
-  risk: 'medium',
-  description:
-    'Create a new blog post. Defaults to status "draft" (not visible to the public) unless the user explicitly asked to publish. content_html is Classic Editor HTML (h2/h3/p/ul/li/strong/a/img).',
-  input_schema: {
-    type: 'object',
-    properties: {
-      title: { type: 'string' },
-      content_html: { type: 'string' },
-      status: { type: 'string', enum: ['draft', 'publish', 'pending', 'private'] },
-      excerpt: { type: 'string' },
-      slug: { type: 'string' },
-      categories: { type: 'array', items: { type: 'integer' } },
-      tags: { type: 'array', items: { type: 'integer' } },
-      featured_media_id: { type: 'integer' },
-    },
-    required: ['title', 'content_html'],
-    additionalProperties: false,
-  },
-  postWrite: true,
-  riskFor: (i) => (i.status === 'publish' ? 'high' : 'medium'),
-  summarize: (i) => `Create blog post "${i.title}" as ${i.status || 'draft'}`,
-  preview: async (i) => ({
-    title: i.title,
-    status: i.status || 'draft',
-    slug: i.slug || '(auto)',
-    words: plainText(i.content_html).split(' ').filter(Boolean).length,
-    problem: placeholderProblem(null, newPostBody(i)),
-  }),
-  run: async (i) => {
-    const { json } = await createPost('post', newPostBody(i));
-    return {
-      result: { id: json.id, status: json.status, link: json.link },
-      change: { summary: `Created post "${i.title}" (#${json.id}, ${json.status})`, targetType: 'post', targetId: String(json.id), undo: { kind: 'trash', type: 'post', id: json.id } },
-    };
-  },
-});
-
-function newPostBody(i) {
-  return {
-    title: i.title,
-    content: i.content_html,
-    status: i.status || 'draft',
-    ...(i.excerpt ? { excerpt: i.excerpt } : {}),
-    ...(i.slug ? { slug: i.slug } : {}),
-    ...(i.categories ? { categories: i.categories } : {}),
-    ...(i.tags ? { tags: i.tags } : {}),
-    ...(i.featured_media_id ? { featured_media: i.featured_media_id } : {}),
-  };
-}
-
-function newPageBody(i) {
-  return { title: i.title, content: i.content, status: i.status || 'draft', ...(i.slug ? { slug: i.slug } : {}), ...(i.parent ? { parent: i.parent } : {}) };
-}
-
-defineTool({
-  name: 'wp_create_page',
-  kind: 'write',
-  risk: 'medium',
-  description: 'Create a new page. Defaults to "draft". content may be HTML or WPBakery shortcodes.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      title: { type: 'string' },
-      content: { type: 'string' },
-      status: { type: 'string', enum: ['draft', 'publish', 'pending', 'private'] },
-      slug: { type: 'string' },
-      parent: { type: 'integer' },
-    },
-    required: ['title', 'content'],
-    additionalProperties: false,
-  },
-  postWrite: true,
-  riskFor: (i) => (i.status === 'publish' ? 'high' : 'medium'),
-  summarize: (i) => `Create page "${i.title}" as ${i.status || 'draft'}`,
-  preview: async (i) => ({ title: i.title, status: i.status || 'draft', slug: i.slug || '(auto)', problem: placeholderProblem(null, newPageBody(i)) }),
-  run: async (i) => {
-    const { json } = await createPost('page', newPageBody(i));
-    return {
-      result: { id: json.id, status: json.status, link: json.link },
-      change: { summary: `Created page "${i.title}" (#${json.id}, ${json.status})`, targetType: 'page', targetId: String(json.id), undo: { kind: 'trash', type: 'page', id: json.id } },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_update_fields',
-  kind: 'write',
-  risk: 'medium',
-  description:
-    'Change fields of an existing post or page: title, slug, status, excerpt, categories, tags, featured image, or the FULL content. Only use content_html to replace the whole body of a normal blog post; for WPBakery pages or small edits use wp_replace_text / wp_insert_content instead so the page layout is not damaged.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      id: { type: 'integer' },
-      type: { type: 'string', enum: ['post', 'page'] },
-      title: { type: 'string' },
-      slug: { type: 'string' },
-      status: { type: 'string', enum: ['draft', 'publish', 'pending', 'private'] },
-      excerpt: { type: 'string' },
-      content_html: { type: 'string' },
-      categories: { type: 'array', items: { type: 'integer' } },
-      tags: { type: 'array', items: { type: 'integer' } },
-      featured_media_id: { type: 'integer' },
-    },
-    required: ['id', 'type'],
-    additionalProperties: false,
-  },
-  postWrite: true,
-  riskFor: (i) => (i.status || i.slug || (i.content_html && i.type === 'page') ? 'high' : 'medium'),
-  summarize: (i) => {
-    const fields = Object.keys(i).filter((k) => !['id', 'type'].includes(k));
-    return `Update ${i.type} #${i.id}: ${fields.join(', ') || 'nothing'}`;
-  },
-  preview: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    const after = fieldsFromInput(i);
-    const warnings: string[] = [];
-    if (i.content_html && isWpbakery(current.content)) warnings.push('This page is built with WPBakery; replacing the whole content can break its layout.');
-    if (i.slug && i.slug !== current.slug) warnings.push('Changing the slug changes the URL. Add a redirect from the old URL (Redirect Redirection plugin) so links and rankings are not lost.');
-    return { target: `${decode(current.title)} (${current.link})`, problem: placeholderProblem(current, after), changes: fieldDiffPreview(current, after), warnings };
-  },
-  run: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    const after = fieldsFromInput(i);
-    const before = Object.fromEntries(Object.keys(after).map((k) => [k, current[k]]));
-    const { json } = await savePost(i.type, i.id, current, after);
-    const change = await restoreFieldsChange(i.type, i.id, before, after.content, `Updated ${i.type} "${decode(current.title)}": ${Object.keys(after).join(', ')}`);
-    return { result: { id: json.id, status: json.status, link: json.link }, change };
-  },
-});
-
-function fieldsFromInput(i) {
-  const out: any = {};
-  if (i.title !== undefined) out.title = i.title;
-  if (i.slug !== undefined) out.slug = i.slug;
-  if (i.status !== undefined) out.status = i.status;
-  if (i.excerpt !== undefined) out.excerpt = i.excerpt;
-  if (i.content_html !== undefined) out.content = i.content_html;
-  if (i.categories !== undefined) out.categories = i.categories;
-  if (i.tags !== undefined) out.tags = i.tags;
-  if (i.featured_media_id !== undefined) out.featured_media = i.featured_media_id;
-  return out;
-}
-
-function replaceInContent(content, i) {
-  return i.replace_all ? content.split(i.find).join(i.replace) : content.replace(i.find, () => i.replace);
-}
-
-defineTool({
-  name: 'wp_replace_text',
-  kind: 'write',
-  risk: 'medium',
-  description:
-    'Precise find-and-replace inside the raw content of a post or page (safe for WPBakery pages). "find" must be copied exactly from wp_get_content and must match exactly once unless replace_all is true. Use this for changing a phone number, fixing wording, updating a figure, changing a link, etc.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      id: { type: 'integer' },
-      type: { type: 'string', enum: ['post', 'page'] },
-      find: { type: 'string' },
-      replace: { type: 'string' },
-      replace_all: { type: 'boolean' },
-    },
-    required: ['id', 'type', 'find', 'replace'],
-    additionalProperties: false,
-  },
-  postWrite: true,
-  summarize: (i) => `Edit text on ${i.type} #${i.id}: "${snippet(i.find, 60)}" → "${snippet(i.replace, 60)}"`,
-  preview: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    const n = countOccurrences(current.content, i.find);
-    const idx = current.content.indexOf(i.find);
-    return {
-      target: `${decode(current.title)} (${current.link})`,
-      occurrences: n,
-      willReplace: n === 0 ? 0 : i.replace_all ? n : 1,
-      problem:
-        n === 0
-          ? 'The text was not found, this change would fail.'
-          : n > 1 && !i.replace_all
-            ? `The text appears ${n} times; this change would fail unless replace_all is set.`
-            : placeholderProblem(current, { content: replaceInContent(current.content, i) }),
-      context: idx >= 0 ? contextAround(current.content, idx) : null,
-    };
-  },
-  run: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    const n = countOccurrences(current.content, i.find);
-    if (n === 0) throw new Error('The text to replace was not found (the page may have changed). Re-read it with wp_get_content.');
-    if (n > 1 && !i.replace_all) throw new Error(`The text appears ${n} times; use a longer unique snippet or set replace_all.`);
-    const content = replaceInContent(current.content, i);
-    const { json } = await savePost(i.type, i.id, current, { content });
-    const change = await restoreFieldsChange(i.type, i.id, { content: current.content }, content, `Edited text on ${i.type} "${decode(current.title)}" (${i.replace_all ? n : 1} replacement${n > 1 && i.replace_all ? 's' : ''})`);
-    return { result: { id: json.id, link: json.link, replacements: i.replace_all ? n : 1 }, change };
-  },
-});
-
-defineTool({
-  name: 'wp_insert_content',
-  kind: 'write',
-  risk: 'medium',
-  description:
-    'Insert new content (HTML or WPBakery shortcodes) into a post or page without touching the rest. position: top | bottom | before_row | after_row (WPBakery pages, use row_index from the outline) | before_text | after_text (exact unique anchor_text copied from wp_get_content). For a WPBakery page, wrap new sections in [vc_row][vc_column]...[/vc_column][/vc_row] (text inside [vc_column_text]...[/vc_column_text]).',
-  input_schema: {
-    type: 'object',
-    properties: {
-      id: { type: 'integer' },
-      type: { type: 'string', enum: ['post', 'page'] },
-      content: { type: 'string' },
-      position: { type: 'string', enum: ['top', 'bottom', 'before_row', 'after_row', 'before_text', 'after_text'] },
-      row_index: { type: 'integer', minimum: 0 },
-      anchor_text: { type: 'string' },
-    },
-    required: ['id', 'type', 'content', 'position'],
-    additionalProperties: false,
-  },
-  postWrite: true,
-  summarize: (i) => `Insert content into ${i.type} #${i.id} (${i.position}${i.row_index !== undefined ? ` row ${i.row_index}` : ''})`,
-  preview: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    let idx;
-    let problem: string | null = null;
-    try {
-      idx = insertionIndex(current.content, i);
-      problem = placeholderProblem(current, { content: current.content.slice(0, idx) + i.content + current.content.slice(idx) });
-    } catch (e: any) {
-      problem = e.message;
-    }
-    return {
-      target: `${decode(current.title)} (${current.link})`,
-      problem,
-      insertedPreview: snippet(i.content, 300),
-      context: idx !== undefined ? contextAround(current.content, idx) : null,
-    };
-  },
-  run: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    const idx = insertionIndex(current.content, i);
-    const content = current.content.slice(0, idx) + i.content + current.content.slice(idx);
-    const { json } = await savePost(i.type, i.id, current, { content });
-    const change = await restoreFieldsChange(i.type, i.id, { content: current.content }, content, `Inserted content into ${i.type} "${decode(current.title)}" (${i.position})`);
-    return { result: { id: json.id, link: json.link }, change };
-  },
-});
-
-defineTool({
-  name: 'wp_upload_image',
-  kind: 'write',
-  risk: 'low',
-  description:
-    'Upload an image the user attached in this chat (by its image_id) to the WordPress Media Library, with descriptive alt text (always write meaningful alt text). Returns the new media id and URL, which you can then insert with wp_insert_image or set as a featured image.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      image_id: { type: 'integer' },
-      alt_text: { type: 'string' },
-      title: { type: 'string' },
-      caption: { type: 'string' },
-    },
-    required: ['image_id', 'alt_text'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `Upload attached image #${i.image_id} to Media Library (alt: "${snippet(i.alt_text, 60)}")`,
-  // Only an image the asker attached themselves (an admin: any), so a member cannot publish an image
-  // someone else attached in a private chat; another person's image reads as not found. An image
-  // attached before attached files were recorded has no owner on file and is allowed, as it is read.
-  preview: async (i, ctx) => {
-    const img = (await ownImageIds(ctx?.me, [i.image_id], { legacy: true })).length
-      ? await prisma.image_library.findUnique({ where: { id: i.image_id }, select: { id: true, filename: true, width: true, height: true } })
-      : null;
-    return img ? { file: img.filename, dimensions: img.width ? `${img.width}x${img.height}` : 'unknown', alt_text: i.alt_text } : { problem: `Attached image ${i.image_id} not found.` };
-  },
-  run: async (i, ctx) => {
-    const img = (await ownImageIds(ctx?.me, [i.image_id], { legacy: true })).length ? await prisma.image_library.findUnique({ where: { id: i.image_id } }) : null;
-    if (!img) throw new Error(`Attached image ${i.image_id} not found`);
-    // PORT NOTE: img.path is now a storage key (lib/storage); lib/wordpress reads it via readFile.
-    const media = await uploadMedia(img.path, { altText: i.alt_text, title: i.title, caption: i.caption });
-    return {
-      result: media,
-      change: { summary: `Uploaded image "${img.filename}" to Media Library (#${media.id})`, targetType: 'media', targetId: String(media.id), undo: { kind: 'delete_media', id: media.id } },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_insert_image',
-  kind: 'write',
-  risk: 'medium',
-  description:
-    'Insert an image that is already in the Media Library into a post or page at a chosen position (same positions as wp_insert_content). On WPBakery pages it becomes a WPBakery image row (as_banner=true makes it a full-width stretched banner row); on blog posts it becomes a Classic Editor image, optionally captioned and linked.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      id: { type: 'integer' },
-      type: { type: 'string', enum: ['post', 'page'] },
-      media_id: { type: 'integer' },
-      position: { type: 'string', enum: ['top', 'bottom', 'before_row', 'after_row', 'before_text', 'after_text'] },
-      row_index: { type: 'integer', minimum: 0 },
-      anchor_text: { type: 'string' },
-      as_banner: { type: 'boolean' },
-      align: { type: 'string', enum: ['center', 'left', 'right', 'none'] },
-      link_url: { type: 'string' },
-      caption: { type: 'string' },
-    },
-    required: ['id', 'type', 'media_id', 'position'],
-    additionalProperties: false,
-  },
-  postWrite: true,
-  summarize: (i) => `Insert image #${i.media_id}${i.as_banner ? ' as a full-width banner' : ''} into ${i.type} #${i.id} (${i.position}${i.row_index !== undefined ? ` row ${i.row_index}` : ''})`,
-  preview: async (i) => {
-    const [current, media] = await Promise.all([getRaw(i.type, i.id), wpRequest('GET', `/wp/v2/media/${i.media_id}`).then((r) => r.json)]);
-    let idx;
-    let problem: string | null = null;
-    try {
-      idx = insertionIndex(current.content, i);
-      problem = placeholderProblem(current, { content: current.content.slice(0, idx) + imageMarkup(current, media, i) + current.content.slice(idx) });
-    } catch (e: any) {
-      problem = e.message;
-    }
-    return {
-      target: `${decode(current.title)} (${current.link})`,
-      image: media.source_url,
-      problem,
-      warning: !media.alt_text ? 'This image has no alt text; add it with wp_update_media for SEO and accessibility.' : null,
-      context: idx !== undefined ? contextAround(current.content, idx) : null,
-    };
-  },
-  run: async (i) => {
-    const [current, media] = await Promise.all([getRaw(i.type, i.id), wpRequest('GET', `/wp/v2/media/${i.media_id}`).then((r) => r.json)]);
-    const markup = imageMarkup(current, media, i);
-    const idx = insertionIndex(current.content, i);
-    const content = current.content.slice(0, idx) + markup + current.content.slice(idx);
-    const { json } = await savePost(i.type, i.id, current, { content });
-    const change = await restoreFieldsChange(i.type, i.id, { content: current.content }, content, `Inserted image #${media.id}${i.as_banner ? ' (banner)' : ''} into ${i.type} "${decode(current.title)}"`);
-    return { result: { id: json.id, link: json.link, markup }, change };
-  },
-});
-
-function imageMarkup(current, media, i) {
-  const align = i.align || 'center';
-  if (isWpbakery(current.content)) {
-    const link = i.link_url ? ` onclick="custom_link" link="${escapeAttr(i.link_url)}"` : '';
-    const rowAttrs = i.as_banner ? ' full_width="stretch_row_content_no_spaces"' : '';
-    return `[vc_row${rowAttrs}][vc_column][vc_single_image image="${media.id}" img_size="full" alignment="${align === 'none' ? 'left' : align}"${link}${i.caption ? ` title="${escapeAttr(i.caption)}"` : ''}][/vc_column][/vc_row]`;
-  }
-  const w = media.media_details?.width;
-  const h = media.media_details?.height;
-  let img = `<img class="align${align} size-full wp-image-${media.id}" src="${escapeAttr(media.source_url)}" alt="${escapeAttr(media.alt_text)}"${w ? ` width="${w}" height="${h}"` : ''} />`;
-  if (i.link_url) img = `<a href="${escapeAttr(i.link_url)}">${img}</a>`;
-  const markup = i.caption ? `[caption id="attachment_${media.id}" align="align${align}"${w ? ` width="${w}"` : ''}]${img} ${escapeAttr(i.caption)}[/caption]` : img;
-  return `\n${markup}\n`;
-}
-
-defineTool({
-  name: 'wp_set_featured_image',
-  kind: 'write',
-  risk: 'low',
-  description: 'Set the featured image (thumbnail shown on blog listings and social shares) of a post or page.',
-  input_schema: {
-    type: 'object',
-    properties: { id: { type: 'integer' }, type: { type: 'string', enum: ['post', 'page'] }, media_id: { type: 'integer' } },
-    required: ['id', 'type', 'media_id'],
-    additionalProperties: false,
-  },
-  postWrite: true,
-  summarize: (i) => `Set featured image of ${i.type} #${i.id} to media #${i.media_id}`,
-  run: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    const { json } = await savePost(i.type, i.id, current, { featured_media: i.media_id });
-    return {
-      result: { id: json.id, featured_media: json.featured_media },
-      change: await restoreFieldsChange(i.type, i.id, { featured_media: current.featured_media || 0 }, undefined, `Set featured image of "${decode(current.title)}" to #${i.media_id}`),
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_update_media',
-  kind: 'write',
-  risk: 'low',
-  description: 'Update an existing Media Library image: alt text, title, caption.',
-  input_schema: {
-    type: 'object',
-    properties: { media_id: { type: 'integer' }, alt_text: { type: 'string' }, title: { type: 'string' }, caption: { type: 'string' } },
-    required: ['media_id'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `Update media #${i.media_id}${i.alt_text ? ` alt text: "${snippet(i.alt_text, 60)}"` : ''}`,
-  run: async (i) => {
-    const { json: before } = await wpRequest('GET', `/wp/v2/media/${i.media_id}`, { query: { context: 'edit' } });
-    const body: any = {};
-    const prev: any = {};
-    if (i.alt_text !== undefined) { body.alt_text = i.alt_text; prev.alt_text = before.alt_text; }
-    if (i.title !== undefined) { body.title = i.title; prev.title = before.title?.raw; }
-    if (i.caption !== undefined) { body.caption = i.caption; prev.caption = before.caption?.raw; }
-    const { json } = await wpRequest('POST', `/wp/v2/media/${i.media_id}`, { body });
-    return {
-      result: { id: json.id, alt_text: json.alt_text },
-      change: { summary: `Updated media #${i.media_id}: ${Object.keys(body).join(', ')}`, targetType: 'media', targetId: String(i.media_id), undo: { kind: 'restore_media_fields', id: i.media_id, fields: prev } },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_update_yoast_seo',
-  kind: 'write',
-  risk: 'low',
-  description:
-    'Set the Yoast SEO meta description, focus keyphrase and/or SEO title of a post or page. Requires a one-time snippet on the WordPress site; if it is missing this fails with instructions.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      id: { type: 'integer' },
-      type: { type: 'string', enum: ['post', 'page'] },
-      meta_description: { type: 'string' },
-      focus_keyphrase: { type: 'string' },
-      seo_title: { type: 'string' },
-    },
-    required: ['id', 'type'],
-    additionalProperties: false,
-  },
-  postWrite: true,
-  summarize: (i) => `Update Yoast SEO fields on ${i.type} #${i.id}`,
-  preview: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    const exposed = '_yoast_wpseo_metadesc' in current.meta;
-    return {
-      target: `${decode(current.title)} (${current.link})`,
-      meta_description: i.meta_description ? `${i.meta_description.length} characters` : undefined,
-      problem: exposed
-        ? placeholderProblem(current, { meta: yoastMetaFromInput(i) })
-        : 'The Yoast REST snippet is not installed on the site yet, so this will fail. See Settings > Yoast SEO fields in the dashboard.',
-    };
-  },
-  run: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    if (!('_yoast_wpseo_metadesc' in current.meta)) {
-      throw new Error('Yoast SEO fields are not writable via the WordPress API yet. Install the one-time snippet shown in the dashboard Settings tab (Yoast SEO fields card), then try again.');
-    }
-    const meta = yoastMetaFromInput(i);
-    const before = Object.fromEntries(Object.keys(meta).map((k) => [k, current.meta[k] || '']));
-    await savePost(i.type, i.id, current, { meta });
-    await refreshYoast(i.type, i.id);
-    return {
-      result: { id: i.id, updated: Object.keys(meta) },
-      change: await restoreFieldsChange(i.type, i.id, { meta: before }, undefined, `Updated Yoast SEO fields on "${decode(current.title)}"`),
-    };
-  },
-});
-
-function yoastMetaFromInput(i) {
-  const meta: any = {};
-  if (i.meta_description !== undefined) meta._yoast_wpseo_metadesc = i.meta_description;
-  if (i.focus_keyphrase !== undefined) meta._yoast_wpseo_focuskw = i.focus_keyphrase;
-  if (i.seo_title !== undefined) meta._yoast_wpseo_title = i.seo_title;
-  return meta;
-}
-
-defineTool({
-  name: 'wp_update_settings',
-  kind: 'write',
-  risk: 'high',
-  description:
-    'Change core site settings: site title, tagline (description), homepage display (show_on_front, page_on_front, page_for_posts), posts_per_page, default_category. Changing the homepage affects the whole site.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      title: { type: 'string' },
-      description: { type: 'string' },
-      show_on_front: { type: 'string', enum: ['posts', 'page'] },
-      page_on_front: { type: 'integer' },
-      page_for_posts: { type: 'integer' },
-      posts_per_page: { type: 'integer', minimum: 1, maximum: 100 },
-      default_category: { type: 'integer' },
-    },
-    required: [],
-    additionalProperties: false,
-  },
-  summarize: (i) => `Change site settings: ${Object.keys(i).join(', ')}`,
-  preview: async (i) => {
-    const { json } = await wpRequest('GET', '/wp/v2/settings');
-    return { changes: Object.keys(i).map((k) => ({ field: k, before: JSON.stringify(json[k]), after: JSON.stringify(i[k]) })) };
-  },
-  run: async (i) => {
-    const body = Object.fromEntries(Object.entries(i).filter(([k]) => SETTINGS_WRITE_KEYS.includes(k)));
-    if (!Object.keys(body).length) throw new Error('No allowed settings to change');
-    const { json: before } = await wpRequest('GET', '/wp/v2/settings');
-    await wpRequest('POST', '/wp/v2/settings', { body });
-    return {
-      result: { updated: Object.keys(body) },
-      change: {
-        summary: `Changed site settings: ${Object.keys(body).join(', ')}`,
-        targetType: 'settings',
-        targetId: 'site',
-        undo: { kind: 'restore_settings', fields: Object.fromEntries(Object.keys(body).map((k) => [k, before[k]])) },
-      },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_add_menu_item',
-  kind: 'write',
-  risk: 'medium',
-  description: 'Add an item to a navigation menu: link to a page (page_id), post (post_id), category (category_id) or a custom URL (url). Optional parent_item_id makes it a dropdown child.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      menu_id: { type: 'integer' },
-      title: { type: 'string' },
-      url: { type: 'string' },
-      page_id: { type: 'integer' },
-      post_id: { type: 'integer' },
-      category_id: { type: 'integer' },
-      parent_item_id: { type: 'integer' },
-      menu_order: { type: 'integer' },
-    },
-    required: ['menu_id', 'title'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `Add "${i.title}" to menu #${i.menu_id}`,
-  run: async (i) => {
-    const body: any = { title: i.title, menus: i.menu_id, status: 'publish' };
-    if (i.page_id) Object.assign(body, { type: 'post_type', object: 'page', object_id: i.page_id });
-    else if (i.post_id) Object.assign(body, { type: 'post_type', object: 'post', object_id: i.post_id });
-    else if (i.category_id) Object.assign(body, { type: 'taxonomy', object: 'category', object_id: i.category_id });
-    else if (i.url) Object.assign(body, { type: 'custom', url: i.url });
-    else throw new Error('Give one of page_id, post_id, category_id or url');
-    if (i.parent_item_id) body.parent = i.parent_item_id;
-    if (i.menu_order !== undefined) body.menu_order = i.menu_order;
-    const { json } = await wpRequest('POST', '/wp/v2/menu-items', { body });
-    return {
-      result: { id: json.id, url: json.url },
-      change: { summary: `Added menu item "${i.title}" (#${json.id}) to menu #${i.menu_id}`, targetType: 'menu_item', targetId: String(json.id), undo: { kind: 'delete_menu_item', id: json.id } },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_update_menu_item',
-  kind: 'write',
-  risk: 'medium',
-  description: 'Rename, re-link, re-order or re-parent an existing menu item.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      item_id: { type: 'integer' },
-      title: { type: 'string' },
-      url: { type: 'string' },
-      menu_order: { type: 'integer' },
-      parent_item_id: { type: 'integer' },
-    },
-    required: ['item_id'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `Update menu item #${i.item_id}`,
-  run: async (i) => {
-    const { json: before } = await wpRequest('GET', `/wp/v2/menu-items/${i.item_id}`, { query: { context: 'edit' } });
-    const body: any = {};
-    const prev: any = {};
-    if (i.title !== undefined) { body.title = i.title; prev.title = before.title?.raw ?? before.title; }
-    if (i.url !== undefined) { body.url = i.url; prev.url = before.url; }
-    if (i.menu_order !== undefined) { body.menu_order = i.menu_order; prev.menu_order = before.menu_order; }
-    if (i.parent_item_id !== undefined) { body.parent = i.parent_item_id; prev.parent = before.parent; }
-    const { json } = await wpRequest('POST', `/wp/v2/menu-items/${i.item_id}`, { body });
-    return {
-      result: { id: json.id },
-      change: { summary: `Updated menu item #${i.item_id}: ${Object.keys(body).join(', ')}`, targetType: 'menu_item', targetId: String(i.item_id), undo: { kind: 'restore_menu_item', id: i.item_id, fields: prev } },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_remove_menu_item',
-  kind: 'write',
-  risk: 'medium',
-  description: 'Remove an item from a navigation menu (the linked page itself is not affected).',
-  input_schema: { type: 'object', properties: { item_id: { type: 'integer' } }, required: ['item_id'], additionalProperties: false },
-  summarize: (i) => `Remove menu item #${i.item_id}`,
-  run: async (i) => {
-    const { json: before } = await wpRequest('GET', `/wp/v2/menu-items/${i.item_id}`, { query: { context: 'edit' } });
-    await wpRequest('DELETE', `/wp/v2/menu-items/${i.item_id}`, { query: { force: 'true' } });
-    const fields = {
-      title: before.title?.raw ?? before.title,
-      menus: before.menus,
-      status: 'publish',
-      type: before.type,
-      object: before.object,
-      object_id: before.object_id,
-      url: before.url,
-      parent: before.parent,
-      menu_order: before.menu_order,
-    };
-    return {
-      result: { removed: i.item_id },
-      change: { summary: `Removed menu item "${fields.title}" (#${i.item_id})`, targetType: 'menu_item', targetId: String(i.item_id), undo: { kind: 'recreate_menu_item', fields } },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_create_term',
-  kind: 'write',
-  risk: 'low',
-  description: 'Create a new blog category or tag.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      taxonomy: { type: 'string', enum: ['category', 'tag'] },
-      name: { type: 'string' },
-      slug: { type: 'string' },
-      parent: { type: 'integer' },
-      description: { type: 'string' },
-    },
-    required: ['taxonomy', 'name'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `Create ${i.taxonomy} "${i.name}"`,
-  run: async (i) => {
-    const r = i.taxonomy === 'tag' ? '/wp/v2/tags' : '/wp/v2/categories';
-    const { json } = await wpRequest('POST', r, {
-      body: { name: i.name, ...(i.slug ? { slug: i.slug } : {}), ...(i.parent ? { parent: i.parent } : {}), ...(i.description ? { description: i.description } : {}) },
-    });
-    return {
-      result: { id: json.id, name: json.name },
-      change: { summary: `Created ${i.taxonomy} "${i.name}" (#${json.id})`, targetType: i.taxonomy, targetId: String(json.id), undo: { kind: 'delete_term', taxonomy: i.taxonomy, id: json.id } },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_trash_content',
-  kind: 'write',
-  risk: 'high',
-  description: 'Move a post or page to the WordPress trash (it disappears from the site but can be restored). Never deletes permanently.',
-  input_schema: {
-    type: 'object',
-    properties: { id: { type: 'integer' }, type: { type: 'string', enum: ['post', 'page'] } },
-    required: ['id', 'type'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `Move ${i.type} #${i.id} to trash`,
-  preview: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    return { target: `${decode(current.title)} (${current.link})`, status: current.status, warning: 'Anyone visiting this URL will get a "not found" page. Consider a redirect.' };
-  },
-  run: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    await wpRequest('DELETE', `${route(i.type)}/${i.id}`);
-    return {
-      result: { trashed: i.id },
-      change: { summary: `Moved ${i.type} "${decode(current.title)}" to trash`, targetType: i.type, targetId: String(i.id), undo: { kind: 'untrash', type: i.type, id: i.id, status: current.status } },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_restore_revision',
-  kind: 'write',
-  risk: 'medium',
-  description: 'Restore a post or page to one of its saved WordPress revisions (from wp_list_revisions).',
-  input_schema: {
-    type: 'object',
-    properties: { id: { type: 'integer' }, type: { type: 'string', enum: ['post', 'page'] }, revision_id: { type: 'integer' } },
-    required: ['id', 'type', 'revision_id'],
-    additionalProperties: false,
-  },
-  postWrite: true,
-  summarize: (i) => `Restore ${i.type} #${i.id} to revision #${i.revision_id}`,
-  preview: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    const rev = await getRevision(i);
-    const body = revisionBody(current, rev);
-    return {
-      target: `${decode(current.title)} (${current.link})`,
-      status: current.status,
-      revision_date: rev.date,
-      problem: placeholderProblem(current, body),
-      changes: fieldDiffPreview(current, body),
-    };
-  },
-  run: async (i) => {
-    const current = await getRaw(i.type, i.id);
-    const body = revisionBody(current, await getRevision(i));
-    await savePost(i.type, i.id, current, body);
-    return {
-      result: { restored: i.revision_id },
-      change: await restoreFieldsChange(i.type, i.id, { content: current.content, title: current.title }, body.content, `Restored ${i.type} "${decode(current.title)}" to revision #${i.revision_id}`),
-    };
-  },
-});
-
-async function getRevision(i) {
-  return (await wpRequest('GET', `${route(i.type)}/${i.id}/revisions/${i.revision_id}`, { query: { context: 'edit' } })).json;
-}
-
-function revisionBody(current, rev) {
-  return { content: rev.content?.raw ?? '', title: rev.title?.raw ?? current.title };
-}
-
-defineTool({
-  name: 'wp_set_plugin_status',
-  kind: 'write',
-  risk: 'high',
-  description:
-    'Activate or deactivate an installed plugin (use the "plugin" value from wp_list_plugins, e.g. "akismet/akismet"). Deactivating security, cache, SEO, form or page-builder plugins can break the site; warn the user first.',
-  input_schema: {
-    type: 'object',
-    properties: { plugin: { type: 'string' }, status: { type: 'string', enum: ['active', 'inactive'] } },
-    required: ['plugin', 'status'],
-    additionalProperties: false,
-  },
-  summarize: (i) => `${i.status === 'active' ? 'Activate' : 'Deactivate'} plugin ${i.plugin}`,
-  run: async (i) => {
-    const { json: before } = await wpRequest('GET', `/wp/v2/plugins/${i.plugin}`);
-    const { json } = await wpRequest('POST', `/wp/v2/plugins/${i.plugin}`, { body: { status: i.status } });
-    return {
-      result: { plugin: json.plugin, status: json.status },
-      change: { summary: `Set plugin ${decode(before.name)} to ${i.status}`, targetType: 'plugin', targetId: i.plugin, undo: { kind: 'plugin_status', plugin: i.plugin, status: before.status } },
-    };
-  },
-});
-
-defineTool({
-  name: 'wp_install_plugin',
-  kind: 'write',
-  risk: 'high',
-  description:
-    'Install a plugin from the official WordPress.org directory by its slug (e.g. "code-snippets"). It is installed INACTIVE; activate it separately with wp_set_plugin_status. Before proposing, check (web search) that it is well maintained and widely used.',
-  input_schema: { type: 'object', properties: { slug: { type: 'string' } }, required: ['slug'], additionalProperties: false },
-  summarize: (i) => `Install plugin "${i.slug}" from WordPress.org (inactive)`,
-  run: async (i) => {
-    const { json } = await wpRequest('POST', '/wp/v2/plugins', { body: { slug: i.slug, status: 'inactive' } });
-    return {
-      result: { plugin: json.plugin, name: decode(json.name), status: json.status, version: json.version },
-      change: { summary: `Installed plugin ${decode(json.name)} (inactive)`, targetType: 'plugin', targetId: json.plugin, undo: { kind: 'delete_plugin', plugin: json.plugin } },
-    };
+  summarize: (i) => `Read website post ${i.id ? `#${i.id}` : i.url || ''}`.trim(),
+  run: async ({ id, url }) => {
+    if (!id && !url) throw new Error('Give the post id or its address.');
+    const p = id ? await getPost(id) : await findPostByUrl(url);
+    return { ...p, content_length: p.content.length };
   },
 });
 
@@ -1834,22 +769,22 @@ defineTool({
   kind: 'write',
   risk: 'low',
   description:
-    'Run the full SEO/AEO/GEO + fact-check audit on a blog (pasted HTML/text, a public URL, or an existing post id). Works for any blog, including someone else\'s. Takes 1-2 minutes and uses AI credits. The result appears in the Blog Audit tab, where the user can generate the rewrite, see what changed and why, and download it as Word.',
+    'Run the full SEO/AEO/GEO + fact-check audit on a blog (pasted HTML/text, a public URL, or a live website post id from website_search_posts). Works for any blog, including someone else\'s. Takes 1-2 minutes and uses AI credits. The result appears in the Blog Audit tab, where the user can generate the rewrite, see what changed and why, and download it as Word.',
   input_schema: {
     type: 'object',
     properties: {
       content_html: { type: 'string' },
       source_url: { type: 'string' },
-      wp_post_id: { type: 'integer' },
+      post_id: { type: 'integer', description: 'A live post on the website (id from website_search_posts).' },
       title: { type: 'string' },
     },
     required: [],
     additionalProperties: false,
   },
-  summarize: (i) => `Run a blog audit on ${i.wp_post_id ? `post #${i.wp_post_id}` : i.source_url ? i.source_url : 'the pasted blog'}`,
+  summarize: (i) => `Run a blog audit on ${i.post_id ? `website post #${i.post_id}` : i.source_url ? i.source_url : 'the pasted blog'}`,
   run: async (i, ctx) => {
     ctx.emit?.({ type: 'tool_progress', text: 'Auditing the blog (researching every claim, 1-2 minutes)…' });
-    const audit = await createAudit({ title: i.title, contentHtml: i.content_html, sourceUrl: i.source_url, wpPostId: i.wp_post_id });
+    const audit = await createAudit({ title: i.title, contentHtml: i.content_html, sourceUrl: i.source_url, wpPostId: i.post_id });
     return {
       result: {
         audit_id: audit.id,
@@ -1863,58 +798,68 @@ defineTool({
   },
 });
 
+// A Word file made in the chat: the document the user asked for (a blog with SEO and links added, a
+// report, notes), saved privately for this member and linked in the reply. Nothing goes to the website.
+defineTool({
+  name: 'make_word_file',
+  kind: 'read',
+  description:
+    'Make a Word (.docx) file and give the user a download link in this chat. Use it whenever the user asks for a document, a Word file or a downloadable version (for example their blog with SEO, internal links and backlinks added). Put the COMPLETE document in html (headings as <h2>/<h3>, paragraphs, lists, tables, links as <a href>). Then reply with the link exactly as returned, as a markdown link. Never deliver a document by saving it to the website or any draft there.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: 'Document title, used as the file name and the first heading.' },
+      html: { type: 'string', description: 'The full document body as HTML.' },
+    },
+    required: ['title', 'html'],
+    additionalProperties: false,
+  },
+  summarize: (i) => `Make a Word file: ${i.title || 'document'}`,
+  run: async (i, ctx) => {
+    const html = String(i.html || '');
+    if (html.replace(/<[^>]+>/g, ' ').trim().length < 20) throw new Error('The document is empty: put the full text in html.');
+    const title = String(i.title || 'Document').trim().slice(0, 150) || 'Document';
+    const { htmlToDocx } = await import('@/lib/docx');
+    const { saveFile } = await import('@/lib/storage');
+    const { ownerStamp } = await import('./conversations');
+    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const buf = await htmlToDocx(`<h1>${esc(title)}</h1>${html}`);
+    const filename = `${title.replace(/[^a-z0-9 ._-]+/gi, '').trim().replace(/\s+/g, '-').slice(0, 80) || 'document'}.docx`;
+    const key = `assistant/docs/${Date.now()}-${filename}`;
+    const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    await saveFile(key, buf, DOCX);
+    await prisma.assistant_files.create({ data: { kind: 'document', filename, path: key, mime: DOCX, size: buf.length, uploaded_by: ownerStamp(ctx?.me, null) } });
+    const url = `/api/uploads/${key}`;
+    return { filename, url, link_markdown: `[Download ${filename}](${url})`, note: 'Give the user link_markdown exactly as written.' };
+  },
+});
+
 // ---------------------------------------------------------------------------------------------
 // Undo
 // ---------------------------------------------------------------------------------------------
 
 async function undoChange(undo, { force = false }: { force?: boolean } = {}) {
   switch (undo.kind) {
-    case 'restore_fields': {
-      if (undo.expectHash && !force) {
-        const current = await getRaw(undo.type, undo.id);
-        if (hash(current.content) !== undo.expectHash) {
-          const err: any = new Error('This content was edited again after this change. Undoing now would also remove those later edits.');
-          err.code = 'CHANGED_SINCE';
-          throw err;
-        }
-      }
-      await wpRequest('POST', `${route(undo.type)}/${undo.id}`, { body: undo.fields });
-      return 'Restored the previous version.';
+    case 'restore_site_post': {
+      // A technical fix on a website post (lib/strategy/fixer.ts): the saved fields go back.
+      const { updatePost } = await import('@/lib/site');
+      await updatePost(undo.id, undo.fields || {});
+      return 'Restored the previous version on the website.';
     }
+    // Changes made on the old website before the move to the custom site cannot be reversed here.
+    case 'restore_fields':
     case 'trash':
-      await wpRequest('DELETE', `${route(undo.type)}/${undo.id}`);
-      return 'Moved the created item to trash.';
     case 'untrash':
-      await wpRequest('POST', `${route(undo.type)}/${undo.id}`, { body: { status: undo.status || 'draft' } });
-      return 'Restored from trash.';
     case 'delete_media':
-      await wpRequest('DELETE', `/wp/v2/media/${undo.id}`, { query: { force: 'true' } });
-      return 'Deleted the uploaded image from the Media Library.';
     case 'restore_media_fields':
-      await wpRequest('POST', `/wp/v2/media/${undo.id}`, { body: undo.fields });
-      return 'Restored the image details.';
     case 'restore_settings':
-      await wpRequest('POST', '/wp/v2/settings', { body: undo.fields });
-      return 'Restored the previous settings.';
     case 'delete_menu_item':
-      await wpRequest('DELETE', `/wp/v2/menu-items/${undo.id}`, { query: { force: 'true' } });
-      return 'Removed the menu item.';
     case 'restore_menu_item':
-      await wpRequest('POST', `/wp/v2/menu-items/${undo.id}`, { body: undo.fields });
-      return 'Restored the menu item.';
     case 'recreate_menu_item':
-      await wpRequest('POST', '/wp/v2/menu-items', { body: undo.fields });
-      return 'Re-added the menu item.';
     case 'delete_term':
-      await wpRequest('DELETE', `${undo.taxonomy === 'tag' ? '/wp/v2/tags' : '/wp/v2/categories'}/${undo.id}`, { query: { force: 'true' } });
-      return 'Deleted the created term.';
     case 'plugin_status':
-      await wpRequest('POST', `/wp/v2/plugins/${undo.plugin}`, { body: { status: undo.status } });
-      return `Plugin set back to ${undo.status}.`;
     case 'delete_plugin':
-      await wpRequest('POST', `/wp/v2/plugins/${undo.plugin}`, { body: { status: 'inactive' } });
-      await wpRequest('DELETE', `/wp/v2/plugins/${undo.plugin}`);
-      return 'Uninstalled the plugin.';
+      throw new Error('This change was made on the old website, which the dashboard no longer reaches, so it cannot be undone from here.');
     case 'restore_paa_questions':
       return await undoPaaSave(undo.rows || []);
     case 'delete_paa_questions': {

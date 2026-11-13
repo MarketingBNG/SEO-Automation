@@ -1,6 +1,6 @@
 # USAIndiaCFO Growth Center
 
-Internal SEO and content automation dashboard: keywords → Claude research and draft → human review → WordPress,
+Internal SEO and content automation dashboard: keywords → Claude research and draft → human review → the company website,
 plus blog audits and renewal, SEO/AEO/GEO reports, monthly strategy, training, meetings insights and a site assistant.
 
 ## Stack
@@ -47,10 +47,9 @@ Cron requests are authorised with `CRON_SECRET`; everything else requires a sign
 ## Project layout
 - `app/` - pages (`page.tsx` dashboard, `login/`) and API route handlers (`app/api/**/route.ts`)
 - `components/tabs/` - one file per dashboard tab; `components/shared/` - shared widgets; `components/ui/` - shadcn
-- `lib/` - domain logic (Claude pipeline, validation, WordPress, Google, Zoho, strategy, assistant)
+- `lib/` - domain logic (Claude pipeline, validation, the website connector, Google, Zoho, strategy, assistant)
 - `prisma/` - schema and migrations · `scripts/migrate-sqlite.ts` - one-off import from the old SQLite app
 - `skills/seo-blog-playbook/SKILL.md` - writing playbook injected into prompts
-- `wordpress/yoast-rest-fields.php` - snippet the WordPress site needs so Yoast meta can be set via REST
 
 ## Monthly Strategy (SEO, AEO, GEO)
 

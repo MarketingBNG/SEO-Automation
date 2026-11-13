@@ -115,7 +115,7 @@ together with the house rules above; if anything here conflicts with accuracy or
 accuracy and the house voice win):\n${playbook}
 
 HOW THE PLAYBOOK MAPS TO THIS DASHBOARD (these override the playbook where they differ):
-- Do NOT write an <h1> in the content: WordPress prints the SEO title as the H1. Start at <h2>.
+- Do NOT write an <h1> in the content: the website prints the SEO title as the H1. Start at <h2>.
 - Byline: do NOT write a byline, author name or reviewer line. The dashboard adds the author, the CA/CPA reviewer and the "last reviewed" date when the post is published. Do not write "Published" or "Last updated" dates either.
 - Call to action: end the article (after the disclaimer) with exactly one call to action written for THIS article's reader, using the CALL TO ACTION given in the request (its service, link and idea). Make it specific to the problem the article solved, one or two sentences, no hype, with the link on descriptive anchor text.
 - The Facts Register goes ONLY in the ===FACTS=== section of the output format below, never in ===CONTENT===. List the FAQ sources (each FAQ question with its source and market, e.g. "paa, US") as bullets at the end of ===RESEARCH_NOTES===.
@@ -183,7 +183,7 @@ VOICE (USAIndiaCFO blog house style): ${voiceGuidelines}
 CHECKED AUTOMATICALLY (a draft that fails any of these is sent back to you):
 - Title 50-60 characters (never over 60) with the target keyword early. Meta description 120-156
   characters that restates the answer plus one concrete detail.
-- No <h1> in the body (WordPress uses the title as the H1).
+- No <h1> in the body (the website uses the title as the H1).
 - Internal links to genuinely related USAIndiaCFO posts or service pages from the brief: never zero,
   3-8 by default, with descriptive anchor text (never "click here", "read more" or "here").
 - Key rates, thresholds, deadlines and rules linked inline to their official primary source
@@ -1223,7 +1223,7 @@ async function researchAndWriteBlog(keyword, notes, { signal, onProgress }: any 
   const stage = (key, percent, text, extra: any = {}) => onProgress?.(text, Math.round(percent), { key, round: attempt, ...extra });
   const words = (chars) => Math.round(chars / 6.5).toLocaleString('en-US');
 
-  stage('brief', 3, 'Gathering data from SE Ranking, Google, Search Console, WordPress and Surfer…', { progress: 0 });
+  stage('brief', 3, 'Gathering data from SE Ranking, Google, Search Console, the website and Surfer…', { progress: 0 });
   const brief = await frozenInput('writer-brief', () => gatherBrief(keyword, { includeSurfer: true }));
   if (signal?.aborted) throw Object.assign(new Error('Request was aborted.'), { name: 'AbortError' });
 

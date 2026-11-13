@@ -6,11 +6,12 @@
 // searches the whole web.
 import prisma from './prisma';
 import { liveSearch } from './serphouse';
+import { publicSite } from './siteConnector';
 
 const N = 8;
 export const MAX_SHARE = 0.08;
 export const MAX_RUN = 25;
-const OWN_HOST = () => new URL(process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').hostname.replace(/^www\./, '');
+const OWN_HOST = () => new URL(publicSite()).hostname.replace(/^www\./, '');
 const SKIP = /(youtube|reddit|quora|facebook|linkedin|instagram|twitter|x)\.com|\.pdf($|\?)/i;
 
 export function plainText(html: string): string {

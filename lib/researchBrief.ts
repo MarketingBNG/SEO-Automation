@@ -3,7 +3,7 @@ import * as questionBankMod from './questionBank';
 import { researchKeywords, listSites, getSiteRankings } from './seranking';
 import { liveSearch } from './serphouse';
 import { querySearchAnalytics, comparisonRanges } from './searchConsole';
-import { wpRequest } from './wordpress';
+import { searchPosts } from './site';
 import { getTermsForKeyword } from './surfer';
 // Gathers a pre-writing brief for one target keyword from every connected SEO tool. Each source
 // is independent and time-boxed: a tool that is down or slow is skipped, never blocking a draft.
@@ -88,17 +88,13 @@ async function gatherBrief(keyword, { includeSurfer = true, only }: any = {}) {
       });
     },
     internalLinks: async () => {
-      // WordPress search requires every word to match, so search each distinctive word as well as
-      // the whole phrase, then rank candidates by how many of the keyword's words their title has.
+      // Live posts on the website whose titles share the keyword's words, ranked by how many of the
+      // keyword's words their title has.
       const searches = [keyword, ...terms.slice(0, 3)];
       const found = new Map();
       for (const search of searches) {
-        const [posts, pages] = await Promise.all([
-          wpRequest('GET', '/wp/v2/posts', { query: { search, per_page: 6, _fields: 'title,link' } }),
-          wpRequest('GET', '/wp/v2/pages', { query: { search, per_page: 4, _fields: 'title,link' } }),
-        ]);
-        for (const p of [...posts.json, ...pages.json]) {
-          const title = decode(p.title?.rendered);
+        for (const p of await searchPosts(search, 10, { full: false })) {
+          const title = decode(p.title);
           if (!found.has(p.link)) found.set(p.link, { title, url: p.link, score: terms.filter((t) => title.toLowerCase().includes(t)).length });
         }
       }

@@ -46,7 +46,7 @@ const GUIDES: { role: string; who: string; steps: string[] }[] = [
     role: 'Admin',
     who: 'Everything above, plus the setup.',
     steps: [
-      'Settings: connections (WordPress, Google, Bing, Zoho), blog rules, AI credits ("Test both keys").',
+      'Settings: connections (website, Google, Bing, Zoho), blog rules, AI credits ("Test both keys").',
       'Team & Roles: give each person a role; change what a role can open and do; give one person extra access, always or for some hours.',
       'Activity Log: everything the dashboard did, with errors.',
     ],

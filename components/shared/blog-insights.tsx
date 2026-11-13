@@ -506,7 +506,7 @@ export function BlogTable({ onOpen }: { onOpen: (row: any) => void }) {
                   <td className={td}>
                     <div className="flex flex-wrap gap-1">
                       <Button type="button" variant="outline" size="sm" onClick={() => onOpen(r)}><BarChart3 />Analytics</Button>
-                      <a href={`/api/wordpress/download?url=${encodeURIComponent(r.url)}`} download className={buttonVariants({ variant: 'outline', size: 'sm' })} title="The live post as a Word file"><Download />Download Word</a>
+                      <a href={`/api/site/download?url=${encodeURIComponent(r.url)}`} download className={buttonVariants({ variant: 'outline', size: 'sm' })} title="The live post as a Word file"><Download />Download Word</a>
                     </div>
                   </td>
                 </tr>

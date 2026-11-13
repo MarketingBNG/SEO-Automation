@@ -20,8 +20,9 @@ import { listReferringDomains } from '../seranking';
 import { smartleadConfigured, leadExists, addLead } from '../smartlead';
 import * as settings from '../settings';
 import { notify } from '../notify';
+import { publicSite } from '../siteConnector';
 
-const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
+const SITE = () => publicSite();
 const HOST = () => SITE().replace(/^https?:\/\//, '').replace(/^www\./, '');
 const DAILY_LIMIT = () => Number(process.env.OUTREACH_DAILY_LIMIT || 5);
 

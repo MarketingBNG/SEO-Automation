@@ -1,15 +1,15 @@
-// @ts-nocheck -- reads untyped WordPress JSON.
-// Applies the technical fixes ticked in the approved strategy, through the WordPress REST API.
+// Applies the technical fixes ticked in the approved strategy, through the website connector.
 // Every change saves the old value in site_changes first, so it can be undone.
-//  - Missing or duplicate title, missing meta description: Claude writes a new one (Yoast fields).
-//  - Broken link inside a page: the link is removed and its text kept.
-//  - A URL returning 4xx: a 301 redirect to the closest live page (needs the Redirection plugin).
-//  - Thin content: an FAQ built only from what the page already says is added before the end.
-//  - Anything else (speed, theme, server, code): cannot be changed safely from here; marked manual.
+//  - Missing or duplicate title, missing meta description: Claude writes a new one (the post's SEO fields).
+//  - Broken link inside a post: the link is removed and its text kept.
+//  - Thin content: an FAQ built only from what the post already says is added before the end.
+//  - A URL returning 4xx (needs a 301 redirect), pages that are not blog posts, and anything else
+//    (speed, theme, server, code): cannot be changed from here; marked manual for a developer.
 import prisma from '../prisma';
 import * as activity from '../activity';
 import { sqlNow } from '../time';
-import { wpRequest, refreshYoast } from '../wordpress';
+import { postBySlug, searchPosts, updatePost, siteConfigured, SITE_NOT_SET_UP, type Post } from '../site';
+import { publicSite } from '../siteConnector';
 import { callClaude } from '../anthropic';
 import { notify } from '../notify';
 
@@ -37,35 +37,33 @@ const pathOf = (url: string) => {
 };
 const slugOf = (url: string) => pathOf(url).replace(/\/+$/, '').split('/').pop() || '';
 
-// The WordPress post or page behind a URL.
-async function findItem(url: string) {
+// The blog post on the website behind a URL (pages and theme parts are not reachable from here).
+async function findPost(url: string): Promise<Post | null> {
   const slug = slugOf(url);
   if (!slug) return null;
-  for (const type of ['posts', 'pages']) {
-    const { json } = await wpRequest('GET', `/wp/v2/${type}`, { query: { slug, context: 'edit', status: 'publish', _fields: 'id,link,title,content,meta' } });
-    if (json?.length) return { type, item: json[0] };
-  }
-  return null;
+  const p = await postBySlug(slug);
+  return p && p.id && p.status === 'publish' ? p : null;
 }
 
-async function saveUndo(summary: string, type: string, id: number, undo: any) {
-  await prisma.site_changes.create({ data: { tool: 'technical_fix', summary, target_type: type, target_id: String(id), undo: JSON.stringify(undo) } });
+// Saved before each change; Undo in the dashboard puts these fields back (lib/assistant/tools.ts).
+async function saveUndo(summary: string, post: Post, fields: Record<string, any>) {
+  await prisma.site_changes.create({ data: { tool: 'technical_fix', summary, target_type: 'post', target_id: String(post.id), undo: JSON.stringify({ kind: 'restore_site_post', id: post.id, fields }) } });
 }
 
-async function writeText(kind: 'title' | 'meta', page: any) {
-  const plain = String(page.content?.raw || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 4000);
+async function writeText(kind: 'title' | 'meta', page: Post) {
+  const plain = String(page.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 4000);
   const rule = kind === 'title' ? 'an SEO title under 60 characters, unique to this page' : 'a meta description of 140 to 155 characters';
   const { text } = await callClaude(
     `You write ${rule} for a page on usaindiacfo.com (cross-border CFO, tax and compliance for US and India). Use only what the page says. No em dashes, no quotes. Return only the text.`,
-    [{ role: 'user', content: `Page title: ${page.title?.raw || ''}\n\nPage text:\n${plain}` }],
+    [{ role: 'user', content: `Page title: ${page.title || ''}\n\nPage text:\n${plain}` }],
     undefined,
     { maxUses: 1, effort: 'low', feature: 'technical_fix' }
   );
   return text.trim().replace(/^["']|["']$/g, '').replace(/—/g, ',');
 }
 
-async function addFaq(page: any) {
-  const raw = String(page.content?.raw || '');
+async function addFaq(page: Post) {
+  const raw = String(page.content || '');
   const { text } = await callClaude(
     `You add a short FAQ section to an existing page on usaindiacfo.com. Write 3 to 4 questions a reader would ask, each answered in 2 or 3 sentences, using ONLY facts already stated in the page. Never add a new number, date, rate or rule. No em dashes. Return only HTML: <h2>Frequently asked questions</h2> then <h3>question</h3><p>answer</p> pairs.`,
     [{ role: 'user', content: raw.slice(0, 30000) }],
@@ -77,29 +75,11 @@ async function addFaq(page: any) {
   return `${raw}\n${faq}\n`;
 }
 
+// The closest live post to a dead URL (by the words in its address), else the home page.
 async function closestLivePage(url: string) {
   const words = slugOf(url).split('-').filter((w) => w.length > 3).slice(0, 4).join(' ');
-  if (words) {
-    const { json } = await wpRequest('GET', '/wp/v2/search', { query: { search: words, per_page: 1 } });
-    if (json?.[0]?.url && json[0].url !== url) return json[0].url;
-  }
-  return (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '') + '/';
-}
-
-// Installs and activates the free Redirection plugin through the WordPress REST API (needs an
-// administrator's application password). Returns true, or the reason it could not.
-export async function ensureRedirectionPlugin(): Promise<true | string> {
-  try {
-    const { json } = await wpRequest('GET', '/wp/v2/plugins', { query: { search: 'redirection' } });
-    const found = (json || []).find((p) => String(p.plugin || '').startsWith('redirection/'));
-    if (found?.status === 'active') return true;
-    if (found) await wpRequest('POST', `/wp/v2/plugins/${found.plugin.replace(/\.php$/, '')}`, { body: { status: 'active' } });
-    else await wpRequest('POST', '/wp/v2/plugins', { body: { slug: 'redirection', status: 'active' } });
-    await activity.log('wordpress.plugin_installed', { details: 'Redirection plugin installed and activated for 301 redirects' });
-    return true;
-  } catch (e: any) {
-    return `could not install the Redirection plugin automatically (${String(e.message || e).slice(0, 200)}). The WordPress user needs the Administrator role, or install it once by hand.`;
-  }
+  const hit = words ? (await searchPosts(words, 1, { full: false }).catch(() => []))[0] : null;
+  return hit && hit.link !== url ? hit.link : `${publicSite()}/`;
 }
 
 export async function applyFix(task: any): Promise<{ status: 'applied' | 'manual' | 'failed'; result: string }> {
@@ -108,53 +88,40 @@ export async function applyFix(task: any): Promise<{ status: 'applied' | 'manual
 
   if (kind === 'redirect') {
     const to = await closestLivePage(task.url);
-    const create = () =>
-      wpRequest('POST', '/redirection/v1/redirect', {
-        body: { url: pathOf(task.url), action_data: { url: to }, action_type: 'url', action_code: 301, match_type: 'url', group_id: 1 },
-      }).catch(() => null);
-    let res = await create();
-    // The plugin is missing or inactive: install and activate it once, then try again.
-    if (!res?.json || typeof res.json !== 'object') {
-      const installed = await ensureRedirectionPlugin();
-      if (installed !== true) return { status: 'manual', result: `Redirect not created: ${installed}` };
-      res = await create();
-    }
-    const json = res?.json;
-    if (!json || typeof json !== 'object') return { status: 'manual', result: 'Redirect not created: the Redirection plugin is active but did not accept the redirect. Open Tools > Redirection once in WordPress to finish its setup.' };
-    await saveUndo(`301 ${task.url} -> ${to}`, 'redirect', json?.items?.[0]?.id || 0, { redirectFrom: pathOf(task.url) });
-    return { status: 'applied', result: `301 redirect to ${to}` };
+    return { status: 'manual', result: `Needs a developer: add a 301 redirect on the website from ${pathOf(task.url)} to ${to}. The dashboard cannot create redirects.` };
   }
 
-  const found = await findItem(task.url);
-  if (!found) return { status: 'manual', result: 'Page not found in WordPress (it may be a category, tag or theme page).' };
-  const { type, item } = found;
-  const route = `/wp/v2/${type}/${item.id}`;
+  const post = await findPost(task.url);
+  if (!post) return { status: 'manual', result: 'Not a live blog post on the website (it may be a page, category or theme part): a developer must change it.' };
 
   if (kind === 'broken_link') {
     const target = task.issue.replace(/^Broken link to /i, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
-    const raw = String(item.content?.raw || '');
+    const raw = String(post.content || '');
     const next = unwrapLinks(raw, target);
-    if (next === raw) return { status: 'manual', result: 'The link is in the menu, sidebar or footer, not in the page text. Remove it in Appearance > Menus or Widgets.' };
-    await saveUndo(`Removed broken link to ${target} on ${task.url}`, type, item.id, { content: raw });
-    await wpRequest('POST', route, { body: { content: next } });
+    if (next === raw) return { status: 'manual', result: 'The link is in the menu, sidebar or footer, not in the post text. A developer must remove it from the website template.' };
+    await saveUndo(`Removed broken link to ${target} on ${task.url}`, post, { contentHtml: raw });
+    await updatePost(post.id as number, { contentHtml: next });
     return { status: 'applied', result: `Removed the broken link to ${target} (text kept)` };
   }
 
   if (kind === 'title' || kind === 'meta') {
-    const value = await writeText(kind, item);
-    const key = kind === 'title' ? '_yoast_wpseo_title' : '_yoast_wpseo_metadesc';
-    await saveUndo(`${kind === 'title' ? 'SEO title' : 'Meta description'} on ${task.url}`, type, item.id, { meta: { [key]: item.meta?.[key] ?? '' } });
-    await wpRequest('POST', route, { body: { meta: { [key]: value } } });
-    await refreshYoast(type === 'pages' ? 'page' : 'post', item.id);
+    const value = await writeText(kind, post);
+    if (kind === 'title') {
+      await saveUndo(`SEO title on ${task.url}`, post, { seoTitle: post.seoTitle || post.title });
+      await updatePost(post.id as number, { seoTitle: value });
+    } else {
+      await saveUndo(`Meta description on ${task.url}`, post, { metaDescription: post.seoDescription || '' });
+      await updatePost(post.id as number, { metaDescription: value });
+    }
     return { status: 'applied', result: `${kind === 'title' ? 'SEO title' : 'Meta description'} set: ${value}` };
   }
 
   if (kind === 'thin') {
-    const raw = String(item.content?.raw || '');
+    const raw = String(post.content || '');
     if (/frequently asked questions/i.test(raw)) return { status: 'manual', result: 'The page already has an FAQ; it needs a fuller rewrite (add it to the blog refresh list).' };
-    const next = await addFaq(item);
-    await saveUndo(`Added FAQ to thin page ${task.url}`, type, item.id, { content: raw });
-    await wpRequest('POST', route, { body: { content: next } });
+    const next = await addFaq(post);
+    await saveUndo(`Added FAQ to thin page ${task.url}`, post, { contentHtml: raw });
+    await updatePost(post.id as number, { contentHtml: next });
     return { status: 'applied', result: 'Added an FAQ built from the page text' };
   }
   return { status: 'manual', result: 'Unknown fix type' };
@@ -166,7 +133,9 @@ export const FIX_DAILY_LIMIT = () => Number(process.env.TECH_FIX_DAILY_LIMIT || 
 
 // Runs a few planned fixes per scheduler run, so the site is never changed in one big burst.
 export async function runFixes({ max = 5, now = new Date() } = {}) {
-  const out = { applied: 0, manual: 0, failed: 0 };
+  const out: Record<string, any> = { applied: 0, manual: 0, failed: 0 };
+  // Without the website connection the planned fixes wait (they are not marked failed).
+  if (!siteConfigured()) return { ...out, skipped: SITE_NOT_SET_UP };
   const done: string[] = [];
   const today = now.toISOString().slice(0, 10);
   const doneToday = await prisma.technical_fix_tasks.count({ where: { strategy_id: { not: 0 }, applied_at: { startsWith: today } } });

@@ -6,8 +6,8 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { AiCreditsCard } from '@/components/shared/ai-credits-card';
 import { BlogRulesCard } from '@/components/shared/blog-rules-card';
 import {
-  BarChart3, Building2, ClipboardCopy, ExternalLink, Gauge, Globe, Loader2, MousePointerClick, PlugZap,
-  RefreshCw, Search, Spline, Upload, Wand2,
+  BarChart3, Building2, ExternalLink, Gauge, Globe, Loader2, MousePointerClick, PlugZap,
+  Search, Spline, Upload, Wand2,
 } from 'lucide-react';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -74,7 +74,7 @@ function ConnBadge({ state }: { state: ConnState }) {
   return <Pill tone="danger">● Error</Pill>;
 }
 
-const CONN_TESTS = ['wordpress', 'gsc', 'gbp', 'zoho', 'seranking', 'surfer', 'serphouse', 'bing'] as const;
+const CONN_TESTS = ['site', 'gsc', 'gbp', 'zoho', 'seranking', 'surfer', 'serphouse', 'bing'] as const;
 
 function ConnCard({
   icon: Icon, title, description, badge, className, children,
@@ -95,74 +95,6 @@ function ConnCard({
       </CardHeader>
       <CardContent className="grid min-w-0 gap-4">{children}</CardContent>
     </Card>
-  );
-}
-
-function YoastFieldsCard() {
-  const [state, setState] = useState<any>(null);
-  const [copied, setCopied] = useState(false);
-
-  async function check() {
-    setState({ checking: true });
-    try {
-      const res = await fetch('/api/wordpress/yoast-status');
-      setState(await res.json());
-    } catch (e: any) {
-      setState({ error: e.message });
-    }
-  }
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    check();
-  }, []);
-
-  async function copy() {
-    await navigator.clipboard.writeText(state.snippet);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  return (
-    <ConnCard
-      icon={Wand2}
-      title="Yoast SEO fields"
-      badge={
-        state && !state.checking ? (
-          <Pill tone={state.installed ? 'success' : 'warn'}>{state.installed ? 'connected' : 'one-time setup needed'}</Pill>
-        ) : undefined
-      }
-      description={
-        <>
-          Lets the dashboard and the assistant write each post&apos;s Yoast meta description and focus keyphrase. Until
-          this is set up, published blogs go live without a meta description (Google then picks random text from the page).
-        </>
-      }
-    >
-      {state && !state.checking && !state.installed && (
-        <ol className="text-muted-foreground list-decimal space-y-1 pl-5 text-sm leading-relaxed">
-          <li>In WordPress admin, install and activate the free &quot;Code Snippets&quot; plugin (or ask the assistant to install it).</li>
-          <li>Go to Snippets &gt; Add New, give it a name like &quot;Growth Center Yoast fields&quot;.</li>
-          <li>Paste the snippet below (everything after the first line), choose &quot;Run snippet everywhere&quot;, then Save and Activate.</li>
-          <li>Come back here and click Check again.</li>
-        </ol>
-      )}
-      <Actions>
-        <Button onClick={check} disabled={state?.checking}>
-          {state?.checking ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-          {state?.checking ? 'Checking…' : 'Check again'}
-        </Button>
-        {state?.snippet && (
-          <Button variant="outline" onClick={copy}>
-            <ClipboardCopy /> {copied ? 'Copied' : 'Copy snippet'}
-          </Button>
-        )}
-      </Actions>
-      {state?.error && <Status>Could not check: {state.error}</Status>}
-      {state?.snippet && !state.installed && (
-        <pre className="bg-muted/50 max-h-80 overflow-auto rounded-md border p-3 font-mono text-xs whitespace-pre-wrap">{state.snippet}</pre>
-      )}
-    </ConnCard>
   );
 }
 
@@ -260,17 +192,16 @@ export default function SettingsTab() {
   async function test() {
     setStatus('Testing…');
     try {
-      const res = await fetch('/api/wordpress/test');
+      const res = await fetch('/api/site/test');
       const json = await res.json();
-      markConn('wordpress', json);
-      if (!json.ok) setStatus(`Failed: ${json.error}`);
+      markConn('site', json);
+      if (!json.ok) setStatus(`${json.connected === false ? 'Not connected' : 'Failed'}: ${json.error}`);
       else {
-        const yn = (b: boolean) => (b ? 'yes' : 'NO');
-        const role = json.roles?.length ? json.roles.join(', ') : 'unknown';
         setStatus(
-          `Connected as ${json.connectedAs}. Role: ${role}${json.isAdministrator ? ' (Administrator)' : ''}. ` +
-            `Install plugins (Redirection, Cache Enabler): ${yn(json.canInstallPlugins)}. Upload images: ${yn(json.canUploadMedia)}. Edit all posts and pages: ${yn(json.canEditPages)}.` +
-            (json.isAdministrator ? ' All automatic fixes can run.' : ' Make this user an Administrator in WordPress (Users) so every automatic fix can run.')
+          `Connected to ${json.site || 'the website'}. ` +
+            (json.draftsAllowed
+              ? 'Drafts are allowed: a blog can be sent to the website as a hidden draft.'
+              : 'Drafts are off: the website makes every saved post live, so blogs are only published live.')
         );
       }
     } catch (err: any) {
@@ -577,25 +508,23 @@ export default function SettingsTab() {
         <BlogRulesCard canChange={canChange} />
       </Section>
 
-      <Section title="Publishing" description="Where drafts go live and how their SEO fields are written.">
+      <Section title="Publishing" description="Where blogs go live.">
         <ConnCard
           icon={Globe}
-          title="WordPress connection"
-          badge={<ConnBadge state={conn.wordpress} />}
+          title="Website connection"
+          badge={<ConnBadge state={conn.site} />}
           description={
             <>
-              Configured via the .env file on the server (WORDPRESS_SITE_URL, WORDPRESS_USERNAME,
-              WORDPRESS_APPLICATION_PASSWORD) and the Anthropic API key (ANTHROPIC_API_KEY).
+              Blogs, covers and images go to usaindiacfo.com through the website&apos;s dashboard connector. Set
+              SITE_CONNECTOR_URL and SITE_CONNECTOR_SECRET in Coolify (and SITE_URL for the public address).
             </>
           }
         >
           <Actions>
-            <Button onClick={test}><PlugZap /> Test WordPress connection</Button>
+            <Button onClick={test}><PlugZap /> Test website connection</Button>
           </Actions>
           {status && <Status>{status}</Status>}
         </ConnCard>
-
-        <YoastFieldsCard />
       </Section>
 
       <Section title="Google" description="Search Console, Analytics and Business Profile.">
@@ -906,7 +835,7 @@ export default function SettingsTab() {
                 setBingStatus('Testing…');
                 const json = await fetch('/api/bing/test').then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
                 markConn('bing', json);
-                setBingStatus(json.ok ? (json.via === 'wordpress' ? `Connected through WordPress: ${json.plugins.join(', ')} sends new posts to Bing. An API key here is optional.` : `Connected: ${json.site} is verified.`) : `Not working: ${json.error}`);
+                setBingStatus(json.ok ? `Connected: ${json.site} is verified.` : `Not working: ${json.error}`);
               }}
             >
               <PlugZap /> Test connection

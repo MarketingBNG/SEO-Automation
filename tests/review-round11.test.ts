@@ -1,5 +1,5 @@
-// Review round 11: the live-site checks use the site connector's origin when WORDPRESS_SITE_URL is
-// not set, a draft the website connector would refuse is refused before anything is saved or
+// Review round 11: the live-site checks use the website connection's origin when SITE_URL is not
+// set, a draft the website connector would refuse is refused before anything is saved or
 // uploaded, a Testing-mode skill update does not hold the run, and the batch-waiting message is right
 // for the AI mode. The database tests use DATABASE_URL (local test database only). Run: npm test
 import { test } from 'node:test';
@@ -18,7 +18,7 @@ globalThis.fetch = (async (url: any) => {
   throw new Error(`Network call in a test: ${url}`);
 }) as any;
 
-const WP_ENV = ['WORDPRESS_SITE_URL', 'WORDPRESS_USERNAME', 'WORDPRESS_APPLICATION_PASSWORD', 'SITE_CONNECTOR_URL', 'SITE_CONNECTOR_SECRET', 'SITE_CONNECTOR_DRAFTS'];
+const WP_ENV = ['SITE_URL', 'WORDPRESS_SITE_URL', 'SITE_CONNECTOR_URL', 'SITE_CONNECTOR_SECRET', 'SITE_CONNECTOR_DRAFTS'];
 async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T> | T): Promise<T> {
   const saved = Object.fromEntries(WP_ENV.map((k) => [k, process.env[k]]));
   for (const k of WP_ENV) delete process.env[k];
@@ -33,25 +33,27 @@ async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T> | T)
   }
 }
 
-test('the live site is WORDPRESS_SITE_URL, else the site connector, else nothing', async () => {
+test('the live site is SITE_URL (or its old name), else the website connection, else nothing', async () => {
   await withEnv({}, () => assert.equal(siteOrigin(), ''));
-  await withEnv({ WORDPRESS_SITE_URL: ' https://wp.example.com/ ' }, () => assert.equal(siteOrigin(), 'https://wp.example.com'));
+  await withEnv({ SITE_URL: ' https://site.example.com/ ' }, () => assert.equal(siteOrigin(), 'https://site.example.com'));
+  await withEnv({ WORDPRESS_SITE_URL: ' https://old-name.example.com/ ' }, () => assert.equal(siteOrigin(), 'https://old-name.example.com', 'the old variable name still works'));
+  await withEnv({ SITE_URL: 'https://new.example.com', WORDPRESS_SITE_URL: 'https://old-name.example.com' }, () => assert.equal(siteOrigin(), 'https://new.example.com'));
   await withEnv({ SITE_CONNECTOR_URL: 'https://site.example.com/_bridge/dashboard-connector.php', SITE_CONNECTOR_SECRET: 's' }, () =>
     assert.equal(siteOrigin(), 'https://site.example.com')
   );
   await withEnv({ SITE_CONNECTOR_URL: 'https://site.example.com/_bridge/x.php' }, () => assert.equal(siteOrigin(), '', 'no secret: the connector is off'));
-  await withEnv({ WORDPRESS_SITE_URL: 'https://wp.example.com', SITE_CONNECTOR_URL: 'https://site.example.com/x.php', SITE_CONNECTOR_SECRET: 's' }, () =>
-    assert.equal(siteOrigin(), 'https://wp.example.com')
+  await withEnv({ SITE_URL: 'https://public.example.com', SITE_CONNECTOR_URL: 'https://site.example.com/x.php', SITE_CONNECTOR_SECRET: 's' }, () =>
+    assert.equal(siteOrigin(), 'https://public.example.com')
   );
 });
 
-test('the Bing calls use the connector site when WORDPRESS_SITE_URL is not set', async () => {
+test('the Bing calls use the connector site when SITE_URL is not set', async () => {
   const { submitToBing } = await import('../lib/bing');
   const prev = process.env.BING_WEBMASTER_API_KEY;
   process.env.BING_WEBMASTER_API_KEY = 'test-key';
   calls.length = 0;
   try {
-    // Reaches the (stubbed) Bing API instead of refusing for a missing WORDPRESS_SITE_URL.
+    // Reaches the (stubbed) Bing API instead of refusing for a missing SITE_URL.
     await withEnv({ SITE_CONNECTOR_URL: 'https://site.example.com/x.php', SITE_CONNECTOR_SECRET: 's' }, () =>
       assert.rejects(submitToBing(['https://site.example.com/a/']), /Network call in a test/)
     );
@@ -66,16 +68,13 @@ test('the Bing calls use the connector site when WORDPRESS_SITE_URL is not set',
 });
 
 test('the website connector refuses drafts before anything is checked, saved or uploaded', { skip: !db, timeout: 60000 }, async () => {
-  const { draftsRefused } = await import('../lib/wordpress');
+  const { draftsRefused } = await import('../lib/site');
   const on = { SITE_CONNECTOR_URL: 'https://site.example.com/x.php', SITE_CONNECTOR_SECRET: 's' };
   await withEnv(on, () => {
     assert.match(draftsRefused('draft') || '', /switched off/);
     assert.equal(draftsRefused('publish'), null);
   });
   await withEnv({ ...on, SITE_CONNECTOR_DRAFTS: 'on' }, () => assert.equal(draftsRefused('draft'), null));
-  await withEnv({ WORDPRESS_SITE_URL: 'https://wp.example.com', WORDPRESS_USERNAME: 'u', WORDPRESS_APPLICATION_PASSWORD: 'p' }, () =>
-    assert.equal(draftsRefused('draft'), null, 'WordPress keeps drafts hidden')
-  );
 
   const { default: prisma } = await import('../lib/prisma');
   const { POST } = await import('../app/api/drafts/[id]/publish/route');

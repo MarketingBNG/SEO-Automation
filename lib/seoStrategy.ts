@@ -8,6 +8,7 @@ import { runPageSpeedCheck } from './pagespeed';
 import { getInsights } from './clarity';
 import { getLeadSourceBreakdown } from './zoho';
 import { hasStoredTokens } from './zohoAuth';
+import { siteOrigin } from './siteConnector';
 // Pulls a snapshot from every currently-connected tool for the monthly SEO strategy. Each
 // source fails independently (a not-yet-connected or temporarily-down tool just gets skipped
 // with a note) so one missing integration never blocks the whole report. New tools added later
@@ -51,7 +52,9 @@ async function gatherSnapshot({ onStep }: any = {}) {
     }),
 
     (async () => {
-      const siteUrl = (process.env.WORDPRESS_SITE_URL || '').replace(/\/+$/, '') + '/';
+      // No default domain: a local or test server must not measure the live site.
+      if (!siteOrigin()) throw new Error('SITE_URL is not set');
+      const siteUrl = siteOrigin() + '/';
       snapshot.pageSpeed = await runPageSpeedCheck(siteUrl, 'mobile');
     })().catch((e: any) => {
       snapshot.pageSpeedError = e.message;

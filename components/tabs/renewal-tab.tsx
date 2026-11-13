@@ -12,6 +12,7 @@ import { NativeSelect, PeopleAlsoAskList, SectionLabel, StatusBadge } from '@/co
 import { IssuesTable, WhyTheseChanges } from '@/components/tabs/audit-tab';
 import { SafeHtml } from '@/components/shared/article';
 import { useRole } from '@/hooks/use-role';
+import { useSiteStatus } from '@/hooks/use-site-status';
 
 export default function RenewalTab() {
   const [posts, setPosts] = useState<any[]>([]);
@@ -20,7 +21,10 @@ export default function RenewalTab() {
   const [activePostId, setActivePostId] = useState<any>(null);
   const [busyPostId, setBusyPostId] = useState<any>(null);
   const [audits, setAudits] = useState<Record<string, any>>({}); // audit id -> full audit row (with facts/issues parsed)
-  const [publishWpStatus, setPublishWpStatus] = useState('publish');
+  const [chosenWpStatus, setPublishWpStatus] = useState('publish');
+  // A separate website draft only while the website keeps drafts hidden (SITE_CONNECTOR_DRAFTS=on).
+  const { draftsAllowed } = useSiteStatus();
+  const publishWpStatus = draftsAllowed ? chosenWpStatus : 'publish';
   const [message, setMessage] = useState<string | null>(null);
   const canDownload = useRole().can('reports.download');
 
@@ -28,7 +32,7 @@ export default function RenewalTab() {
     setLoadingPosts(true);
     setError(null);
     try {
-      const res = await fetch('/api/wordpress/posts');
+      const res = await fetch('/api/site/posts');
       const json = await res.json();
       if (!res.ok || json.connected === false) throw new Error(json.error);
       setPosts(json.posts);
@@ -113,7 +117,7 @@ export default function RenewalTab() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       // 'draft' makes a separate draft post on the server; the live post is not touched.
-      setMessage(json.draft ? `Saved as a separate draft. The live post has not changed: ${json.draft.link}` : `Replaced live post: ${json.wpPostUrl}`);
+      setMessage(json.draft ? `Saved as a separate website draft. The live post has not changed: ${json.draft.link}` : `Replaced live post: ${json.wpPostUrl}`);
       await loadAudit(auditId);
       loadPosts();
     } catch (err: any) {
@@ -293,10 +297,12 @@ export default function RenewalTab() {
                     <Button variant="outline" onClick={() => rewriteAudit(activeAudit.id)} disabled={busyActive}>
                       Rewrite again
                     </Button>
-                    <NativeSelect value={publishWpStatus} onChange={(e) => setPublishWpStatus(e.target.value)}>
-                      <option value="draft">Save as a separate draft (live post unchanged)</option>
-                      <option value="publish">Replace live now</option>
-                    </NativeSelect>
+                    {draftsAllowed && (
+                      <NativeSelect value={publishWpStatus} onChange={(e) => setPublishWpStatus(e.target.value)}>
+                        <option value="draft">Save as a separate website draft (live post unchanged)</option>
+                        <option value="publish">Replace live now</option>
+                      </NativeSelect>
+                    )}
                     <Button onClick={() => publishAudit(activeAudit.id)} disabled={busyActive}>
                       {busyActive ? 'Working…' : publishWpStatus === 'draft' ? 'Approve – save as a draft' : 'Approve – replace the live post'}
                     </Button>

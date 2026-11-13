@@ -1,7 +1,7 @@
 // Images inside a blog body. The writer only marks where a visual would help ([VISUAL SUGGESTION:
 // ...]); a person uploads an image for each spot (or removes the note), or adds one after any
 // section. Images live in the dashboard's storage until publish, when each one is uploaded to the
-// WordPress Media Library and the post points at the WordPress copy.
+// website and the post points at the website's copy.
 const NOTE_RE = /<p[^>]*>\s*\[VISUAL SUGGESTION:?[^\]]{0,500}\]\s*<\/p>|\[VISUAL SUGGESTION:?\s*([^\]]{0,500})\]/gi;
 const H2_RE = /<h2[^>]*>([\s\S]*?)<\/h2>/gi;
 const IMG_RE = /<img\b[^>]*\bsrc="\/api\/uploads\/([^"]+)"[^>]*>/gi;
@@ -78,9 +78,9 @@ export function inlineImageKeys(html: string): string[] {
 
 export type Media = { id: number; url: string };
 
-// At publish: each dashboard image is uploaded to WordPress and the tag points at that copy.
+// At publish: each dashboard image is uploaded to the website and the tag points at that copy.
 // `known` holds images uploaded on an earlier attempt (key -> media), so a retry reuses them
-// instead of filling the Media Library with duplicates.
+// instead of uploading duplicates.
 export async function publishInlineImages(html: string, upload: (key: string, alt: string) => Promise<Media>, known: Record<string, Media> = {}) {
   const src = String(html || '');
   const media: Record<string, Media> = { ...known };

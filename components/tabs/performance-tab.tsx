@@ -12,7 +12,7 @@ import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartToo
 import { Banner, DataTable, KpiTile, NativeSelect, SectionLabel, StatusBadge, type Col } from '@/components/shared/ui-bits';
 
 // SEO, AEO, GEO and the overall report. All numbers come from /api/performance (computed in code
-// from Search Console, GA4, WordPress, SE Ranking and the latest strategy run), with the previous
+// from Search Console, GA4, the website, SE Ranking and the latest strategy run), with the previous
 // period beside each one.
 
 const COLORS = ['#3b5bdb', '#D7392E', '#5BB947', '#D4AF37', '#E85A2C'];

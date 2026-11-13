@@ -3,11 +3,12 @@
 // resubmitting the sitemap in Search Console, which prompts a recrawl.
 import { google } from 'googleapis';
 import { googleAuth, getSiteUrl } from './searchConsole';
+import { siteOrigin } from './siteConnector';
 
 export async function submitIndexNow(urls: string[]) {
   const key = process.env.INDEXNOW_KEY;
   if (!key) throw new Error('INDEXNOW_KEY is not set');
-  const site = new URL(process.env.WORDPRESS_SITE_URL || urls[0]);
+  const site = new URL(siteOrigin() || urls[0]);
   const res = await fetch('https://api.indexnow.org/indexnow', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
@@ -19,8 +20,11 @@ export async function submitIndexNow(urls: string[]) {
 }
 
 // Needs the service account to have Owner or Full access on the Search Console property.
+// SITEMAP_URL, else /sitemap.xml on the website.
 export async function resubmitSitemap() {
-  const sitemap = process.env.SITEMAP_URL || `${(process.env.WORDPRESS_SITE_URL || '').replace(/\/+$/, '')}/sitemap_index.xml`;
+  const origin = siteOrigin();
+  const sitemap = process.env.SITEMAP_URL || (origin ? `${origin}/sitemap.xml` : '');
+  if (!sitemap) throw new Error('SITEMAP_URL is not set (and neither SITE_URL nor the website connection is).');
   const auth = googleAuth(['https://www.googleapis.com/auth/webmasters']);
   const sc = google.searchconsole({ version: 'v1', auth });
   await sc.sitemaps.submit({ siteUrl: getSiteUrl(), feedpath: sitemap });

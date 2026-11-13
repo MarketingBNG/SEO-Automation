@@ -12,8 +12,9 @@ import { callClaude } from '../anthropic';
 import { parseJson } from './generate';
 import { directoryTargets } from './core';
 import { onceADay } from '../onceADay';
+import { publicSite } from '../siteConnector';
 
-const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
+const SITE = () => publicSite();
 const METHOD = 'Directory or citation listing';
 const domainOf = (s: string) => String(s || '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase();
 const istDay = (d: Date) => new Date(d.getTime() + 5.5 * 3600000).toISOString().slice(0, 10);

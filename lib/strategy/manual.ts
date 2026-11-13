@@ -9,8 +9,9 @@ import * as activity from '../activity';
 import { sqlNow } from '../time';
 import { callClaude } from '../anthropic';
 import { parseJson } from './generate';
+import { publicSite } from '../siteConnector';
 
-const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
+const SITE = () => publicSite();
 
 export type ManualTask = {
   kind: 'backlink' | 'fix';
@@ -81,7 +82,7 @@ Rules:
 - Give ready-to-paste text for every form field (company name, tagline, short and long description, services, industries, website, etc.), written in a professional, factual voice. Respect the platform's usual length limits.
 - Explain how to check it worked, and what to do if it asks for verification or is rejected.
 - No em dashes.
-${kind === 'fix' ? '- This is a website task a developer or WordPress admin must do. Explain it for a non-technical person who will pass it to a developer, plus the exact steps in WordPress or hosting if it can be done there.' : ''}
+${kind === 'fix' ? '- This is a website task a developer must do on the company custom-built website. Explain it for a non-technical person who will pass it to the developer, plus what the developer should change.' : ''}
 
 Return ONLY ===JSON===
 {"summary":"what this is and why it helps, 2 sentences","link":"https://main page to start","timeMinutes":15,

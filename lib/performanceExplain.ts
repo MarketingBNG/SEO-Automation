@@ -20,7 +20,7 @@ function slice(perf, view) {
 
 // Every source the report reads (the names gatherPerformance gives its errors). When all of them
 // failed there is nothing to explain, so no AI call is made.
-const SOURCES = ['searchConsole', 'searchConsoleQueries', 'pages', 'pagesBefore', 'ga4Organic', 'ga4Ai', 'wordpress', 'seRanking'];
+const SOURCES = ['searchConsole', 'searchConsoleQueries', 'pages', 'pagesBefore', 'ga4Organic', 'ga4Ai', 'website', 'seRanking'];
 export const noReportData = (perf) => SOURCES.every((k) => perf?.errors?.[k]);
 
 // fresh: the Rewrite button. signal: the page's request, so a closed page cancels a queued job.
@@ -39,7 +39,7 @@ export async function explainPerformance(view: string, days = 28, { fresh = fals
 
   // Not saved, so the paragraph is written once the data can be read.
   if (noReportData(perf)) {
-    return { basis, view, days, text: 'There is no data to explain for this period: none of the report sources (Search Console, GA4, WordPress, SE Ranking) could be read. Check the connections in Settings, then press Rewrite.', writtenAt: null, noData: true };
+    return { basis, view, days, text: 'There is no data to explain for this period: none of the report sources (Search Console, GA4, the website, SE Ranking) could be read. Check the connections in Settings, then press Rewrite.', writtenAt: null, noData: true };
   }
   // Testing mode: a page view does not queue work for Claude Code (nor hold the page open waiting for
   // it); only the Rewrite button does.

@@ -20,6 +20,7 @@ import { DataTable, FieldLabel, NativeSelect, TD, TD_MUTED } from '@/components/
 import { jobsChanged } from '@/components/shared/job-progress';
 import { OriginLabel } from '@/components/shared/origin-details';
 import { useRole } from '@/hooks/use-role';
+import { useSiteStatus } from '@/hooks/use-site-status';
 import DraftChanges from '@/components/shared/draft-changes';
 
 export { PeopleAlsoAskList };
@@ -131,7 +132,7 @@ export default function DraftsTab() {
         />
       )}
 
-      {/* The all-blogs Google table asks Search Console and WordPress, so it loads only when wanted. */}
+      {/* The all-blogs Google table asks Search Console and the website, so it loads only when wanted. */}
       {showPerf ? (
         <BlogTable onOpen={(r) => setAnalyticsPost(r)} />
       ) : (
@@ -188,8 +189,8 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
   // The boxes hold a Word file not yet saved: the save is recorded as an upload, not an edit.
   const [fromWord, setFromWord] = useState(false);
   const wordInput = useRef<HTMLInputElement>(null);
-  // Publishing takes a while (images, cover, WordPress): a bar with the step and the time, then
-  // what WordPress really holds (live or not, the address, the FAQ format), read back from it.
+  // Publishing takes a while (images, cover, the website): a bar with the step and the time, then
+  // what the website really holds (live or not, the address, the FAQ format), read back from it.
   const [pub, setPub] = useState<{ state: 'running' | 'done' | 'error'; started: number; text: string; check?: any; url?: string } | null>(null);
   const [secs, setSecs] = useState(0);
   useEffect(() => {
@@ -199,7 +200,10 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
     return () => clearInterval(t);
   }, [pub?.state]);
 
-  const [wpStatus, setWpStatus] = useState('publish');
+  const [chosenWpStatus, setWpStatus] = useState('publish');
+  // A hidden website draft only while the website keeps drafts hidden (SITE_CONNECTOR_DRAFTS=on).
+  const { draftsAllowed } = useSiteStatus();
+  const wpStatus = draftsAllowed ? chosenWpStatus : 'publish';
   const topRef = useRef<HTMLDivElement>(null);
 
   // resetFields=false refreshes the draft's status, facts and image but keeps whatever is typed in
@@ -327,7 +331,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
             ? `Approved. ${json.calendar}`
             : plan
               ? `Approved. ${plan.headline}. ${plan.detail}`
-              : 'Approved. This blog is not on the monthly calendar, so nothing publishes on its own: use "Publish to WordPress" below when you are ready.'
+              : 'Approved. This blog is not on the monthly calendar, so nothing publishes on its own: use "Publish to the website" below when you are ready.'
         );
       } else {
         setMessage(status ? `Marked as ${status}.` : 'Saved.');
@@ -375,7 +379,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
       const res = await fetch(`/api/drafts/${draft.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cover_alt: coverAlt }) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setMessage('Cover alt text saved. It goes to WordPress with the image when the blog publishes.');
+      setMessage('Cover alt text saved. It goes to the website with the image when the blog publishes.');
       loadDraft(false);
     } catch (err: any) {
       setMessage('Error: ' + err.message);
@@ -385,7 +389,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
   }
 
   async function deleteDraft() {
-    const live = draft.wp_post_url ? '\n\nThis draft was already sent to WordPress. The WordPress post will NOT be deleted; remove it in WordPress if you want it gone.' : '';
+    const live = draft.wp_post_url ? '\n\nThis blog is already on the website. The website post will NOT be deleted; ask the website developer to remove it if you want it gone.' : '';
     if (!window.confirm(`Delete this draft?\n\n"${draft.title || 'Untitled'}"\n\nThe draft, its facts and image links are removed for good. ${draft.schedule ? 'The monthly calendar writes this blog again on its own.' : draft.kind === 'article' || draft.wp_post_url ? 'The keyword is not queued again.' : `The keyword "${draft.keyword || ''}" goes back to the pending queue so it can be written again (a blog started from Topics & News is started again there instead).`}${live}`)) return;
     setSaving(true);
     try {
@@ -426,7 +430,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
     setSaving(true);
     setMessage('');
     setSecs(0);
-    setPub({ state: 'running', started: 0, text: 'Sending to WordPress' });
+    setPub({ state: 'running', started: 0, text: 'Sending to the website' });
     try {
       const res = await fetch(`/api/drafts/${draft.id}/publish`, {
         method: 'POST',
@@ -436,7 +440,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
       const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (!res.ok) throw new Error(json.error);
       jobsChanged();
-      setPub({ state: 'done', started: 0, text: wpStatus === 'publish' ? 'Done' : 'Sent as a WordPress draft', check: json.check, url: json.wpPostUrl });
+      setPub({ state: 'done', started: 0, text: wpStatus === 'publish' ? 'Done' : 'Sent to the website as a hidden draft', check: json.check, url: json.wpPostUrl });
       onChange();
       loadDraft(false);
     } catch (err: any) {
@@ -647,7 +651,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
             {draft.featured_image_path
               ? 'Your uploaded cover. It is shown on the blog page, in listings and on social shares.'
               : `No cover uploaded, so this branded cover (title and author${draft.author ? `, ${draft.author}` : ''}) is used automatically. Upload your own to replace it.`}{' '}
-            It goes to the WordPress Media Library with the alt text below, so Google reads what the picture shows.
+            It goes to the website with the alt text below, so Google reads what the picture shows.
           </p>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className="mb-2 max-h-72 max-w-full rounded-lg border object-contain" src={`/api/drafts/${draft.id}/cover?v=${encodeURIComponent(draft.updated_at || '')}`} alt={draft.cover_alt_shown || 'Cover image'} />
@@ -699,18 +703,18 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
           <p className="text-sm text-muted-foreground">This is a LinkedIn article: approve it, place the images, download it as Word or copy the text, and post it on LinkedIn by hand. It is not published to the website.</p>
         ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <NativeSelect value={wpStatus} onChange={(e) => setWpStatus(e.target.value)}>
-            <option value="publish">Publish live on the website now</option>
-            <option value="draft">Send to WordPress as a draft (NOT live)</option>
-          </NativeSelect>
+          {draftsAllowed && (
+            <NativeSelect value={wpStatus} onChange={(e) => setWpStatus(e.target.value)}>
+              <option value="publish">Publish live on the website now</option>
+              <option value="draft">Send to the website as a hidden draft (NOT live)</option>
+            </NativeSelect>
+          )}
           <Button onClick={publish} disabled={saving || !(draft.status === 'approved' || (draft.status === 'published' && draft.wp_post_id)) || dirty || (scheduledEarly && !canPublishNow)}>
             <Send />
-            {draft.wp_post_id ? `Update the live post (WordPress #${draft.wp_post_id})` : draft.schedule ? 'Publish now (skips the scheduled slot)' : 'Publish to WordPress'}
+            {draft.wp_post_id ? 'Update the live post' : draft.schedule ? 'Publish now (skips the scheduled slot)' : 'Publish to the website'}
           </Button>
           {draft.wp_post_id && !draft.wp_post_url ? (
-            <span className="text-sm text-amber-700 dark:text-amber-400">On WordPress as a draft only (post {draft.wp_post_id}): it is NOT on the website. Choose &quot;Publish live&quot; to make it live.</span>
-          ) : draft.status === 'published' && /[?&]p=\d+/.test(draft.wp_post_url || '') ? (
-            <span className="text-sm text-amber-700 dark:text-amber-400">Sent as a WordPress draft: it is NOT on the website. Choose &quot;Publish live&quot; and press the button to make it live.</span>
+            <span className="text-sm text-amber-700 dark:text-amber-400">On the website as a hidden draft only: it is NOT live. Choose &quot;Publish live&quot; to make it live.</span>
           ) : draft.status === 'published' ? (
             <StatusBadge status="published">published</StatusBadge>
           ) : draft.status !== 'approved' ? (
@@ -775,7 +779,7 @@ function AuthorPicker({ draft, onChanged }: { draft: any; onChanged: () => void 
     return (
       <div>
         <span className="text-muted-foreground">Author: </span>
-        {current || 'the default WordPress author'}
+        {current || "the website's default author"}
       </div>
     );
   }
@@ -809,8 +813,8 @@ function GoesLive({ draft, onChanged }: { draft: any; onChanged: () => void }) {
     : draft.status === 'published'
       ? draft.wp_post_url ? `Live at ${draft.wp_post_url}` : 'Live on the website.'
       : draft.status === 'approved'
-        ? 'This blog is not on the monthly calendar, so nothing publishes on its own. Use "Publish to WordPress" at the bottom: live at once, or as a WordPress draft.'
-        : 'This blog is not on the monthly calendar. Approve it, then publish it with "Publish to WordPress" at the bottom.';
+        ? 'This blog is not on the monthly calendar, so nothing publishes on its own. Use "Publish to the website" at the bottom.'
+        : 'This blog is not on the monthly calendar. Approve it, then publish it with "Publish to the website" at the bottom.';
   return (
     <div className="grid gap-3 rounded-xl border bg-muted/20 p-3 sm:grid-cols-[200px_1fr]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -904,10 +908,10 @@ function OriginalityLine({ draft }: { draft: any }) {
   );
 }
 
-// The publish bar: moving while WordPress works (with the seconds so far), then the result.
+// The publish bar: moving while the website works (with the seconds so far), then the result.
 function PublishProgress({ pub, secs }: { pub: any; secs: number }) {
   if (pub.state === 'running') {
-    const step = secs < 8 ? 'Uploading the cover and images' : secs < 25 ? 'Sending the article to WordPress' : 'Saving SEO fields and checking the post';
+    const step = secs < 8 ? 'Uploading the cover and images' : secs < 25 ? 'Sending the article to the website' : 'Saving SEO fields and checking the post';
     return (
       <div className="space-y-1 rounded-lg border p-3 text-sm">
         <div className="flex justify-between">
@@ -938,13 +942,12 @@ function PublishProgress({ pub, secs }: { pub: any; secs: number }) {
       <div className="font-semibold">{pub.text}</div>
       {c ? (
         <ul className="space-y-0.5">
-          {ok(c.live, 'Live on the website', `Not live: WordPress status is "${c.status}"`)}
-          {c.trashed?.length > 0 && <li className="text-emerald-700 dark:text-emerald-400">✓ Removed {c.trashed.length} duplicate copy (never live, now in WordPress Trash): {c.trashed.map((x: number) => `#${x}`).join(', ')}</li>}
-          {ok(c.slugOk, `Address as planned: ${c.link}`, c.liveHolder ? `Address is ${c.link}: the planned /${c.wantSlug}/ belongs to another LIVE post (${c.liveHolder.link}), which is not touched. Change one of them in WordPress.` : `Address is ${c.link} (planned /${c.wantSlug}/). Press Update once more.`)}
+          {ok(c.live, 'Live on the website', `Not live: the website status is "${c.status}"`)}
+          {ok(c.slugOk, `Address as planned: ${c.link}`, c.liveHolder ? `Address is ${c.link}: the planned /${c.wantSlug}/ belongs to another LIVE post (${c.liveHolder.link}), which is not touched.` : `Address is ${c.link} (planned /${c.wantSlug}/). Press Update once more.`)}
           {ok(c.faqBoxes, 'FAQ shown as click-to-open boxes', 'FAQ not in the box format')}
         </ul>
       ) : (
-        <div className="text-muted-foreground">Sent. WordPress could not be read back to confirm.</div>
+        <div className="text-muted-foreground">Sent. The website could not be read back to confirm.</div>
       )}
       {pub.url && (
         <a className="text-primary underline" href={pub.url} target="_blank" rel="noreferrer">

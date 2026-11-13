@@ -1,6 +1,6 @@
 // Built-in scheduler, started once when the server starts (instrumentation.ts), so the automation
 // runs on the self-hosted server without depending on a Coolify Scheduled Task being set up:
-//  - every 15 minutes: the daily autopilot (drafts, review windows, publishing, fixes, speed, outreach,
+//  - every 15 minutes: the daily autopilot (drafts, review windows, publishing, fixes, outreach,
 //    rank check; each step has its own once-a-day guard where needed),
 //  - Mondays: plan vs actual (once per Monday),
 //  - daily: a new strategy is generated when none covers the coming 3 days (it still needs approval).
@@ -28,7 +28,7 @@ async function tick() {
   const daily: any = await runDaily(now).catch((e) => ({ errors: [`Daily run failed: ${e.message}`] }));
   if (daily && !daily.skipped) {
     const errors: string[] = [...(daily.errors || [])];
-    for (const k of ['fixes', 'outreach', 'speed', 'siteChecks', 'meetings', 'rankAlerts']) if (daily[k]?.error) errors.push(`${k}: ${daily[k].error}`);
+    for (const k of ['fixes', 'outreach', 'siteChecks', 'meetings', 'rankAlerts']) if (daily[k]?.error) errors.push(`${k}: ${daily[k].error}`);
     await settings.set('scheduler_last_run', JSON.stringify({ at: new Date().toISOString(), errors: errors.slice(0, 10), opened: daily.opened || 0, published: daily.published || 0, drafted: daily.drafted || 0, held: daily.held || 0 })).catch(() => {});
   }
   // AI work paused for credits: starts again by itself once a key works again (top-up or the

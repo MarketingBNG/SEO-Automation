@@ -4,6 +4,7 @@ import { onScreen } from '@/components/shared/on-screen';
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import { Download, FileSearch, Loader2, Wand2, X } from 'lucide-react';
 import { useRole } from '@/hooks/use-role';
+import { useSiteStatus } from '@/hooks/use-site-status';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardAction } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -95,7 +96,7 @@ export function RewriteChecks({ audit }: { audit: any }) {
   );
 }
 
-// Sends an audit's rewrite to WordPress and returns { text, link } describing what happened, or
+// Sends an audit's rewrite to the website and returns { text, link } describing what happened, or
 // null when the user cancels. Replacing a live post asks first, and a rewrite that failed its
 // checks is only sent after an explicit OK (the server answers 409 needsOverride).
 export async function publishAuditRewrite(audit: any, wpStatus: string) {
@@ -120,28 +121,30 @@ export async function publishAuditRewrite(audit: any, wpStatus: string) {
   if (res.status === 409 && json.needsOverride) {
     const count = asList(audit.rewrite_validation_issues).length;
     const what = count ? `${count} unresolved issue${count === 1 ? '' : 's'}` : 'unresolved issues';
-    if (!window.confirm(`This rewrite still has ${what} after auto-repair. Send it to WordPress anyway?`)) return null;
+    if (!window.confirm(`This rewrite still has ${what} after auto-repair. Send it to the website anyway?`)) return null;
     res = await send(true);
     json = await res.json().catch(() => ({}));
   }
   if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
-  if (json.draft) return { text: 'Saved as a separate WordPress draft. The live post has not changed:', link: json.draft.link };
+  if (json.draft) return { text: 'Saved as a separate website draft. The live post has not changed:', link: json.draft.link };
   if (existing) return { text: 'Replaced the live post:', link: json.wpPostUrl || audit.wp_post_url };
-  return { text: wpStatus === 'publish' ? 'Published as a new post:' : 'Sent to WordPress as a draft:', link: json.wpPostUrl };
+  return { text: wpStatus === 'publish' ? 'Published as a new post:' : 'Sent to the website as a hidden draft:', link: json.wpPostUrl };
 }
 
 const linkCls = 'text-primary underline underline-offset-4 break-all';
 
-// Rewrite again / send to WordPress, shared by Blog Audit and Blog Renewal. For a post that is
-// already live the default is a separate WordPress draft, so the live post stays as it is until
-// someone picks "Replace the live post now". Render with key={audit.id} so the choice resets.
+// Rewrite again / send to the website, shared by Blog Audit and Blog Renewal. A separate website
+// draft is offered only while the website keeps drafts hidden (SITE_CONNECTOR_DRAFTS=on); otherwise
+// the rewrite is published live (or replaces the live post). Render with key={audit.id} so the choice resets.
 export function RewritePublishControls({ audit, busy, onRewrite, onPublish }: { audit: any; busy: any; onRewrite: () => void; onPublish: (s: string) => void }) {
-  const [wpStatus, setWpStatus] = useState('publish');
+  const [chosen, setWpStatus] = useState('publish');
+  const { draftsAllowed } = useSiteStatus();
+  const wpStatus = draftsAllowed ? chosen : 'publish';
   const existing = Boolean(audit.wp_post_id);
   const liveLink = safeHref(audit.wp_post_url);
 
   if (audit.rewrite_status === 'published') {
-    return <p className="text-sm text-muted-foreground">{existing ? 'Already replaced live.' : 'Already sent to WordPress.'}</p>;
+    return <p className="text-sm text-muted-foreground">{existing ? 'Already replaced live.' : 'Already published on the website.'}</p>;
   }
 
   const rewriteButton = (
@@ -151,21 +154,12 @@ export function RewritePublishControls({ audit, busy, onRewrite, onPublish }: { 
     </Button>
   );
 
-  if (audit.wp_post_type === 'page') {
-    return (
-      <>
-        <div className="mt-2.5 flex flex-wrap gap-2">{rewriteButton}</div>
-        <p className="mt-2 text-sm text-muted-foreground">This is a WPBakery page. Apply the changes with the Assistant so the layout is kept.</p>
-      </>
-    );
-  }
-
   if (existing && audit.rewrite_status === 'sent_as_draft') {
     const draftLink = safeHref(audit.rewrite_wp_draft_url);
     return (
       <>
         <p className="mt-2 text-sm text-muted-foreground">
-          Saved as a separate WordPress draft
+          Saved as a separate website draft
           {draftLink && (
             <>
               {': '}
@@ -181,7 +175,7 @@ export function RewritePublishControls({ audit, busy, onRewrite, onPublish }: { 
           </Button>
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
-          This uses the rewrite shown here. Edits made to the WordPress draft are not copied back to the dashboard.
+          This uses the rewrite shown here. Edits made to the website draft are not copied back to the dashboard.
         </p>
       </>
     );
@@ -189,27 +183,29 @@ export function RewritePublishControls({ audit, busy, onRewrite, onPublish }: { 
 
   const approveLabel = existing
     ? wpStatus === 'draft'
-      ? 'Approve - save as WordPress draft'
+      ? 'Approve - save as website draft'
       : 'Approve - replace the live post'
     : wpStatus === 'draft'
-    ? 'Approve - send to WordPress as draft'
+    ? 'Approve - send to the website as a hidden draft'
     : 'Approve - publish as new post';
 
   return (
     <>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {rewriteButton}
-        <NativeSelect value={wpStatus} onChange={(e) => setWpStatus(e.target.value)}>
-          <option value="draft">{existing ? 'Save as a separate WordPress draft (live post unchanged)' : 'Send to WordPress as Draft'}</option>
-          <option value="publish">{existing ? 'Replace the live post now' : 'Publish live now'}</option>
-        </NativeSelect>
+        {draftsAllowed && (
+          <NativeSelect value={wpStatus} onChange={(e) => setWpStatus(e.target.value)}>
+            <option value="draft">{existing ? 'Save as a separate website draft (live post unchanged)' : 'Send to the website as a hidden draft'}</option>
+            <option value="publish">{existing ? 'Replace the live post now' : 'Publish live now'}</option>
+          </NativeSelect>
+        )}
         <Button onClick={() => onPublish(wpStatus)} disabled={Boolean(busy)}>
           {busy === 'publish' ? 'Working…' : approveLabel}
         </Button>
       </div>
       {existing && (
         <p className="mt-2 text-sm text-muted-foreground">
-          {wpStatus === 'draft' ? 'A new draft post is made in WordPress for review. The live post at ' : 'This will replace the live post at '}
+          {wpStatus === 'draft' ? 'A new hidden draft is made on the website for review. The live post at ' : 'This will replace the live post at '}
           {liveLink ? (
             <a href={liveLink} target="_blank" rel="noreferrer" className={linkCls}>{audit.wp_post_url}</a>
           ) : (
@@ -382,7 +378,7 @@ export default function AuditTab() {
     note(audit.id, null);
     try {
       const result = await publishAuditRewrite(audit, wpStatus);
-      note(audit.id, result || { text: 'Not sent. Nothing changed on WordPress.' });
+      note(audit.id, result || { text: 'Not sent. Nothing changed on the website.' });
       if (result) load();
     } catch (err: any) {
       note(audit.id, { text: 'Error: ' + err.message });
@@ -507,7 +503,7 @@ export default function AuditTab() {
                             a.origin.detail,
                             `Audited ${a.created_at} (UTC): ${a.audit_status === 'running' ? 'still running' : a.audit_status === 'failed' ? 'failed' : a.verdict === 'READY' ? 'ready' : `${a.issues.length} issue(s) found`}.`,
                             a.rewrite_status === 'generating' ? 'Rewrite: running now.' : a.rewrite_content_html ? 'Rewrite: done, waiting for your review.' : a.rewrite_error ? `Rewrite: failed (${a.rewrite_error}).` : 'Rewrite: not done yet.',
-                            a.rewrite_status === 'published' ? 'The rewrite replaced the live post.' : a.rewrite_status === 'sent_as_draft' ? 'The rewrite was sent to WordPress as a draft.' : 'Nothing has been sent to the website from this audit.',
+                            a.rewrite_status === 'published' ? 'The rewrite replaced the live post.' : a.rewrite_status === 'sent_as_draft' ? 'The rewrite was sent to the website as a draft.' : 'Nothing has been sent to the website from this audit.',
                           ]}
                         />
                       )}

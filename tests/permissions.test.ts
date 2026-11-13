@@ -109,7 +109,7 @@ test('only settings.change connects Zoho or Google Business Profile', () => {
 });
 
 test('the Settings connection tests need settings.change for any method', () => {
-  for (const name of ['serphouse', 'surfer', 'bing', 'wordpress', 'zoho', 'gbp', 'seranking', 'gsc']) {
+  for (const name of ['serphouse', 'surfer', 'bing', 'site', 'zoho', 'gbp', 'seranking', 'gsc']) {
     for (const method of ['GET', 'POST']) {
       const path = `/api/${name}/test`;
       assert.equal(actionFor(method, path), 'settings.change', `${method} ${path}`);
@@ -120,6 +120,11 @@ test('the Settings connection tests need settings.change for any method', () => 
   assert.equal(actionFor('GET', '/api/fireflies/test'), 'reports.view');
   assert.equal(allowed('user', 'GET', '/api/fireflies/test'), false);
   assert.equal(allowed('user', 'POST', '/api/fireflies/test'), false);
+  // The live post list and its Word download are for anyone signed in; the website's own content API
+  // (/api/site/v1) is not a settings action.
+  assert.equal(actionFor('GET', '/api/site/posts'), null);
+  assert.equal(actionFor('GET', '/api/site/download'), null);
+  assert.equal(actionFor('GET', '/api/site/v1/posts'), null);
   // Reports still read GSC and SE Ranking data.
   assert.equal(actionFor('GET', '/api/gsc/queries'), 'reports.view');
   assert.equal(actionFor('GET', '/api/seranking/keywords'), 'reports.view');
@@ -183,18 +188,6 @@ test('an image attached in a private assistant chat is read and sent to Claude o
     // before), never one someone else attached.
     assert.deepEqual(await ownImageIds(b, [img.id, old.id], { legacy: true }), [old.id]);
     assert.deepEqual(await ownImageIds(null, [old.id], { legacy: true }), []);
-    // The assistant's wp_upload_image takes only an image the asker attached: another member cannot
-    // publish it to the Media Library (nor see its file name in the preview). No WordPress call is made.
-    const { getTool } = await import('../lib/assistant/tools');
-    const upload = getTool('wp_upload_image');
-    const input = { image_id: img.id, alt_text: 'x' };
-    assert.equal((await upload.preview(input, { me: a })).file, 'secret.png');
-    assert.equal((await upload.preview(input, { me: admin })).file, 'secret.png');
-    const seen = await upload.preview(input, { me: b });
-    assert.ok(seen.problem && !seen.file, "someone else's image reads as not found");
-    await assert.rejects(upload.run(input, { me: b }), /not found/);
-    await assert.rejects(upload.run(input, {}), /not found/);
-    assert.equal((await upload.preview({ image_id: old.id, alt_text: 'x' }, { me: b })).file, 'old.png', 'a member can still upload an older attached image');
   } finally {
     await prisma.assistant_files.delete({ where: { id: file.id } });
     await prisma.image_library.deleteMany({ where: { id: { in: [img.id, old.id] } } });

@@ -33,7 +33,7 @@ async function withEnv<T>(vars: Record<string, string | undefined>, fn: () => Pr
     }
   }
 }
-const NO_WP = { WORDPRESS_SITE_URL: undefined, WORDPRESS_USERNAME: undefined, WORDPRESS_APPLICATION_PASSWORD: undefined, SITE_CONNECTOR_URL: undefined, SITE_CONNECTOR_SECRET: undefined };
+const NO_SITE = { SITE_URL: undefined, WORDPRESS_SITE_URL: undefined, SITE_CONNECTOR_URL: undefined, SITE_CONNECTOR_SECRET: undefined };
 
 test('a publishing pause keeps a held blog\'s skipped-check reasons, so it sends no notice when it starts or ends', () => {
   const pause = 'Auto-publishing paused: the site returned 503.';
@@ -56,8 +56,8 @@ test('a publishing pause keeps a held blog\'s skipped-check reasons, so it sends
 });
 
 test('connection tests answer Not connected (200, connected:false) when nothing is set up', async () => {
-  await withEnv({ ...NO_WP, GOOGLE_SERVICE_ACCOUNT_KEY_JSON: undefined, GOOGLE_SERVICE_ACCOUNT_KEY_PATH: undefined, SERANKING_API_KEY: undefined, SURFER_API_KEY: undefined, SERPHOUSE_API_KEY: undefined }, async () => {
-    for (const name of ['wordpress', 'gsc', 'seranking', 'surfer', 'serphouse']) {
+  await withEnv({ ...NO_SITE, GOOGLE_SERVICE_ACCOUNT_KEY_JSON: undefined, GOOGLE_SERVICE_ACCOUNT_KEY_PATH: undefined, SERANKING_API_KEY: undefined, SURFER_API_KEY: undefined, SERPHOUSE_API_KEY: undefined }, async () => {
+    for (const name of ['site', 'gsc', 'seranking', 'surfer', 'serphouse']) {
       const { GET } = await import(`../app/api/${name}/test/route`);
       const res = await GET(new Request('http://localhost/x'));
       assert.equal(res.status, 200, name);
@@ -69,20 +69,12 @@ test('connection tests answer Not connected (200, connected:false) when nothing 
   });
 });
 
-test('site checks and speed work report an error when nothing could be done, so the day stays open', { skip: !db, timeout: 60000 }, async () => {
-  await withEnv(NO_WP, async () => {
+test('site checks report an error when nothing could be done, so the day stays open', { skip: !db, timeout: 60000 }, async () => {
+  await withEnv(NO_SITE, async () => {
     const { runSiteChecks } = await import('../lib/siteChecks');
     const site: any = await runSiteChecks();
     assert.ok(site.error, 'no website connection: not marked done');
     assert.match(String(site.aiText), /^not checked/);
-    const { runSpeedFixes } = await import('../lib/strategy/speed');
-    const prisma = (await import('../lib/prisma')).default;
-    // A cache row (from an earlier run on this database) makes the cache step a skip, not an error.
-    if (!(await prisma.technical_fix_tasks.count({ where: { strategy_id: 0, kind: 'cache' } }))) {
-      const speed: any = await runSpeedFixes();
-      assert.ok(speed.cache?.error && speed.images?.error);
-      assert.ok(speed.error, 'both steps failed: not marked done');
-    }
   });
 });
 
@@ -93,7 +85,7 @@ test('the outreach link check: no SE Ranking key is not an error, an SE Ranking 
     assert.deepEqual(await checkOutreachLinks(new Date(), sent), { verified: 0 });
   });
   // A domain no earlier run cached, so the (blocked) live call is made and fails.
-  await withEnv({ SERANKING_API_KEY: 'test-key', WORDPRESS_SITE_URL: `https://r13-${Date.now()}.test` }, async () => {
+  await withEnv({ SERANKING_API_KEY: 'test-key', SITE_URL: `https://r13-${Date.now()}.test` }, async () => {
     const r = await checkOutreachLinks(new Date(), sent);
     assert.equal(r.verified, 0);
     assert.match(String(r.error), /SE Ranking link check failed/);

@@ -36,7 +36,7 @@ test('an image can be added after a section', () => {
   assert.ok(placeAfterSection(html, 9, '<p>X</p>').endsWith('<p>X</p>'), 'past the last heading it goes at the end');
 });
 
-test('at publish, dashboard images move to WordPress and the tags point there', async () => {
+test('at publish, dashboard images move to the website and the tags point there', async () => {
   const body = placeAtSlot(html, 0, imageTag('inline/draft-1-9.png', 'W-7 "flow" & steps'));
   assert.deepEqual(inlineImageKeys(body), ['inline/draft-1-9.png']);
   const calls: any[] = [];

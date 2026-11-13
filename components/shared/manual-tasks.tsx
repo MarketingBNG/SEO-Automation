@@ -166,7 +166,7 @@ function TaskRow({ t, m }: { t: Task; m: M }) {
             {t.title}
           </div>
           <div className="text-xs text-muted-foreground">
-            {t.kind === 'fix' ? 'Website fix for a developer or WordPress admin' : 'Profile or listing to create'}
+            {t.kind === 'fix' ? 'Website fix for a developer' : 'Profile or listing to create'}
             {t.date ? `, planned ${t.date.slice(0, 10)}` : ''}. {t.detail}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">

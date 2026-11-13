@@ -2,21 +2,36 @@
 // Run: DATABASE_URL=... npx tsx tests/e2e-strategy.ts
 import assert from 'node:assert/strict';
 
-process.env.WORDPRESS_SITE_URL = 'https://usaindiacfo.com';
-process.env.WORDPRESS_USERNAME = process.env.WORDPRESS_USERNAME || 'test';
-process.env.WORDPRESS_APPLICATION_PASSWORD = process.env.WORDPRESS_APPLICATION_PASSWORD || 'test';
+process.env.SITE_URL = 'https://usaindiacfo.com';
+// The website connector, answered by a small in-memory website below.
+const CONNECTOR = 'https://usaindiacfo.com/_bridge/dashboard-connector.php';
+process.env.SITE_CONNECTOR_URL = CONNECTOR;
+process.env.SITE_CONNECTOR_SECRET = 'test';
 process.env.UPLOADS_DIR = process.env.UPLOADS_DIR || '/tmp/claude-0/e2e/uploads';
 delete process.env.BLOB_READ_WRITE_TOKEN;
 
+const sitePosts = new Map<string, any>([['old-post', { id: 5, slug: 'old-post', title: 'FBAR deadline explained', status: 'published', url: '/old-post/', content: '<p>Old post.</p>' }]]);
+let nextId = 100;
 const calls: string[] = [];
 globalThis.fetch = (async (url: any, init: any = {}) => {
   const u = String(url);
   calls.push(`${init.method || 'GET'} ${u}${init.body && typeof init.body === 'string' ? ` ${init.body}` : ''}`);
-  if (u.endsWith('/robots.txt')) return new Response('User-agent: *\nDisallow: /wp-admin/\n', { status: 200 });
-  if (u.includes('/wp-json/wp/v2/posts/5') && init.method === 'POST') return Response.json({ id: 5, link: 'https://usaindiacfo.com/old-post/', meta: {} });
-  if (u.includes('/wp-json/wp/v2/posts') && (init.method || 'GET') === 'POST') return Response.json({ id: 99, link: 'https://usaindiacfo.com/new-post/', meta: {} });
-  if (u.includes('/wp-json/wp/v2/posts') && u.includes('search=')) return Response.json([{ id: 5, link: 'https://usaindiacfo.com/old-post/', content: { raw: '<p>Old post.</p>' } }]);
-  if (u.includes('/wp-json/')) return Response.json([]);
+  if (u.endsWith('/robots.txt')) return new Response('User-agent: *\nDisallow: /private/\n', { status: 200 });
+  if (u === CONNECTOR) {
+    const { action, data } = JSON.parse(init.body);
+    if (action === 'post.list') return Response.json({ ok: true, posts: [...sitePosts.values()] });
+    if (action === 'post.get') return sitePosts.has(data.slug) ? Response.json({ ok: true, post: sitePosts.get(data.slug) }) : Response.json({ ok: false, error: 'not found' }, { status: 404 });
+    if (action === 'post.create') {
+      sitePosts.set(data.slug, { ...data, id: nextId++, url: `/${data.slug}/` });
+      return Response.json({ ok: true });
+    }
+    if (action === 'post.update') {
+      sitePosts.set(data.slug, { ...sitePosts.get(data.slug), ...data });
+      return Response.json({ ok: true });
+    }
+    if (action === 'media.upload') return Response.json({ ok: true, url: `/uploads/${data.filename}` });
+    return Response.json({ ok: false, error: 'unknown action' }, { status: 400 });
+  }
   return new Response('stubbed', { status: 503 });
 }) as any;
 
@@ -221,7 +236,7 @@ async function main() {
   assert.equal(verifyCalls, 1); // unchanged draft is not re-checked
   const log = JSON.parse(r!.post_publish_log!);
   console.log('PASS unreviewed blog waited the full 48 hours, then auto-approved and published by', r!.author, 'with a cover image. After-publish:', Object.fromEntries(Object.entries(log).map(([k, v]: any) => [k, v.ok ? 'ok' : v.error])));
-  assert.ok(calls.some((c) => c.startsWith('POST https://usaindiacfo.com/wp-json/wp/v2/posts')));
+  assert.ok(calls.some((c) => c.startsWith(`POST ${CONNECTOR}`) && c.includes('"action":"post.create"')));
   assert.equal(log.internalLinks.ok, true);
   assert.deepEqual(log.internalLinks.result, ['https://usaindiacfo.com/old-post/']);
 
@@ -245,7 +260,7 @@ async function main() {
   r = await prisma.blog_schedule.findUnique({ where: { id: second.id } });
   assert.equal(r!.status, 'published', r!.hold_reasons || '');
   assert.equal(r!.approval_mode, 'reviewed');
-  const sent = calls.filter((c) => /^POST https:\/\/usaindiacfo\.com\/wp-json\/wp\/v2\/posts(\?| )/.test(c)).pop() || '';
+  const sent = calls.filter((c) => c.startsWith(`POST ${CONNECTOR}`) && c.includes('"action":"post.create"')).pop() || '';
   assert.ok(sent.includes('Reviewed by') && sent.includes('Akshay Nahar, CA'), 'byline names the CA reviewer');
   assert.ok(sent.includes('reviewedBy'), 'expert schema added');
   console.log('PASS approved blog published at its slot with the CA reviewer byline and expert schema');

@@ -12,6 +12,7 @@ import {
   DEFAULT_DIRECTORIES_PER_DAY,
   STRATEGY_DAYS,
 } from './core';
+import { publicSite } from '../siteConnector';
 
 // The strongest model available, at maximum effort, for strategy research. Override in Vercel.
 const STRATEGY_MODEL = () => process.env.STRATEGY_MODEL || process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
@@ -140,17 +141,16 @@ export function calendarSlots(window: any, days: string[], timeIst: string, coun
 export const AUTOMATION = [
   { platform: 'Claude API', what: 'Writes each blog with deep research, then fact-checks and corrects it against official sources until two checks in a row are clean', when: '2 days before each slot, again when review opens and after any edit' },
   { platform: 'Dashboard', what: 'Opens the 48-hour review: a manager approves or rejects with feedback (a rejected blog is rewritten and comes back with a note on what changed); if nobody rejects it, it publishes automatically under a partner\'s name with a cover image', when: '48 hours before each publish slot' },
-  { platform: 'Website CMS (WordPress)', what: 'Publishes the reviewed or auto-approved blog with FAQ schema', when: 'At each publish slot' },
+  { platform: 'Website (dashboard connector)', what: 'Publishes the reviewed or auto-approved blog with FAQ schema', when: 'At each publish slot' },
   { platform: 'Bing IndexNow', what: 'Submits each new or updated URL', when: 'Right after publishing' },
   { platform: 'Google Search Console', what: 'Sitemap resubmitted so Google recrawls the new URL', when: 'Right after publishing' },
   { platform: 'SE Ranking', what: 'Adds the main keyword to rank tracking; daily rank check with 5+ drop alert', when: 'After publishing; daily' },
-  { platform: 'Website CMS (WordPress)', what: 'Adds internal links from 2 to 3 older related posts', when: 'Right after publishing' },
+  { platform: 'Website (dashboard connector)', what: 'Adds internal links from 2 to 3 older related posts', when: 'Right after publishing' },
   { platform: 'Surfer', what: 'Content score check (75+ required)', when: 'Before each publish' },
   { platform: 'SERPHouse', what: 'Featured snippet, PAA and AI Overview checks', when: 'Weekly plan vs actual' },
   { platform: 'SE Ranking AI Search and AI Results Tracker', what: 'ChatGPT, Perplexity, Gemini, AI Overviews and AI Mode mentions and links', when: 'Each strategy run and weekly plan vs actual' },
   { platform: 'Screaming Frog', what: 'Crawl upload parsed into Section 8 fixes', when: 'On each upload (required before approval)' },
-  { platform: 'Website CMS (WordPress)', what: 'Applies the ticked Section 8 fixes (titles, meta descriptions, broken links, 301 redirects, FAQs for thin pages), saving the old value for undo', when: 'A few per run after approval' },
-  { platform: 'Website CMS (WordPress) and PageSpeed', what: 'Speed: adds a page cache plugin if none is active (removed again if PageSpeed drops), and converts large images to WebP on every page that uses them, keeping the originals', when: 'Daily, a few images per day' },
+  { platform: 'Website (dashboard connector)', what: 'Applies the ticked Section 8 fixes on blog posts (SEO titles, meta descriptions, broken links, FAQs for thin pages), saving the old value for undo; 301 redirects and pages are listed for a developer', when: 'A few per run after approval' },
   { platform: 'Smartlead', what: 'Each backlink target is added as a lead to the outreach campaign with a personalised opening line; Smartlead sends the emails and follow-ups', when: 'Daily, up to 5 leads, from each task send date' },
   { platform: 'SE Ranking', what: 'Competitors found from Google results for our keywords; backlink gap built from them; new links verified', when: 'Each strategy run or update; daily link check' },
 ];
@@ -235,7 +235,7 @@ export async function buildPlan(ai, inputs, period, window = windowOf(period)) {
     if (s.impressions >= 500 && s.ctr < 2)
       refreshes.push({ page: s.page, trigger: `High impressions (${s.impressions}), low CTR (${s.ctr}%) for "${s.query}"`, source: `Search Console, last ${s.windowDays} days`, tags: ['SEO', 'AEO'] });
   }
-  for (const g of a.regulatoryRefresh || []) refreshes.push({ page: g.url || g.page, trigger: 'Changed tax rule (Income-tax Act 2025 wording)', source: 'WordPress content scan', tags: ['SEO', 'AEO', 'GEO'] });
+  for (const g of a.regulatoryRefresh || []) refreshes.push({ page: g.url || g.page, trigger: 'Changed tax rule (Income-tax Act 2025 wording)', source: 'Website content scan', tags: ['SEO', 'AEO', 'GEO'] });
 
   const L = inputs.lastMonth;
   const t = ai.targets || {};
@@ -319,7 +319,7 @@ export function technicalFixesFromCrawl(crawl) {
 // checkpoint: awaited between steps; it pauses (waits) or stops (throws) the run when asked.
 export async function generateStrategy({ window = strategyWindow(), actor = 'Monthly auto-run', onProgress, signal, rowId, checkpoint = async () => {} }: any = {}) {
   const period = window.label;
-  const siteUrl = process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com';
+  const siteUrl = publicSite();
   await checkpoint();
   onProgress?.('Collecting real data from every connected tool', 3);
   const inputs = await gatherStrategyInputs({

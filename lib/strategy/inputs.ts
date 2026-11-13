@@ -13,8 +13,9 @@ import * as settings from '../settings';
 import { gatherAiVisibility } from '../aiVisibility';
 import { metric, keywordKey, CRAWL_MAX_AGE_DAYS } from './core';
 import { competitorList, detectCompetitors } from '../competitors';
+import { publicHost } from '../siteConnector';
 
-const SITE_HOST = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '');
+const SITE_HOST = () => publicHost();
 
 // Gives up on a step that takes too long, so one slow or silent tool can never stall the strategy.
 // The step's number then shows as DATA MISSING with the reason.
@@ -236,7 +237,7 @@ export async function gatherStrategyInputs({ onStep }: any = {}) {
   if (!crawl) out.missing.push('Screaming Frog crawl (none uploaded)');
 
   // The deeper analysis (striking distance, decay, cannibalization, AI visibility) from Search
-  // Console, GA4, SERPHouse, WordPress, PageSpeed and Clarity.
+  // Console, GA4, SERPHouse, the website, PageSpeed and Clarity.
   await onStep?.('Running the full site analysis', 0.45);
   try {
     out.snapshot = await limit(gatherSnapshot({ onStep: (l, f) => onStep?.(l, 0.45 + 0.4 * f) }), 20, 'Site analysis');

@@ -34,7 +34,8 @@ test('a held blog is notified again when its reasons change, not when only the p
 });
 
 test('Bing gets the verified site address (www or not, as Bing has it), the one the Settings test finds', async () => {
-  const saved = { WORDPRESS_SITE_URL: process.env.WORDPRESS_SITE_URL, SITE_CONNECTOR_URL: process.env.SITE_CONNECTOR_URL, SITE_CONNECTOR_SECRET: process.env.SITE_CONNECTOR_SECRET, BING_WEBMASTER_API_KEY: process.env.BING_WEBMASTER_API_KEY };
+  const saved = { SITE_URL: process.env.SITE_URL, WORDPRESS_SITE_URL: process.env.WORDPRESS_SITE_URL, SITE_CONNECTOR_URL: process.env.SITE_CONNECTOR_URL, SITE_CONNECTOR_SECRET: process.env.SITE_CONNECTOR_SECRET, BING_WEBMASTER_API_KEY: process.env.BING_WEBMASTER_API_KEY };
+  delete process.env.SITE_URL;
   delete process.env.WORDPRESS_SITE_URL;
   process.env.SITE_CONNECTOR_URL = 'https://www.example-site.test/_bridge/x';
   process.env.SITE_CONNECTOR_SECRET = 's';

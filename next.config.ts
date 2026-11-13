@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['sharp', 'html-to-docx', 'mammoth', 'googleapis', 'xlsx', 'unpdf'],
   // lib/playbook.ts reads the playbook from disk at runtime; ship it with every server function.
   outputFileTracingIncludes: {
-    '/api/**/*': ['./skills/**/*', './wordpress/**/*', './assets/**/*'],
+    '/api/**/*': ['./skills/**/*', './assets/**/*'],
   },
 };
 

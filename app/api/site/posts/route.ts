@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listPosts, wpConfigured } from '@/lib/wordpress';
+import { listPosts, siteConfigured, SITE_NOT_SET_UP } from '@/lib/site';
 import prisma from '@/lib/prisma';
 import { getMe } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
-// Old handler accepted any method.
+// The website's live posts (Refresh a live blog), with the latest audit of each.
 async function handler(req: NextRequest) {
   try {
     const page = parseInt(req.nextUrl.searchParams.get('page') as any, 10) || 1;
     // Not set up is not a server failure: 200 with connected:false and the reason.
-    if (!wpConfigured()) return NextResponse.json({ posts: [], totalPages: 0, page, connected: false, error: 'WordPress connection is not configured, so the live blogs cannot be listed.' });
+    if (!siteConfigured()) return NextResponse.json({ posts: [], totalPages: 0, page, connected: false, error: SITE_NOT_SET_UP });
     const { posts, totalPages }: any = await listPosts({ perPage: 20, page });
 
     const audits = await prisma.blog_audits.findMany({
@@ -31,7 +31,7 @@ async function handler(req: NextRequest) {
     const admin = me?.role === 'admin' || me?.role === 'tester';
     const merged = posts.map((p: any) => ({
       id: p.id,
-      title: p.title?.rendered || '(untitled)',
+      title: p.title || '(untitled)',
       link: p.link,
       modified: p.modified,
       audit: latestAuditByPost[p.id] || null,
@@ -44,4 +44,4 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
-export { handler as GET, handler as POST, handler as PUT, handler as PATCH, handler as DELETE };
+export { handler as GET };

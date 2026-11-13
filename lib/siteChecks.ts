@@ -1,17 +1,16 @@
-// @ts-nocheck -- reads untyped WordPress JSON.
+// @ts-nocheck -- untyped task rows and fetch results.
 // Daily checks on the live website (audit items A1 and K11):
 //  - every published post is scanned for AI instruction text, chat lines and placeholders;
-//  - robots.txt must list the sitemap;
-//  - image attachment pages must not be indexable pages of their own.
+//  - robots.txt must list the sitemap.
 // Each problem becomes a task for a person (Monthly Strategy > tasks) with an alert, once.
 import prisma from './prisma';
-import { wpRequest } from './wordpress';
+import { livePosts } from './site';
 import { siteOrigin } from './siteConnector';
 import { notify } from './notify';
 import { aiLeftovers } from './strategy/core';
 
-// No default domain: a local or test server without WORDPRESS_SITE_URL or the site connector must
-// not fetch the live site.
+// No default domain: a local or test server without SITE_URL or the website connection must not
+// fetch the live site.
 const SITE = () => siteOrigin();
 
 async function addTask(url: string, issue: string, fix: string) {
@@ -21,26 +20,18 @@ async function addTask(url: string, issue: string, fix: string) {
   return true;
 }
 
-export async function scanPostsForAiText(maxPages = 5) {
+// The website could not be read at all: the caller hears of it.
+export async function scanPostsForAiText() {
   const found = [];
-  for (let page = 1; page <= maxPages; page++) {
-    // The first page failing means the website could not be read at all: the caller hears of it.
-    const { json } = await wpRequest('GET', '/wp/v2/posts', { query: { per_page: 100, page, status: 'publish', context: 'edit', _fields: 'id,link,title,content' } }).catch((e) => {
-      if (page === 1) throw e;
-      return { json: [] };
-    });
-    if (!Array.isArray(json) || !json.length) break;
-    for (const p of json) {
-      const issues = aiLeftovers(p.title?.raw || '', p.content?.raw || '');
-      if (issues.length) found.push({ url: p.link, title: p.title?.raw || p.link, issues });
-    }
-    if (json.length < 100) break;
+  for (const p of await livePosts({ full: true, fresh: true })) {
+    const issues = aiLeftovers(p.title || '', p.content || '');
+    if (issues.length) found.push({ url: p.link, title: p.title || p.link, issues });
   }
   return found;
 }
 
 export async function runSiteChecks() {
-  const out: any = { aiText: 0, robots: null, attachments: null, newTasks: 0 };
+  const out: any = { aiText: 0, robots: null, newTasks: 0 };
   // 1. AI instruction text on live posts.
   let ai = [];
   let scanFailed = false;
@@ -52,46 +43,31 @@ export async function runSiteChecks() {
     out.aiText = `not checked: ${e.message}`;
   }
   for (const p of ai) {
-    if (await addTask(p.url, 'AI instruction text on a live post', `Edit the post in WordPress and remove: ${p.issues.join(' ')}`)) out.newTasks++;
+    if (await addTask(p.url, 'AI instruction text on a live post', `Edit the post on the website and remove: ${p.issues.join(' ')}`)) out.newTasks++;
   }
 
   // 2. Sitemap listed in robots.txt.
-  if (!SITE()) out.robots = 'not checked: neither WORDPRESS_SITE_URL nor the site connector is set';
+  if (!SITE()) out.robots = 'not checked: neither SITE_URL nor the website connection is set';
   else {
     try {
       const txt = await (await fetch(`${SITE()}/robots.txt`, { signal: AbortSignal.timeout(15000) })).text();
       out.robots = /^\s*sitemap:\s*https?:\/\//im.test(txt) ? 'ok' : 'missing';
-      if (out.robots === 'missing' && (await addTask(`${SITE()}/robots.txt`, 'Sitemap missing from robots.txt', `Add the line "Sitemap: ${SITE()}/sitemap_index.xml" (Yoast: SEO > Tools > File editor)`))) out.newTasks++;
+      if (out.robots === 'missing' && (await addTask(`${SITE()}/robots.txt`, 'Sitemap missing from robots.txt', `Ask the developer to add the line "Sitemap: ${process.env.SITEMAP_URL || `${SITE()}/sitemap.xml`}" to robots.txt on the website`))) out.newTasks++;
     } catch (e) {
       out.robots = `not checked: ${e.message}`;
     }
   }
 
-  // 3. Image attachment pages should redirect to the image (Yoast: Settings > Advanced > Media pages).
-  try {
-    const { json } = await wpRequest('GET', '/wp/v2/media', { query: { per_page: 1, _fields: 'link,source_url' } });
-    const link = json?.[0]?.link;
-    if (link && json[0].source_url && link !== json[0].source_url) {
-      const res = await fetch(link, { redirect: 'manual', signal: AbortSignal.timeout(15000) });
-      const html = res.status === 200 ? await res.text() : '';
-      const indexable = res.status === 200 && !/<meta[^>]+name=["']robots["'][^>]+noindex/i.test(html);
-      out.attachments = indexable ? 'indexable' : 'ok';
-      if (indexable && (await addTask(link, 'Image attachment pages are indexable', 'In Yoast SEO: Settings > Advanced > Media pages, turn off "Enable media pages" so each image URL redirects to the image itself'))) out.newTasks++;
-    } else out.attachments = 'ok';
-  } catch (e) {
-    out.attachments = `not checked: ${e.message}`;
-  }
-
   // Nothing could be checked (no connection, or the website is down): an error, so the scheduler
   // keeps the day open and tries again on its next run instead of marking today's check done.
-  if (scanFailed && /^not checked/.test(String(out.robots)) && /^not checked/.test(String(out.attachments))) {
+  if (scanFailed && /^not checked/.test(String(out.robots))) {
     out.error = `Website not reachable: ${out.aiText.slice('not checked: '.length)}`;
   }
 
   if (out.newTasks) {
     await notify(
       `Website check: ${out.newTasks} new problem(s) need a person`,
-      `${ai.length ? `AI instruction text on ${ai.length} live post(s): ${ai.slice(0, 5).map((p) => p.url).join(', ')}. ` : ''}${out.robots === 'missing' ? 'The sitemap is missing from robots.txt. ' : ''}${out.attachments === 'indexable' ? 'Image attachment pages are indexable. ' : ''}See the task list in Monthly Strategy.`,
+      `${ai.length ? `AI instruction text on ${ai.length} live post(s): ${ai.slice(0, 5).map((p) => p.url).join(', ')}. ` : ''}${out.robots === 'missing' ? 'The sitemap is missing from robots.txt. ' : ''}See the task list in Monthly Strategy.`,
       { action: 'alert.site_check' }
     );
   }

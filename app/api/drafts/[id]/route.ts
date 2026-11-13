@@ -7,7 +7,8 @@ import { sqlNow } from '@/lib/time';
 import { methodNotAllowed, toId } from '../../_lib/http';
 import { needsExpertReview, publishPlan } from '@/lib/strategy/core';
 import { requireExpert } from '@/lib/reviewers';
-import { seoSlug } from '@/lib/wordpress';
+import { seoSlug } from '@/lib/site';
+import { publicSite } from '@/lib/siteConnector';
 import { coverAlt } from '@/lib/cover';
 import { DRAFT_TOKEN_ACTOR, hasDraftToken } from '@/lib/draftToken';
 import { authorNames, pickAuthor } from '@/lib/authors';
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
         publish_plan: publishPlan(sched, new Date(), { requireExpert: expertOn }),
       }
     : null;
-  const site = (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
+  const site = publicSite();
   const planned_url = found.wp_post_url || `${site}/${seoSlug(sched?.main_keyword || row.keyword || found.title || '')}/`;
   return NextResponse.json({ ...row, text_hash: wordsHash(found), facts, schedule, planned_url, cover_alt_shown: coverAlt(found), author_options: await authorNames() }, { status: 200 });
 }
@@ -65,7 +66,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   const viaToken = hasDraftToken(req);
   if (viaToken && (status != null || cover_alt != null || author != null)) return NextResponse.json({ error: 'The edit token changes only the title, meta description and article. Approve or reject in the dashboard.' }, { status: 403 });
   // Only the review states the screen sets. 'published' comes only from a real publish (it needs the
-  // WordPress post), and a blog already live is not moved back to review here.
+  // website post), and a blog already live is not moved back to review here.
   if (status != null && !['approved', 'rejected', 'pending_review'].includes(status)) {
     return NextResponse.json({ error: 'Status must be approved, rejected or pending_review. Publishing is done with Publish.' }, { status: 400 });
   }
@@ -85,7 +86,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
     const names = await authorNames();
     const name = author === 'random' ? pickAuthor(names) : names.find((n) => n === author);
     if (!name) return NextResponse.json({ error: `Pick one of: ${names.join(', ')}.` }, { status: 400 });
-    if (existing.wp_post_url) return NextResponse.json({ error: 'This blog is already on the website; change its author in WordPress.' }, { status: 400 });
+    if (existing.wp_post_url) return NextResponse.json({ error: 'This blog is already on the website; its author cannot be changed from here.' }, { status: 400 });
     await prisma.drafts.update({ where: { id: nid }, data: { author: name } });
     await prisma.blog_schedule.updateMany({ where: { draft_id: nid, status: { not: 'published' } }, data: { author: name, updated_at: sqlNow() } });
     await activity.log('draft.author_set', { entityType: 'draft', entityId: nid, details: `"${existing.title}" will publish under ${name}${author === 'random' ? ' (picked at random)' : ''}`, actor: await getActor() });
@@ -167,7 +168,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
 // Deletes a draft that will not be published. Its facts and image links go with it. A plain blog's
 // keyword returns to the pending queue so it can be written again later; a calendar blog is written
 // again by the schedule, a topic's blog or article from Topics, and a live blog's keyword stays as it
-// is (see requeueAfterDelete). A WordPress post that was already created from this draft is NOT touched.
+// is (see requeueAfterDelete). A website post that was already created from this draft is NOT touched.
 export async function DELETE(req: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const nid = toId(id);
@@ -205,7 +206,7 @@ export async function DELETE(req: NextRequest, { params }: Ctx) {
   await activity.log('draft.deleted', {
     entityType: 'draft',
     entityId: Number(id),
-    details: `"${existing.title || '(untitled)'}" deleted${existing.wp_post_url ? ' (the WordPress post was not touched)' : ''}`,
+    details: `"${existing.title || '(untitled)'}" deleted${existing.wp_post_url ? ' (the website post was not touched)' : ''}`,
     actor: await getActor(),
   });
   return NextResponse.json({ deleted: true, keywordId: existing.keyword_id, requeued: requeue }, { status: 200 });

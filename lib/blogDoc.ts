@@ -7,11 +7,12 @@ import { readFile, mimeFor } from './storage';
 import { makeCover, coverAlt } from './cover';
 import { withByline } from './byline';
 import { htmlToDocx } from './docx';
-import { seoSlug } from './wordpress';
+import { seoSlug } from './site';
 import { inlineImageKeys, decodeKey } from './blogImages';
+import { publicSite } from './siteConnector';
 
 const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const SITE = () => (process.env.WORDPRESS_SITE_URL || 'https://usaindiacfo.com').replace(/\/+$/, '');
+const SITE = () => publicSite();
 
 export type BlogDocInput = {
   title: string;
@@ -125,12 +126,13 @@ export async function renderLiveBlogDocx(inputUrl: string): Promise<{ buffer: Bu
     throw Object.assign(new Error('That is not a web address.'), { status: 400 });
   }
   if (url.hostname.replace(/^www\./, '') !== site.hostname.replace(/^www\./, '')) throw Object.assign(new Error('Only posts on the company website can be downloaded.'), { status: 400 });
-  const { findPostByUrl, wpRequest } = await import('./wordpress');
-  const post: any = await findPostByUrl(url.toString()).catch(() => null);
+  const { findPostByUrl, siteConfigured, SITE_NOT_SET_UP } = await import('./site');
+  if (!siteConfigured()) throw Object.assign(new Error(SITE_NOT_SET_UP), { status: 503 });
+  const post = await findPostByUrl(url.toString()).catch(() => null);
   if (!post) throw Object.assign(new Error('That post was not found on the website.'), { status: 404 });
   const plain = (s: string) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/&#8217;/g, '’').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-  const title = plain(post.title?.rendered);
-  let content = String(post.content?.rendered || '');
+  const title = plain(post.title);
+  let content = String(post.content || '');
 
   const sameSite = (src: string) => {
     try {
@@ -161,21 +163,20 @@ export async function renderLiveBlogDocx(inputUrl: string): Promise<{ buffer: Bu
 
   let cover: string | null = null;
   let coverAltText: string | null = null;
-  if (post.featured_media) {
-    const media: any = await wpRequest('GET', `/wp/v2/media/${post.featured_media}`, { query: { _fields: 'source_url,alt_text' } }).then((r: any) => r.json).catch(() => null);
-    if (media?.source_url && sameSite(media.source_url)) cover = await fetchImage(media.source_url);
-    coverAltText = media?.alt_text || null;
+  if (post.featuredImage) {
+    if (sameSite(post.featuredImage)) cover = await fetchImage(post.featuredImage);
+    coverAltText = post.featuredImageAlt || null;
   }
-  const authorName = post.author ? await wpRequest('GET', `/wp/v2/users/${post.author}`, { query: { _fields: 'name' } }).then((r: any) => r.json?.name || null).catch(() => null) : null;
+  const authorName = post.author || null;
   const html = blogDocHtml({
     title,
-    meta: plain(post.excerpt?.rendered),
+    meta: plain(post.excerpt),
     content,
     author: null, // the live post already carries its byline
     cover,
     coverAlt: coverAltText,
     url: post.link || url.toString(),
-    status: `Published${post.modified ? ` (last updated ${String(post.modified).slice(0, 10)})` : ''}${authorName ? `, author on WordPress: ${authorName}` : ''}`,
+    status: `Published${post.modified ? ` (last updated ${String(post.modified).slice(0, 10)})` : ''}${authorName ? `, author on the website: ${authorName}` : ''}`,
     keyword: null,
     words: plain(content).split(' ').filter(Boolean).length,
     images: {},

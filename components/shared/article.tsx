@@ -12,7 +12,7 @@ export function renderMarkdown(text: any): string {
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\*)/g, '$1<em>$2</em>')
       .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/api\/uploads\/[A-Za-z0-9._/-]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
   const cells = (row: string) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
   const isRule = (row: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(row);
 
@@ -88,7 +88,7 @@ export function isSafeUrl(value: any, allowRelative = true) {
 // absolute http(s) URLs become clickable.
 export const safeHref = (url: any) => (isSafeUrl(url, false) ? String(url).trim() : undefined);
 
-// WordPress titles arrive texturized (&#8217; &#8211; &amp;). React would print those literally.
+// Titles from the website can arrive as HTML entities (&#8217; &#8211; &amp;). React would print those literally.
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', hellip: '…', ndash: '–',
   mdash: '—', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“',

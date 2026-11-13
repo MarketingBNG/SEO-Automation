@@ -3,7 +3,7 @@ import * as searchConsoleMod from './searchConsole';
 import * as questionBankMod from './questionBank';
 import prisma from './prisma';
 import { RELIABLE_IMPRESSIONS_FROM, eventsAffecting, upcomingDeadlines } from './seoCalendar';
-import { wpRequest } from './wordpress';
+import { livePosts } from './site';
 import { liveSearch } from './serphouse';
 import { aiOverviewSummary, peopleAlsoAsk } from './researchBrief';
 import { listSites, getSiteRankings } from './seranking';
@@ -28,7 +28,7 @@ const throwIfAborted = (signal) => {
   if (signal?.aborted) throw abortError();
 };
 // Settles with the promise, or rejects as soon as the signal aborts, so Stop ends the run at
-// once. A call that cannot take a signal (Search Console, WordPress) finishes in the background,
+// once. A call that cannot take a signal (Search Console, the website) finishes in the background,
 // and its result is ignored.
 function untilAborted(promise, signal) {
   if (!signal) return promise;
@@ -285,16 +285,20 @@ async function cohorts(pageRowsLast28, signal) {
     { label: '6 months ago', fromDays: 195, toDays: 165, checkpoint: 180 },
   ];
   const out: any[] = [];
+  const all = await livePosts();
   for (const w of windows) {
     throwIfAborted(signal);
-    const after = new Date(Date.now() - w.fromDays * DAY).toISOString();
-    const before = new Date(Date.now() - w.toDays * DAY).toISOString();
-    const { json } = await wpRequest('GET', '/wp/v2/posts', { query: { after, before, per_page: 50, _fields: 'id,title,link,date' } });
-    const posts = (json || []).map((p) => {
+    const after = Date.now() - w.fromDays * DAY;
+    const before = Date.now() - w.toDays * DAY;
+    const inWindow = all.filter((p) => {
+      const t = Date.parse(String(p.date || '').replace(' ', 'T'));
+      return t > after && t < before;
+    }).slice(0, 50);
+    const posts = inWindow.map((p) => {
       const g = byUrl.get(String(p.link).replace(/\/+$/, ''));
       return {
         id: p.id,
-        title: String(p.title?.rendered || '').replace(/&#8217;/g, "'").replace(/&amp;/g, '&'),
+        title: String(p.title || '').replace(/&#8217;/g, "'").replace(/&amp;/g, '&'),
         url: p.link,
         published: String(p.date).slice(0, 10),
         clicks28d: g?.clicks || 0,
@@ -327,28 +331,23 @@ function oldActWording(text) {
 async function regulatoryRefresh(pageRowsLast28, signal) {
   const clicks = new Map(pageRowsLast28.map((r) => [r.keys[0].replace(/\/+$/, ''), r.clicks]));
   const found = new Map();
-  // Quoted phrases: WordPress search otherwise matches each word on its own, and "act" matches
-  // inside "contact" and "impact", which fills the 50 results with unrelated posts.
-  for (const search of ['"assessment year"', '1961', '"income tax act"', '"income-tax act"', '"previous year"']) {
-    throwIfAborted(signal);
-    const { json } = await wpRequest('GET', '/wp/v2/posts', { query: { search, per_page: 50, _fields: 'id,title,link,content,modified' } });
-    for (const p of json || []) {
-      if (found.has(p.id)) continue;
-      const text = String(p.content?.rendered || '')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;|&#160;/g, ' ')
-        .replace(/\s+/g, ' ');
-      const example = oldActWording(text);
-      if (!example) continue;
-      found.set(p.id, {
-        id: p.id,
-        title: String(p.title?.rendered || '').replace(/&#8217;/g, "'").replace(/&amp;/g, '&'),
-        url: p.link,
-        lastModified: String(p.modified).slice(0, 10),
-        example,
-        clicks28d: clicks.get(String(p.link).replace(/\/+$/, '')) || 0,
-      });
-    }
+  throwIfAborted(signal);
+  // Every live post's text is read once and checked here (the website has no full-text search).
+  for (const p of await livePosts({ full: true })) {
+    const text = String(p.content || '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;|&#160;/g, ' ')
+      .replace(/\s+/g, ' ');
+    const example = oldActWording(text);
+    if (!example) continue;
+    found.set(p.id, {
+      id: p.id,
+      title: String(p.title || '').replace(/&#8217;/g, "'").replace(/&amp;/g, '&'),
+      url: p.link,
+      lastModified: String(p.modified).slice(0, 10),
+      example,
+      clicks28d: clicks.get(String(p.link).replace(/\/+$/, '')) || 0,
+    });
   }
   return [...found.values()].sort((a, b) => b.clicks28d - a.clicks28d).slice(0, 25);
 }

@@ -59,7 +59,7 @@ link to the Social dashboard (`/api/links`).
   `credits.view` (ai-credits, agent), `team.view` (team), `reports.view` (client-insights), `settings.change`
   (gbp|zoho auth-url and oauth-callback, fireflies/transcripts, serphouse/check, pagespeed/check), else
   **none (any signed-in member)**.
-  Writes -> settings.change (seranking/topup, settings, gsc, ga4, gbp, zoho, wordpress, fireflies, bing,
+  Writes -> settings.change (seranking/topup, settings, gsc, ga4, gbp, zoho, site/test, fireflies, bing,
   surfer/test, serphouse/test, seranking/test), assistant.ask (assistant/chat|upload), website.change
   (assistant/decide|undo), manual.do (associate-training, strategy/manual, strategy/backlinks/*,
   strategy/schedule/<id>), strategy.approve (strategy/<id>/approve), strategy.edit (other strategy),
@@ -104,7 +104,7 @@ link to the Social dashboard (`/api/links`).
 | drafts/[id]/images | GET,POST | inline images | content.work |
 | drafts/[id]/keywords | GET,POST | keyword usage check | content.work |
 | drafts/[id]/originality | POST | plagiarism check | content.work |
-| drafts/[id]/publish | POST | publish to WordPress / site connector | content.work (+blog.publish_now in schedule route) |
+| drafts/[id]/publish | POST | publish to the website (connector) | content.work (+blog.publish_now in schedule route) |
 | drafts/[id]/recheck | POST | re-run open fact-check issues | content.work |
 | drafts/[id]/word | POST | parse uploaded .docx back into a blog | content.work |
 | facts/[id] | PATCH | review a fact | content.work |
@@ -167,10 +167,10 @@ link to the Social dashboard (`/api/links`).
 | training/examples | GET,POST | style examples | GET signed-in; POST content.work |
 | training/examples/[id] | DELETE | delete example | content.work |
 | uploads/[...file] | GET | serve stored file (lib/storage) | signed-in |
-| wordpress/download | GET | live post as .docx | signed-in |
-| wordpress/posts | any | WP post list with audit/draft origin | GET signed-in; writes settings.change |
-| wordpress/test | any | WP connection test | GET signed-in |
-| wordpress/yoast-status | GET | Yoast REST snippet check | signed-in |
+| site/download | GET | live post as .docx | signed-in |
+| site/posts | GET | the website's live posts with audit/draft origin | signed-in |
+| site/status | GET | connection set up? drafts allowed? (no call to the site) | signed-in |
+| site/test | GET, POST | website connection test (signed ping) | settings.change |
 | zoho/auth-url, zoho/oauth-callback, zoho/test | any | Zoho OAuth + test | GET auth-url/oauth-callback settings.change, test signed-in; writes settings.change |
 | zoho/leads, zoho/pipeline | any | CRM data | GET reports.view |
 | zoho/business | GET | leads/consults/clients by blog topic | reports.view |
@@ -222,15 +222,15 @@ link to the Social dashboard (`/api/links`).
 - `storage.ts` Vercel Blob or local `UPLOADS_DIR`. `technicalAudit.ts` Screaming Frog parser.
 - `team.ts` team members, owner, tester expiry. `time.ts` SQLite-style UTC text timestamps. `tokenStore.ts` OAuth tokens in DB.
 - `topLength.ts` target length from ranking pages. `topics.ts` daily news/evergreen topics (10:00 IST).
-- `validation.ts` banned phrases, sources, rule checks. `wordImport.ts` .docx -> blog. `wordpress.ts` WP REST (or connector).
+- `validation.ts` banned phrases, sources, rule checks. `wordImport.ts` .docx -> blog. `site.ts` the website (publish, update, images, posts) through `siteConnector.ts` only.
 - `zoho.ts`/`zohoAuth.ts` Zoho CRM + OAuth. `utils.ts` cn(). `generated/prisma` generated client.
 - `assistant/engine.ts` assistant loop (tools, approvals, site_changes). `assistant/prompt.ts` system prompt.
-  `assistant/stream.ts` NDJSON stream. `assistant/tools.ts` read/write tools (WP, drafts, settings, PAA, undo).
+  `assistant/stream.ts` NDJSON stream. `assistant/tools.ts` read/write tools (website posts read only, drafts, Word files, PAA, undo).
 - `strategy/core.ts` pure strategy rules (tested). `strategy/generate.ts` Claude strategy research.
   `strategy/inputs.ts` real numbers for a strategy. `strategy/jobs.ts` background strategy jobs.
   `strategy/service.ts` read/edit/approve/changes/crawl. `strategy/refresh.ts` cheap update.
   `strategy/progress.ts` progress + cost. `strategy/autopilot.ts` runDaily/runWeekly.
-  `strategy/fixer.ts` technical fixes via WP. `strategy/speed.ts` cache plugin + WebP. `strategy/outreach.ts`
+  `strategy/fixer.ts` technical fixes on blog posts via the connector. `strategy/outreach.ts`
   Smartlead backlink outreach. `strategy/directories.ts` daily directory tasks. `strategy/manual.ts` human tasks + guides.
   `strategy/reschedule.ts` pause/resume/reschedule calendar blogs.
 
@@ -268,7 +268,7 @@ link to the Social dashboard (`/api/links`).
 | activity_log | audit trail | lib/activity, auth, team | activity/list, progress, lessons, clientInsights |
 | research_digests | research digests | training/digest | training/digest |
 | client_insights | meeting insights | clientInsights, client-insights | anthropic (writer context), assistant |
-| blog_audits | audits + rewrites | audits, auditJobs, audit/[id]/publish, topics | audit, wordpress/posts, monthlyMetrics |
+| blog_audits | audits + rewrites | audits, auditJobs, audit/[id]/publish, topics | audit, site/posts, monthlyMetrics |
 | image_library | assistant/inline images | assistant/upload, drafts/[id]/images, inlineMedia | assistant |
 | draft_images | images placed in a draft | drafts/[id]/images | inlineMedia |
 | seo_strategies | monthly strategies | strategy/*, jobs, generate, service, aiCredits, sweep | many (scheduler, autopilot, reports) |
@@ -320,7 +320,7 @@ link to the Social dashboard (`/api/links`).
 | Fireflies | fireflies.ts | FIREFLIES_API_KEY | api.fireflies.ai/graphql |
 | Zoho CRM | zoho.ts, zohoAuth.ts, leadAttribution.ts | ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REDIRECT_URI, ZOHO_ACCOUNTS_URL, ZOHO_API_BASE_URL | crm/v2 |
 | Smartlead | smartlead.ts, strategy/outreach.ts | SMARTLEAD_API_KEY, SMARTLEAD_CAMPAIGN_ID, OUTREACH_DAILY_LIMIT | server.smartlead.ai/api/v1 |
-| WordPress | wordpress.ts, fixer, speed, siteChecks | WORDPRESS_SITE_URL, WORDPRESS_USERNAME, WORDPRESS_APPLICATION_PASSWORD, TECH_FIX_DAILY_LIMIT; settings blog_authors, wp_author_ids | /wp-json/wp/v2 |
+| Website | site.ts, siteConnector.ts, fixer, siteChecks | SITE_CONNECTOR_URL, SITE_CONNECTOR_SECRET, SITE_CONNECTOR_DRAFTS, SITE_URL (old name WORDPRESS_SITE_URL read as fallback), TECH_FIX_DAILY_LIMIT; settings blog_authors | signed POST to the connector |
 | Custom website connector | siteConnector.ts | SITE_CONNECTOR_URL, SITE_CONNECTOR_SECRET, SITE_CONNECTOR_DRAFTS/_CATEGORIES/_AUTHORS | /_bridge/dashboard-connector.php |
 | Custom website webhook / read API | siteContent.ts, site/v1 | SITE_WEBHOOK_URL, SITE_WEBHOOK_SECRET, SITE_API_KEY, SITE_IMPORT_KEY | signed webhook out; /api/site/v1 in |
 | Bing Webmaster | bing.ts | BING_WEBMASTER_API_KEY | ssl.bing.com/webmaster/api.svc/json |
