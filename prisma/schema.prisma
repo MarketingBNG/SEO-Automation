@@ -162,6 +162,7 @@ model blog_audits {
   changes_summary         String? // what changed since that earlier upload (lib/contentDiff.ts)
   draft_id                Int? // the draft this audit was started from (Optimise for SEO, AEO and GEO)
   mode                    String? // optimise: the rewrite keeps the author's text and adds only what SEO, AEO and GEO need
+  instructions            String? // what the person asked for this blog when uploading it (followed by the audit and the rewrite)
 }
 
 // Every change to a blog's words (a reviewer's edit, a Word upload, a re-upload in Check a blog, an

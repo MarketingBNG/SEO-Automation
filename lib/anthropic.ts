@@ -1398,7 +1398,15 @@ Return plain text in EXACTLY this format:
 // gates the writer itself is held to: SEO, AEO, GEO/AI, voice/humanize, accuracy, and CTA.
 // Distinct from researchAndWriteBlog: this reviews something that already exists, it doesn't
 // write anything new.
-async function auditBlog({ title, content, sourceUrl, signal, reverify }: any) {
+// What the person asked for this blog when they uploaded it in Check a blog. It steers the audit and
+// the rewrite (what to change and what to leave alone); facts are still checked, never invented.
+function askedNote(instructions: string | undefined, step: 'audit' | 'rewrite') {
+  const t = String(instructions || '').trim();
+  if (!t) return '';
+  return `\n\nWHAT THE PERSON ASKED FOR THIS BLOG (follow it; it wins over the default ${step === 'audit' ? 'checks' : 'fixes'} where they conflict, for example "do not change the content" means keep their sentences and only add what they asked for). Still verify every hard claim on official sources: report a wrong fact${step === 'rewrite' ? ' and correct only that sentence' : ''}, and never invent a figure, date or section.\n${t.slice(0, 2000)}`;
+}
+
+async function auditBlog({ title, content, sourceUrl, signal, reverify, instructions }: any) {
   // Google's live "People also ask" questions for the post's topic, so the audit can check the FAQ
   // against what searchers actually ask.
   let peopleAlsoAsk: any[] = [];
@@ -1482,7 +1490,7 @@ If the piece has no checkable hard claims, leave this section empty.>
     Array.isArray(reverify) && reverify.length
       ? `\n\nRE-VERIFY FIRST: this piece was uploaded before and these sentences changed since then. Check every claim in them against primary sources before anything else, and name each one in ISSUES or FACTS:\n${reverify.slice(0, 25).map((s) => `- ${s}`).join('\n')}`
       : '';
-  const { text } = await callClaude(systemPrompt, [{ role: 'user', content: userPrompt + reverifyNote }], signal, { maxUses: 8, feature: 'audit' });
+  const { text } = await callClaude(systemPrompt, [{ role: 'user', content: userPrompt + reverifyNote + askedNote(instructions, 'audit') }], signal, { maxUses: 8, feature: 'audit' });
 
   const get = (start, end) => {
     const startIdx = text.indexOf(start);
@@ -1540,7 +1548,7 @@ If the piece has no checkable hard claims, leave this section empty.>
 // house voice, research, and Facts Register as new drafts. Runs through the same
 // validate+auto-repair loop as researchAndWriteBlog so a rewrite can't ship with the same
 // problems it was supposed to fix.
-async function rewriteBlog({ title, content, issues, suggestions, signal, onProgress, mode }: any) {
+async function rewriteBlog({ title, content, issues, suggestions, signal, onProgress, mode, instructions }: any) {
   const systemPrompt = await buildSystemPrompt();
 
   const issuesList = (issues || [])
@@ -1578,7 +1586,7 @@ SPECIFIC FIXES REQUESTED:
 ${suggestionsList || '(none listed)'}
 
 ORIGINAL CONTENT:
-${content.slice(0, 20000)}`;
+${content.slice(0, 20000)}${askedNote(instructions, 'rewrite')}`;
 
   // Same tool brief as new drafts (minus Surfer, to keep bulk renewals from using Surfer credits),
   // keyed on the post's title since an existing post has no pipeline keyword.

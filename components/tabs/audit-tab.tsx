@@ -269,6 +269,9 @@ export default function AuditTab() {
   const [title, setTitle] = useState('');
   const [contentHtml, setContentHtml] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
+  // What the person wants for this blog, followed by the audit and the rewrite.
+  const [instructions, setInstructions] = useState('');
+  const [keepWords, setKeepWords] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -322,7 +325,8 @@ export default function AuditTab() {
     setRunning(true);
     setError(null);
     try {
-      const body = mode === 'url' ? { sourceUrl } : { title, contentHtml };
+      const asked = { instructions: instructions.trim() || undefined, keepWords };
+      const body = mode === 'url' ? { sourceUrl, ...asked } : { title, contentHtml, ...asked };
       const res = await fetch('/api/audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -334,6 +338,8 @@ export default function AuditTab() {
       setTitle('');
       setContentHtml('');
       setSourceUrl('');
+      setInstructions('');
+      setKeepWords(false);
       load();
     } catch (err: any) {
       setError(err.message);
@@ -446,6 +452,22 @@ export default function AuditTab() {
               <Textarea rows={12} value={contentHtml} onChange={(e) => setContentHtml(e.target.value)} />
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <SectionLabel>What do you want for this blog? (optional)</SectionLabel>
+            <Textarea
+              rows={3}
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              maxLength={2000}
+              placeholder='For example: "Only SEO and backlinking. Do not change the content or the facts; just check the facts lightly." Or: "Add an FAQ, keep the tone as it is."'
+            />
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" className="mt-0.5 size-4" checked={keepWords} onChange={(e) => setKeepWords(e.target.checked)} />
+              <span>Keep my words and facts: only add SEO, AEO and GEO (keyword, headings, FAQ, links). Wrong facts are still flagged.</span>
+            </label>
+            <p className="text-xs text-muted-foreground">The audit and the rewrite follow what you write here.</p>
+          </div>
 
           <div>
             <Button onClick={runAudit} disabled={!canRun || running}>
@@ -584,6 +606,12 @@ export default function AuditTab() {
             )}
 
             <Separator className="my-1" />
+
+            {open.instructions && (
+              <p className="whitespace-pre-line rounded-lg border p-2 text-sm">
+                <strong>You asked for:</strong> {open.instructions}
+              </p>
+            )}
 
             {open.changes_summary && (
               <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-sm">

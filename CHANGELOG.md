@@ -4,6 +4,10 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-13
+- (seo) Check a blog: a box "What do you want for this blog?" and a "Keep my words and facts" option when uploading. The audit and every rewrite of that blog follow it (for example only SEO and backlinking, content and facts unchanged); wrong facts are still flagged and the request is shown on the audit.
+- (ops) Assistant: when Anthropic answers with a temporary server error (for example "503 credential validation failed") the step is tried once more after a few seconds, and if it still fails the message says it is a temporary problem on Anthropic's side, not the key.
+
 ## 2026-10-29
 - (writer) Change tracking and learning: every edit, Word upload, re-upload, optimisation and restore of a blog is recorded with what changed and how much (sentences reworded, added, removed; numbers, headings, links, FAQ, call to action, title, meta; words used more or less), shown on the draft under "Changes to this blog" and on the new Learning page (Team & training). Once a day the team's edits become lessons in the writer's memory; the weekly lessons read them too.
 - (writer) Uploaded blogs: "Optimise for SEO, AEO and GEO" on a draft, and "Optimise, keep my text" in Check a blog, keep the author's sentences and facts and add only what search and AI answers need (keyword, question headings with direct answers, FAQ, service links, call to action, meta description); the version before it can be restored. A Word file uploaded into a draft shows what it changes compared with the saved blog before anything is saved.

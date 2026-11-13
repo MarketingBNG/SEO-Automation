@@ -138,6 +138,9 @@ async function runLoop(conv, emit, signal, me) {
 
   try {
     let jsonRetries = 0;
+    // A step Anthropic answered with a server error (5xx, e.g. "503 credential validation failed")
+    // after the SDK's own retries: tried once more after a pause, without the server-side fallback.
+    let serverRetry = false;
     for (let step = 0; step < MAX_STEPS; step++) {
       // The assistant works with the dashboard's tools in a live conversation, so it runs on the API
       // only. In Testing mode it is off; ask Claude Code instead.
@@ -147,8 +150,8 @@ async function runLoop(conv, emit, signal, me) {
         {
           model: MODEL,
           max_tokens: 32000,
-          betas: ['server-side-fallback-2026-07-01', 'thinking-display-updates-2026-08-18'],
-          fallbacks: 'default',
+          betas: serverRetry ? ['thinking-display-updates-2026-08-18'] : ['server-side-fallback-2026-07-01', 'thinking-display-updates-2026-08-18'],
+          ...(serverRetry ? {} : { fallbacks: 'default' }),
           // The model's short notes between tool calls come back as thinking blocks on this model;
           // "updates" returns them as readable text (reasoning itself stays hidden).
           thinking: { type: 'adaptive', display: 'updates' },
@@ -178,6 +181,13 @@ async function runLoop(conv, emit, signal, me) {
         const partial = !message && (stream as any).currentMessage?.usage;
         if (partial) await recordUsage({ model: MODEL, usage: partial, feature: 'assistant' }).catch(() => {});
         await onApiError(err, (client as any).keyKind);
+        if (!signal.aborted && err instanceof Anthropic.APIError && Number(err.status) >= 500 && !serverRetry) {
+          serverRetry = true;
+          emit({ type: 'notice', text: `Anthropic answered with a temporary server error (${err.status}). Trying again in a few seconds…` });
+          await new Promise((r) => setTimeout(r, 5000));
+          step--;
+          continue;
+        }
         if (signal.aborted || err instanceof Anthropic.APIError || jsonRetries++ >= 2) throw err;
         emit({ type: 'notice', text: 'Retrying a step that came back malformed…' });
         continue;

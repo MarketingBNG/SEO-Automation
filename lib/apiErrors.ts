@@ -20,6 +20,11 @@ function friendlyApiError(err, keyKind: 'main' | 'secondary' = keyInUse()) {
   if (status === 529 || /overloaded_error/i.test(raw)) {
     return 'The Anthropic API is overloaded right now. Try again in a few minutes.';
   }
+  // Any other server-side failure (for example "503 credential validation failed"): a problem on
+  // Anthropic's side, not with the key or the dashboard. It was already retried.
+  if (typeof status === 'number' && status >= 500) {
+    return `Anthropic's service had a temporary problem (HTTP ${status}: ${raw.replace(/^\d{3}\s*/, '').slice(0, 120)}). It was tried again and still failed. Wait a minute and send the message again; if it keeps happening, check status.anthropic.com.`;
+  }
   return raw;
 }
 
