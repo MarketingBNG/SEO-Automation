@@ -5,6 +5,8 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-13
+- (publisher) WordPress is removed: blogs are published, updated and given images only through the custom website connector (SITE_CONNECTOR_URL, SITE_CONNECTOR_SECRET). When the connection is not set up nothing is sent, calendar blogs wait with that reason and Settings shows "Website connection". A blog already live is never copied: if its live post cannot be found or read, nothing is sent. WordPress-only work (plugins, Yoast, menus, cache and WebP speed fixes, automatic redirects) is gone; redirects and page fixes become developer tasks. The public site address is SITE_URL (WORDPRESS_SITE_URL still read for now).
+- (ops) Assistant: asked for a document, it makes a Word file and gives the download link in the chat (private to the person who asked). It no longer edits the website or saves anything there. After publishing, related-post links go only to posts whose titles really match.
 - (seo) Check a blog: a box "What do you want for this blog?" and a "Keep my words and facts" option when uploading. The audit and every rewrite of that blog follow it (for example only SEO and backlinking, content and facts unchanged); wrong facts are still flagged and the request is shown on the audit.
 - (ops) Assistant: when Anthropic answers with a temporary server error (for example "503 credential validation failed") the step is tried once more after a few seconds, and if it still fails the message says it is a temporary problem on Anthropic's side, not the key.
 
