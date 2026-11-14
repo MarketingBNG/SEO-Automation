@@ -8,7 +8,7 @@
 // banner first: better photo searches, a better AI photo prompt, and which words of the title go gold.
 import prisma from './prisma';
 import * as settings from './settings';
-import { saveFile, readFile } from './storage';
+import { saveFile, readFile, listFiles, deleteFile } from './storage';
 import { CANDIDATE_PREFIX } from './bannerOptions';
 import { composeCover, makeCover } from './cover';
 
@@ -198,6 +198,21 @@ export async function bannerCandidate(b: Parameters<typeof makeBanner>[0], scope
   const made = await makeBanner(b);
   const key = await saveFile(`${CANDIDATE_PREFIX}${String(scope).replace(/[^a-z0-9]/gi, '')}-${Date.now()}.${made.ext}`, made.image, made.ext === 'png' ? 'image/png' : 'image/jpeg');
   return { key, source: made.source };
+}
+
+// Banners made for a preview and never chosen are removed after a day (the scheduler's daily cleanup).
+// A file a draft uses as its cover is never removed. Returns how many were removed.
+export async function pruneBannerCandidates(maxAgeMs = 86400000, now = Date.now()): Promise<number> {
+  const old = (await listFiles(CANDIDATE_PREFIX)).filter((f) => now - f.at > maxAgeMs);
+  if (!old.length) return 0;
+  const used = new Set((await prisma.drafts.findMany({ where: { featured_image_path: { in: old.map((f) => f.key) } }, select: { featured_image_path: true } })).map((d) => d.featured_image_path));
+  let removed = 0;
+  for (const f of old) {
+    if (used.has(f.key)) continue;
+    await deleteFile(f.key).catch(() => {});
+    removed++;
+  }
+  return removed;
 }
 
 // A stored candidate key, or null when the key is not one (never any other stored file).

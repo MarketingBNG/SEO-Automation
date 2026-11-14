@@ -356,3 +356,165 @@ test('choosing a banner on a draft accepts only a made candidate', { skip: !db, 
     await cleanup(draft.id);
   }
 });
+
+// ---- Review fixes ----
+
+test('pasted HTML is cleaned with an allowlist: script handlers, svg, hidden javascript: and data: links go', async () => {
+  const { articleHtml } = await import('../lib/myBlog');
+  const { sanitizeHtml } = await import('../lib/htmlSanitize');
+  const payloads = [
+    '<p>One</p><img/src=x/onerror=alert(1)>',
+    '<p>Two</p><svg/onload=alert(1)>',
+    '<p>Three <a href="java&#115;cript:alert(1)">link</a></p>',
+    '<p>Four <a href="data:text/html,<script>alert(1)</script>">link</a></p>',
+    '<p>Five <a href="&#x6A;avascript&colon;alert(1)">x</a> <a href=" JaVa\tScRiPt:alert(1)">y</a> <img src="vbscript:x"></p>',
+    '<p style="background:url(javascript:alert(1))" onclick="alert(1)">Six</p><iframe src="https://evil.test"></iframe><math><mi>x</mi></math>',
+  ];
+  for (const p of payloads) {
+    const out = articleHtml(p);
+    assert.doesNotMatch(out, /\son[a-z]+\s*=/i, out);
+    assert.doesNotMatch(out, /<(svg|script|iframe|math|style)\b/i, out);
+    assert.doesNotMatch(out, /href="\s*(javascript|data|vbscript):/i, out);
+    assert.doesNotMatch(out, /src="\s*(javascript|vbscript):/i, out);
+    assert.doesNotMatch(out, /style=/i, out);
+  }
+  assert.equal(articleHtml(payloads[2]), '<p>Three <a>link</a></p>');
+  assert.equal(articleHtml(payloads[3]), '<p>Four <a>link</a></p>');
+  assert.equal(articleHtml(payloads[1]), '<p>Two</p>');
+  // What an article needs is kept.
+  const good = '<h1>Top</h1><h2 class="x">Fees</h2><p>See <a href="https://www.irs.gov/forms" target="_blank">IRS</a>, <a href="/contact">us</a>, <a href="mailto:a@b.com">mail</a> and <a href="#faq">the FAQ</a>.</p><table><tr><th colspan="2">A</th></tr><tr><td>1 &amp; 2</td><td>3</td></tr></table><img src="/api/uploads/inline/x.png" alt="A chart"><ul><li><strong>Bold</strong></li></ul>';
+  assert.equal(
+    sanitizeHtml(good),
+    '<h2>Top</h2><h2>Fees</h2><p>See <a href="https://www.irs.gov/forms">IRS</a>, <a href="/contact">us</a>, <a href="mailto:a@b.com">mail</a> and <a href="#faq">the FAQ</a>.</p><table><tr><th colspan="2">A</th></tr><tr><td>1 &amp; 2</td><td>3</td></tr></table><img src="/api/uploads/inline/x.png" alt="A chart" /><ul><li><strong>Bold</strong></li></ul>',
+  );
+  assert.equal(sanitizeHtml('<a href="//evil.test/x">x</a>'), '<a>x</a>', 'protocol-relative links go');
+  assert.match(sanitizeHtml('<img src="data:image/png;base64,iVBORw0KGgo=" alt="w">'), /^<img src="data:image\/png;base64,iVBORw0KGgo=" alt="w" \/>$/, 'Word pictures are kept to be stored');
+});
+
+test('a fact check that did not really check is never treated as passed', () => {
+  return import('../lib/myBlog').then(({ factCheckFailure }) => {
+    assert.match(factCheckFailure([])!, /no result/);
+    assert.match(factCheckFailure([{ claim: 'No claims could be listed for the fact check', verdict: 'unverifiable' }])!, /did not finish/);
+    assert.match(factCheckFailure([{ claim: 'A', verdict: 'correct' }, { claim: 'B', verdict: 'unverifiable', correction: 'The check for this claim failed; check it again.' }])!, /1 of 2 checks failed/);
+    assert.match(factCheckFailure([{ claim: 'A', verdict: 'unverifiable', correction: 'Only a non-official source was found' }])!, /could not confirm any/);
+    assert.equal(factCheckFailure([{ claim: 'A', verdict: 'correct' }, { claim: 'B', verdict: 'unverifiable', correction: 'Only a non-official source was found' }]), null);
+  });
+});
+
+test('fact check that fails (checker answers unreadable): not posted, saved to Drafts; the draft is not approved while it is checked', { skip: !db, timeout: 120000 }, async () => {
+  const prisma = (await import('../lib/prisma')).default;
+  const { postMyBlog } = await import('../lib/myBlog');
+  const g = globalThis as any;
+  const prevPin = g.__AI_MODE_PIN;
+  g.__AI_MODE_PIN = 'testing';
+  const title = `Fact check outage ${stamp()}`;
+  const statusDuringCheck: string[] = [];
+  let stop = false;
+  const answerer = (async () => {
+    while (!stop) {
+      for (const job of await prisma.ai_jobs.findMany({ where: { status: 'waiting', feature: 'fact-check' } })) {
+        const s = job.system;
+        const d = await prisma.drafts.findFirst({ where: { title }, select: { status: true } });
+        if (d) statusDuringCheck.push(d.status);
+        const answer = /list the checkable claims/.test(s)
+          ? `===JSON===${JSON.stringify({ claims: [{ text: 'Snake plants and pothos need water about once every two weeks.', topic: 'plants', search: false }] })}===END===`
+          : /research brief/.test(s)
+            ? '===BRIEF===Plants.===END==='
+            : /final reviewer/.test(s)
+              ? '===JSON==={"checks":[]}===END==='
+              : 'The service had an error and wrote no JSON.';
+        await prisma.ai_jobs.update({ where: { id: job.id }, data: { status: 'answered', answer, answered_by: 'test' } });
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  })();
+  calls.length = 0;
+  let id: number | null = null;
+  try {
+    const r = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post', fact_check: true }, { me: ADMIN }));
+    id = r.body.draftId;
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.posted, false);
+    assert.match(r.body.message, /did not finish.*not posted/);
+    assert.deepEqual(calls.filter((c) => c.action === 'post.create'), [], 'nothing went to the website');
+    const d = (await prisma.drafts.findUnique({ where: { id: id! } }))!;
+    assert.equal(d.status, 'pending_review');
+    assert.equal(d.production_state, 'NEEDS_ATTENTION');
+    assert.ok(statusDuringCheck.length && statusDuringCheck.every((s) => s === 'pending_review'), `not approved while checked: ${statusDuringCheck}`);
+  } finally {
+    stop = true;
+    await answerer;
+    g.__AI_MODE_PIN = prevPin;
+    await cleanup(id);
+  }
+});
+
+test('the same submission sent again returns its draft and never posts twice', { skip: !db, timeout: 120000 }, async () => {
+  const prisma = (await import('../lib/prisma')).default;
+  const { postMyBlog } = await import('../lib/myBlog');
+  const title = `Retry blog ${stamp()}`;
+  const request_key = crypto.randomUUID();
+  calls.length = 0;
+  let id: number | null = null;
+  try {
+    const [a, b] = await withEnv(ON, () => Promise.all([postMyBlog({ title, html: article(), mode: 'post', request_key }, { me: ADMIN }), postMyBlog({ title, html: article(), mode: 'post', request_key }, { me: ADMIN })]));
+    id = a.body.draftId;
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    assert.equal(a.body.posted, true);
+    assert.equal(b.status, 409, 'a second press while the first runs waits');
+    const again = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post', request_key }, { me: ADMIN }));
+    assert.equal(again.status, 200);
+    assert.equal(again.body.duplicate, true);
+    assert.equal(again.body.draftId, id);
+    assert.equal(again.body.posted, true);
+    assert.equal(again.body.url, a.body.url);
+    assert.equal(calls.filter((c) => c.action === 'post.create').length, 1, 'one post on the website');
+    assert.equal(await prisma.drafts.count({ where: { title } }), 1, 'one draft');
+    // A saved (not posted) one: a retry with Post now does not post it either.
+    const key2 = crypto.randomUUID();
+    const saved = await withEnv(ON, () => postMyBlog({ title: `${title} saved`, html: article(), mode: 'save', request_key: key2 }, { me: ADMIN }));
+    const retry = await withEnv(ON, () => postMyBlog({ title: `${title} saved`, html: article(), mode: 'post', request_key: key2 }, { me: ADMIN }));
+    assert.equal(retry.body.draftId, saved.body.draftId);
+    assert.equal(retry.body.posted, false);
+    assert.match(retry.body.message, /Already saved as draft/);
+    assert.equal(calls.filter((c) => c.action === 'post.create').length, 1);
+    await cleanup(saved.body.draftId);
+  } finally {
+    await cleanup(id);
+  }
+});
+
+test('the keyword row and the draft are made together: a failed draft leaves no keyword behind', { skip: !db, timeout: 60000 }, async () => {
+  const prisma = (await import('../lib/prisma')).default;
+  const { postMyBlog } = await import('../lib/myBlog');
+  const keyword = `orphan check ${stamp()}`;
+  // A NUL character is refused by Postgres in a text column, so the draft insert fails.
+  await assert.rejects(postMyBlog({ title: 'Broken', keyword, html: `${words(60)}\u0000`, mode: 'save' }, { me: ADMIN }));
+  assert.equal(await prisma.keywords.count({ where: { keyword } }), 0);
+});
+
+test('unchosen preview banners are removed after a day; a banner a draft uses is kept', { skip: !db || !!process.env.BLOB_READ_WRITE_TOKEN, timeout: 60000 }, async () => {
+  const prisma = (await import('../lib/prisma')).default;
+  const fs = await import('node:fs/promises');
+  const { saveFile, fileExists } = await import('../lib/storage');
+  const { pruneBannerCandidates } = await import('../lib/coverPhoto');
+  const s = stamp().replace(/\D/g, '');
+  const oldUnused = await saveFile(`covers/candidate-t${s}-1.png`, Buffer.from('x'));
+  const oldUsed = await saveFile(`covers/candidate-t${s}-2.png`, Buffer.from('x'));
+  const fresh = await saveFile(`covers/candidate-t${s}-3.png`, Buffer.from('x'));
+  const root = path.resolve(process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads'));
+  const twoDaysAgo = new Date(Date.now() - 2 * 86400000);
+  for (const k of [oldUnused, oldUsed]) await fs.utimes(path.join(root, k), twoDaysAgo, twoDaysAgo);
+  const kw = await prisma.keywords.create({ data: { keyword: `banner keep ${s}`, status: 'done' } });
+  const draft = await prisma.drafts.create({ data: { keyword_id: kw.id, title: 'Keeps its banner', featured_image_path: oldUsed } });
+  try {
+    assert.ok((await pruneBannerCandidates()) >= 1);
+    assert.equal(await fileExists(oldUnused), false, 'old and unchosen: removed');
+    assert.equal(await fileExists(oldUsed), true, 'chosen by a draft: kept');
+    assert.equal(await fileExists(fresh), true, 'less than a day old: kept');
+  } finally {
+    await cleanup(draft.id);
+    const { deleteFile } = await import('../lib/storage');
+    for (const k of [oldUsed, fresh]) await deleteFile(k);
+  }
+});

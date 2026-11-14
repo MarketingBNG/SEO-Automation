@@ -20,6 +20,7 @@ import { recordChange } from './contentChanges';
 import { UPLOAD_PREFIX } from './blogImages';
 import { dataImages } from './wordImport';
 import { extractClaims } from './strategy/core';
+import { sanitizeHtml } from './htmlSanitize';
 import { CREDENTIAL, expertReviewers } from './reviewers';
 import { publishDraft, canPublishNow, liveTextProblem, type PublishMe, type PublishResult } from './publishDraft';
 
@@ -39,6 +40,7 @@ export type MyBlogInput = {
   ask_reviewer?: boolean;
   cover_key?: string | null; // a banner chosen in the preview (covers/candidate-...)
   cover_data?: string | null; // an uploaded banner, or the picture above the title in the Word file (data: URI)
+  request_key?: string | null; // one per submission from the form: a retry returns the same draft, never a second post
 };
 
 // check: the fact check, injectable; the default is the dashboard's own (lib/anthropic.ts factCheckDraft).
@@ -50,9 +52,9 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 const escAttr = (s: string) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 export const wordCount = (html: string) => String(html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
 
-// Pasted plain text becomes paragraphs; HTML keeps its structure, without what must never be on a
-// page (scripts, frames, styles, event handlers, javascript: links). The website prints the title as
-// the H1, so an H1 inside the article becomes an H2.
+// Pasted plain text becomes paragraphs; HTML goes through the allowlist cleaner (lib/htmlSanitize.ts):
+// only article tags and safe links and pictures survive. The website prints the title as the H1, so
+// an H1 inside the article becomes an H2.
 export function articleHtml(input: string): string {
   const raw = String(input || '').replace(/\r\n?/g, '\n').trim();
   if (!raw) return '';
@@ -64,14 +66,7 @@ export function articleHtml(input: string): string {
       .map((para) => `<p>${esc(para).replace(/\n/g, '<br>')}</p>`)
       .join('\n');
   }
-  return raw
-    .replace(/<(script|style|iframe|object|embed|noscript|template|form|svg|math)\b[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<(script|style|iframe|object|embed|link|meta|base|input|button)\b[^>]*\/?>/gi, '')
-    .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s+(href|src)\s*=\s*("\s*javascript:[^"]*"|'\s*javascript:[^']*'|javascript:[^\s>]+)/gi, '')
-    .replace(/<h1\b([^>]*)>([\s\S]*?)<\/h1>/gi, '<h2$1>$2</h2>')
-    .replace(/<p>\s*<\/p>/gi, '')
-    .trim();
+  return sanitizeHtml(raw).replace(/<p>\s*<\/p>/gi, '').trim();
 }
 
 async function imageKey(bytes: Buffer, name: string): Promise<string | null> {
@@ -95,7 +90,47 @@ async function storeImages(html: string, draftId: number): Promise<{ html: strin
 
 const fail = (status: number, error: string, extra: Record<string, unknown> = {}): PublishResult => ({ status, body: { error, ...extra } });
 
+// A fact check that did not really check: a checker that failed, gave no verdict, listed no claims or
+// could not be read comes back as "unverifiable" (lib/anthropic.ts). Returns why the result cannot
+// be trusted, or null when the claims were really checked.
+const CHECK_FAILED = /check for this claim failed|checker gave no verdict|no claims could be listed|output could not be read/i;
+export function factCheckFailure(checks: any[]): string | null {
+  if (!checks.length) return 'The fact check gave no result.';
+  const failed = checks.filter((c) => c?.verdict !== 'correct' && c?.verdict !== 'incorrect' && CHECK_FAILED.test(`${c?.claim || ''} ${c?.correction || ''}`));
+  if (failed.length) return `The fact check did not finish: ${failed.length} of ${checks.length} check${checks.length > 1 ? 's' : ''} failed or gave no verdict (for example "${String(failed[0].claim || '').slice(0, 120)}").`;
+  if (!checks.some((c) => c?.verdict === 'correct')) return `The fact check could not confirm any of the ${checks.length} claim${checks.length > 1 ? 's' : ''}.`;
+  return null;
+}
+
+// Submissions running now, by request key, so a double press waits instead of saving twice.
+const running = new Set<string>();
+const REQUEST_KEY = /^[a-z0-9-]{8,80}$/i;
+
 export async function postMyBlog(input: MyBlogInput, deps: MyBlogDeps): Promise<PublishResult> {
+  const key = REQUEST_KEY.test(String(input.request_key || '')) ? `my-blog:${input.request_key}` : null;
+  if (!key) return postOnce(input, deps, null);
+  if (running.has(key)) return fail(409, 'This blog is being saved or posted right now. Wait a minute, then look for it in Drafts & Review.');
+  // Claimed before any await, so a second press arriving meanwhile sees it.
+  running.add(key);
+  try {
+    // The same submission again (a retry after an error or a cut-off answer): its draft is returned,
+    // and nothing is saved or posted a second time.
+    const earlier = await prisma.keywords.findFirst({ where: { notes: key, batch_name: MY_BLOGS_BATCH }, orderBy: { id: 'desc' }, include: { drafts: { select: { id: true, status: true, wp_post_url: true }, orderBy: { id: 'asc' }, take: 1 } } });
+    const d = earlier?.drafts[0];
+    if (d) {
+      const live = d.status === 'published' && d.wp_post_url;
+      return {
+        status: 200,
+        body: { draftId: d.id, saved: true, duplicate: true, posted: Boolean(live), url: live ? d.wp_post_url : undefined, notes: [], message: live ? `Already live on the website: ${d.wp_post_url}` : `Already saved as draft #${d.id}; nothing was sent again. Open it in Drafts & Review to publish it.` },
+      };
+    }
+    return await postOnce(input, deps, key);
+  } finally {
+    running.delete(key);
+  }
+}
+
+async function postOnce(input: MyBlogInput, deps: MyBlogDeps, requestKey: string | null): Promise<PublishResult> {
   const title = String(input.title || '').replace(/\s+/g, ' ').trim().slice(0, 300);
   const meta = String(input.meta_description || '').replace(/\s+/g, ' ').trim().slice(0, 400);
   const keyword = String(input.keyword || '').replace(/\s+/g, ' ').trim().slice(0, 200) || title;
@@ -124,16 +159,16 @@ export async function postMyBlog(input: MyBlogInput, deps: MyBlogDeps): Promise<
     }
   }
 
-  // The draft: 'approved' when it goes live now (the publish code needs an approved draft), else waiting for review.
-  const kw = await prisma.keywords.create({ data: { keyword, batch_name: MY_BLOGS_BATCH, status: 'done' } });
+  // The draft waits for review; it is approved only just before it is published (after any checks).
+  // The keyword row is made in the same write, so a failure never leaves one without its draft.
   const draft = await prisma.drafts.create({
     data: {
-      keyword_id: kw.id,
+      keyword: { create: { keyword, batch_name: MY_BLOGS_BATCH, status: 'done', notes: requestKey } },
       title,
       meta_description: meta || null,
       content_html: html,
       word_count: wordCount(html),
-      status: post ? 'approved' : 'pending_review',
+      status: 'pending_review',
       production_state: 'READY_FOR_REVIEW',
       validation_issues: '[]',
       author,
@@ -181,7 +216,6 @@ export async function postMyBlog(input: MyBlogInput, deps: MyBlogDeps): Promise<
       const result = await timed(`factcheck-${id}`, 'fact-check', `Fact check (Post my blog): ${title}`, () => run({ title, meta, content: html, facts: [] }, { mustCheck: extractClaims(html).map((c) => c.sentence) }));
       checks = Array.isArray(result?.checks) ? result.checks : [];
     } catch (e: any) {
-      await prisma.drafts.update({ where: { id }, data: { status: 'pending_review', updated_at: sqlNow() } });
       return fail(503, `The fact check could not run (${String(e?.message || e).slice(0, 200)}), so the blog was not posted. It is saved in Drafts & Review.`, { ...saved, posted: false });
     }
     const wrong = checks.filter((c) => c?.verdict === 'incorrect');
@@ -190,9 +224,17 @@ export async function postMyBlog(input: MyBlogInput, deps: MyBlogDeps): Promise<
     const warnings = unsure.map((c) => `Fact check could not confirm: "${String(c.claim || '').slice(0, 300)}"`);
     if (wrong.length) {
       const issues = wrong.map(issueText);
-      await prisma.drafts.update({ where: { id }, data: { status: 'pending_review', production_state: 'NEEDS_ATTENTION', validation_issues: JSON.stringify(issues), validation_warnings: JSON.stringify(warnings), updated_at: sqlNow() } });
+      await prisma.drafts.update({ where: { id }, data: { production_state: 'NEEDS_ATTENTION', validation_issues: JSON.stringify(issues), validation_warnings: JSON.stringify(warnings), updated_at: sqlNow() } });
       await activity.log('draft.my_blog_fact_check', { entityType: 'draft', entityId: id, details: `"${title}": ${wrong.length} claim(s) wrong, not posted`, actor }).catch(() => {});
       return { status: 200, body: { ...saved, posted: false, factCheck: { wrong: wrong.length, unconfirmed: unsure.length }, issues, warnings, message: `The fact check found ${wrong.length} wrong claim${wrong.length > 1 ? 's' : ''}, so the blog was not posted. It is saved in Drafts & Review with the issues shown.` } };
+    }
+    // Not really checked (an outage, no verdicts, nothing listed): never posted as if it were.
+    const failure = factCheckFailure(checks);
+    if (failure) {
+      const issues = [`${failure} Run the fact check again, or post without it.`];
+      await prisma.drafts.update({ where: { id }, data: { production_state: 'NEEDS_ATTENTION', validation_issues: JSON.stringify(issues), validation_warnings: JSON.stringify(warnings), updated_at: sqlNow() } });
+      await activity.log('draft.my_blog_fact_check', { entityType: 'draft', entityId: id, details: `"${title}": ${failure} Not posted.`, actor }).catch(() => {});
+      return { status: 200, body: { ...saved, posted: false, factCheck: { wrong: 0, unconfirmed: unsure.length, failed: true }, issues, warnings, message: `${failure} So the blog was not posted. It is saved in Drafts & Review.` } };
     }
     if (warnings.length) await prisma.drafts.update({ where: { id }, data: { validation_warnings: JSON.stringify(warnings) } });
     notes.push(`Fact check: no wrong claim found${unsure.length ? ` (${unsure.length} could not be confirmed; see the draft)` : ''}.`);
@@ -217,6 +259,7 @@ export async function postMyBlog(input: MyBlogInput, deps: MyBlogDeps): Promise<
     return { status: 200, body: { ...saved, posted: false, message: 'Saved to Drafts & Review.' } };
   }
 
+  await prisma.drafts.update({ where: { id }, data: { status: 'approved', updated_at: sqlNow() } });
   const r = await publishDraft(id, {
     wpStatus: 'publish',
     reviewer: reviewer || null,

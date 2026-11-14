@@ -1,6 +1,6 @@
 import path from 'path';
 import { promises as fs } from 'fs';
-import { put, get, del } from '@vercel/blob';
+import { put, get, del, list } from '@vercel/blob';
 
 // Self-hosted (Coolify/Docker): when BLOB_READ_WRITE_TOKEN is not set, files live on local disk under
 // UPLOADS_DIR (default ./uploads). Mount that folder as a persistent volume so files survive redeploys.
@@ -102,6 +102,33 @@ export async function deleteFile(stored: string | null | undefined): Promise<voi
   } catch {
     // Same as the old fs.unlink(..., () => {}): best effort.
   }
+}
+
+// Stored files whose key starts with `prefix` (a folder and the start of a name), with when each was
+// saved (ms). For cleanups; at most `max` files.
+export async function listFiles(prefix: string, max = 2000): Promise<{ key: string; at: number }[]> {
+  const out: { key: string; at: number }[] = [];
+  if (!blobEnabled()) {
+    const dirRel = path.posix.dirname(prefix);
+    const folder = dirRel === '.' ? DISK_ROOT() : diskPath(dirRel);
+    if (!folder) return out;
+    const start = path.posix.basename(prefix);
+    const rel = dirRel === '.' ? '' : `${dirRel}/`;
+    const names = await fs.readdir(folder).catch(() => [] as string[]);
+    for (const name of names) {
+      if (!name.startsWith(start) || out.length >= max) continue;
+      const st = await fs.stat(path.join(folder, name)).catch(() => null);
+      if (st?.isFile()) out.push({ key: rel + name, at: st.mtimeMs });
+    }
+    return out;
+  }
+  let cursor: string | undefined;
+  do {
+    const page = await list({ prefix: PREFIX + prefix, cursor, limit: 1000 });
+    for (const b of page.blobs) if (out.length < max) out.push({ key: b.pathname.slice(PREFIX.length), at: new Date(b.uploadedAt).getTime() });
+    cursor = page.hasMore && out.length < max ? page.cursor : undefined;
+  } while (cursor);
+  return out;
 }
 
 export function basename(stored: string): string {

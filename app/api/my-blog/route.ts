@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
       ask_reviewer: body.ask_reviewer === true,
       cover_key: body.cover_key ?? null,
       cover_data: body.cover_data ?? null,
+      request_key: typeof body.request_key === 'string' ? body.request_key : null,
     },
     { me: await getMe(), actor: await getActor() },
   );

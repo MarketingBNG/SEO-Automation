@@ -48,6 +48,8 @@ async function tick() {
     // Finished Claude Code queue jobs hold the full prompt and are never read again.
     const { sqlNowOffset } = await import('./time');
     await prisma.ai_jobs.deleteMany({ where: { status: { in: ['used', 'cancelled'] }, created_at: { lt: sqlNowOffset('-14 days') } } }).catch((e: any) => console.error('Scheduler: queue prune failed:', e.message));
+    // Banners made for a preview and never chosen (Drafts & Review, Post my blog), after a day.
+    await (await import('./coverPhoto')).pruneBannerCandidates().catch((e: any) => console.error('Scheduler: banner cleanup failed:', e.message));
     await settings.set('last_apicache_prune', today);
   }
 

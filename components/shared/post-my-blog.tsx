@@ -22,6 +22,10 @@ const OPTIONS: { key: 'fact_check' | 'originality' | 'optimise' | 'ask_reviewer'
   { key: 'ask_reviewer', label: 'Ask for the CA/CPA reviewer name', note: 'The reviewer is named in the byline; posting needs the name.' },
 ];
 
+// One key per submission: a retry after an error or a cut-off answer sends the same key, and the
+// server returns the draft it already made instead of saving or posting it again.
+const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
+
 const readAsDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
     const r = new FileReader();
@@ -48,6 +52,9 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
   const [fileNote, setFileNote] = useState('');
   const [busy, setBusy] = useState<'' | 'post' | 'save' | 'file'>('');
   const [result, setResult] = useState<Result | null>(null);
+  const [requestKey, setRequestKey] = useState(newKey);
+  // Set once the server answered with a draft: the form then offers that draft, never a second post.
+  const [doneDraftId, setDoneDraftId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const coverRef = useRef<HTMLInputElement>(null);
 
@@ -92,30 +99,37 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
       const res = await fetch('/api/my-blog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, html, meta_description: meta, keyword, author, reviewer, mode, ...opts, cover_key: coverKey, cover_data: coverKey ? null : coverData }),
+        body: JSON.stringify({ title, html, meta_description: meta, keyword, author, reviewer, mode, ...opts, cover_key: coverKey, cover_data: coverKey ? null : coverData, request_key: requestKey }),
       });
-      const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
-      if (j.draftId) onSaved();
+      const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}). Press the button again: the same blog is never saved or posted twice.` }));
+      if (j.draftId) {
+        setDoneDraftId(j.draftId);
+        onSaved();
+      }
       if (!res.ok) {
         setResult({ ok: false, text: j.error || `HTTP ${res.status}`, draftId: j.draftId });
         return;
       }
       setResult({ ok: Boolean(j.posted) || mode === 'save', text: [j.message, ...(j.notes || [])].filter(Boolean).join(' '), url: j.url, issues: j.issues, draftId: j.draftId });
-      if (j.posted || (mode === 'save' && !j.issues?.length)) {
-        setTitle('');
-        setHtml('');
-        setMeta('');
-        setKeyword('');
-        setReviewer('');
-        setCoverKey(null);
-        setCoverData(null);
-        setFileNote('');
-      }
     } catch (e: any) {
       setResult({ ok: false, text: e.message });
     } finally {
       setBusy('');
     }
+  }
+
+  function startNew() {
+    setTitle('');
+    setHtml('');
+    setMeta('');
+    setKeyword('');
+    setReviewer('');
+    setCoverKey(null);
+    setCoverData(null);
+    setFileNote('');
+    setResult(null);
+    setDoneDraftId(null);
+    setRequestKey(newKey());
   }
 
   if (!canSave) return null;
@@ -231,6 +245,16 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
             <p className="text-xs text-muted-foreground">Always checked (free): reviewer placeholders such as [VERIFY] or [AUTHOR NAME] and leftover AI notes stop a post until you remove them.</p>
           </div>
 
+          {doneDraftId ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <a href={`/?tab=drafts&draft=${doneDraftId}`} className="inline-flex items-center gap-1 text-sm font-medium text-primary underline">
+                Open draft #{doneDraftId}
+              </a>
+              <Button variant="outline" size="sm" onClick={startNew}>
+                Start a new blog
+              </Button>
+            </div>
+          ) : (
           <div className="flex flex-wrap items-center gap-2">
             <Button onClick={() => send('post')} disabled={!ready || !canPost || opts.optimise} title={!canPost ? 'Only an admin or a manager can post live straight away' : opts.optimise ? 'Optimise saves to Drafts for review first' : ''}>
               {busy === 'post' ? <Loader2 className="animate-spin" /> : <Send />}
@@ -243,6 +267,7 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
             {!canPost && <span className="text-sm text-muted-foreground">Only an admin or a manager can post live; you can save it to Drafts.</span>}
             {busy === 'post' && opts.fact_check && <span className="text-sm text-muted-foreground">Fact checking, then posting (a few minutes)…</span>}
           </div>
+          )}
 
           {result && (
             <div className={`rounded-lg border p-3 text-sm ${result.ok ? '' : 'border-destructive/40'}`}>
@@ -260,7 +285,7 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
                   ))}
                 </ul>
               )}
-              {result.draftId && !result.url && (
+              {result.draftId && !result.url && !doneDraftId && (
                 <a href={`/?tab=drafts&draft=${result.draftId}`} className="mt-1 inline-block text-primary underline">
                   Open it in Drafts & Review
                 </a>
