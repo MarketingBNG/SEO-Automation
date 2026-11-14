@@ -13,6 +13,7 @@ import { recordQuestions, summary as questionBankSummary } from '@/lib/questionB
 import { createAudit } from '@/lib/audits';
 import { sqlNow } from '@/lib/time';
 import type { Action } from '@/lib/permissions';
+import { TAB_TOOLS } from './tabTools';
 
 // Every tool is either 'read' (runs immediately) or 'write' (only runs after the human approves
 // it in the dashboard). A write tool's run() returns { result, change } where change describes how
@@ -1046,6 +1047,9 @@ function validate(schema: any, value: any, path = 'input'): string | null {
   return null;
 }
 
+// The tools for the work each dashboard tab does (lib/assistant/tabTools.ts).
+for (const t of TAB_TOOLS) defineTool(t);
+
 function getTool(name) {
   return TOOLS.find((t) => t.name === name);
 }
@@ -1070,12 +1074,38 @@ const READ_NEEDS: Record<string, Action> = {
   list_audits: 'content.work',
   list_keywords: 'content.work',
   list_site_changes: 'content.work',
-  // Post my blog: content work to save; posting live is checked again (blog.publish_now) in lib/myBlog.ts.
-  post_my_blog: 'content.work',
   latest_technical_crawl: 'reports.view',
 };
-function toolNeeds(name: string): Action | null {
-  return READ_NEEDS[name] || null;
+
+// Write tools: the permission the person needs, checked when the card is shown and again for the
+// person who approves it, the same action the matching dashboard route needs. A tool in
+// lib/assistant/tabTools.ts names its own ("needs"). A write tool named nowhere needs website.change,
+// so a new tool is never open to everyone by mistake.
+const WRITE_NEEDS: Record<string, Action | Action[]> = {
+  draft_edit_text: 'content.work',
+  draft_update_fields: 'content.work',
+  // Post my blog: content work to save; posting live is checked again (blog.publish_now) in lib/myBlog.ts.
+  post_my_blog: 'content.work',
+  add_keywords_to_pipeline: 'content.work',
+  save_people_also_ask: 'content.work',
+  run_blog_audit: 'content.work',
+};
+
+// Every action a tool needs for this input (all of them are required).
+function toolNeeds(name: string, input: any = {}): Action[] {
+  const tool = getTool(name);
+  const own = tool?.needs ? (typeof tool.needs === 'function' ? tool.needs(input || {}) : tool.needs) : null;
+  const needs = own || READ_NEEDS[name] || WRITE_NEEDS[name] || (tool?.kind === 'write' ? 'website.change' : null);
+  return needs ? (Array.isArray(needs) ? needs : [needs]) : [];
+}
+
+// The first action this person may not do for this tool, or null when every one is open to them.
+async function missingNeed(me: any, name: string, input: any): Promise<Action | null> {
+  const { canDo } = await import('@/lib/access');
+  for (const need of toolNeeds(name, input)) {
+    if (!(me && (me.role === 'admin' || (await canDo(me, need))))) return need;
+  }
+  return null;
 }
 
 // Like the Activity Log page: an admin sees everyone's work, everyone else their own.
@@ -1098,4 +1128,4 @@ const API_TOOLS: any[] = [
   { type: 'web_search_20260209', name: 'web_search', max_uses: 5 },
 ];
 
-export { TOOLS, API_TOOLS, getTool, toolNeeds, validate, riskOf, serializeResult, undoChange };
+export { TOOLS, API_TOOLS, getTool, toolNeeds, missingNeed, validate, riskOf, serializeResult, undoChange };

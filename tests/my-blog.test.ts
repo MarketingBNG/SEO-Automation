@@ -332,7 +332,7 @@ test('the assistant tool post_my_blog is a write tool (approved first), open to 
   const { getTool, toolNeeds } = await import('../lib/assistant/tools');
   const t = getTool('post_my_blog');
   assert.equal(t.kind, 'write');
-  assert.equal(toolNeeds('post_my_blog'), 'content.work');
+  assert.deepEqual(toolNeeds('post_my_blog'), ['content.work']);
   assert.equal(typeof t.preview, 'function');
   assert.match(t.summarize({ title: 'My blog', mode: 'post' }), /Post live on the website: "My blog" \(checks: none\)/);
   assert.match(t.summarize({ title: 'My blog', mode: 'save', fact_check: true }), /Save to Drafts & Review.*fact check/);
