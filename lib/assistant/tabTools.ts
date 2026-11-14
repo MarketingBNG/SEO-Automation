@@ -7,9 +7,13 @@
 //
 // Testing mode and Pause work as on the tabs: the lib functions send their AI steps to the Claude Code
 // queue in Testing mode and stop while AI work is paused. The previews say which applies.
-import prisma from '@/lib/prisma';
+import prismaClient from '@/lib/prisma';
 import * as settings from '@/lib/settings';
 import type { Action } from '@/lib/permissions';
+
+// Untyped on purpose: these are small lookups for previews, and the Prisma types of ~40 more queries
+// cost the type check (which runs near the default heap limit) more than they are worth here.
+const prisma: any = prismaClient;
 
 type Ctx = { me?: any; emit?: (e: any) => void; conversationId?: number };
 type Result = { status: number; body: any };
@@ -43,13 +47,32 @@ const parse = (s: string | null | undefined, fallback: any) => {
 };
 
 // What a paid step costs and whether it will run now, for the approval card.
-export async function costNote(what: string): Promise<string> {
+// resumes: work that waits while AI is paused and carries on by itself after Resume (blog writing,
+// strategy generation); everything else fails at its first AI step and has to be started again.
+export async function costNote(what: string, { resumes = false }: { resumes?: boolean } = {}): Promise<string> {
   const { aiMode } = await import('@/lib/aiQueue');
   const mode = await aiMode().catch(() => 'live');
   const paused = (await settings.get('ai_paused').catch(() => null)) === '1';
   if (mode === 'testing') return `${what} Testing mode is on: its AI steps wait in the Claude Code queue (no API credits) until Claude Code answers them ("run the SEO AI queue").`;
-  if (paused) return `${what} AI work is paused (Settings > AI credits), so it stops at its first AI step until someone presses Resume.`;
+  if (paused) {
+    return resumes
+      ? `${what} AI work is paused (Settings > AI credits): it waits at its first AI step and carries on by itself after someone presses Resume.`
+      : `${what} AI work is paused (Settings > AI credits), so this fails now; try again after someone presses Resume.`;
+  }
   return what;
+}
+
+// A step that waits for AI answers. In Testing mode those answers come from the Claude Code queue,
+// which can take any time, so the step runs in the background and the card returns at once (the
+// chat would otherwise stay busy until Claude Code answers). Its outcome is saved where the tab
+// shows it; a failure goes to the activity log. In Live mode it runs here and returns its result.
+export async function runOrQueue(ctx: Ctx | undefined, label: string, where: string, fn: () => Promise<any>): Promise<any> {
+  const { aiMode } = await import('@/lib/aiQueue');
+  if ((await aiMode()) !== 'testing') return fn();
+  const activity = await import('@/lib/activity');
+  const actor = actorOf(ctx);
+  void fn().catch((e: any) => activity.log('assistant.background_failed', { details: `${label}: ${String(e?.message || e).slice(0, 300)}`, actor }).catch(() => {}));
+  return { result: { started: true, note: `Testing mode: "${label}" runs in the background and its AI steps wait in the Claude Code queue. When Claude Code has answered, see the result in ${where}.` } };
 }
 
 const AI = 'Uses AI credits.';
@@ -165,8 +188,12 @@ tool({
   run: async (i, ctx) => {
     ctx?.emit?.({ type: 'tool_progress', text: i.action === 'publish_now' ? 'Publishing (checks first, a minute or two)…' : 'Marking as done…' });
     const { decideSchedule } = await import('@/lib/strategy/scheduleActions');
-    const body = ok(await decideSchedule(i.id, { action: i.action, url: i.url }, { me: ctx?.me || null, actor: actorOf(ctx) }));
-    return { result: { id: i.id, result: body.result || body.status, url: body.url || body.wp_post_url || null } };
+    const go = async () => {
+      const body = ok(await decideSchedule(i.id, { action: i.action, url: i.url }, { me: ctx?.me || null, actor: actorOf(ctx) }));
+      return { result: { id: i.id, result: body.result || body.status, url: body.url || body.wp_post_url || null } };
+    };
+    // Publishing runs the fact check first (AI); marking done does not.
+    return i.action === 'publish_now' ? runOrQueue(ctx, `Publish calendar blog #${i.id} now`, 'the Blog Calendar', go) : go();
   },
 });
 
@@ -213,7 +240,7 @@ tool({
   summarize: () => 'Generate a new monthly strategy',
   preview: async () => {
     const running = await prisma.seo_strategies.count({ where: { status: { in: ['generating', 'paused', 'stopping'] } } });
-    return { warning: await costNote('Uses AI credits, SE Ranking units and SerpHouse searches; takes a long time.'), problem: running ? 'A strategy is already being generated.' : null };
+    return { warning: await costNote('Uses AI credits, SE Ranking units and SerpHouse searches; takes a long time.', { resumes: true }), problem: running ? 'A strategy is already being generated.' : null };
   },
   run: async (_i, ctx) => {
     const { startStrategyJob } = await import('@/lib/strategy/jobs');
@@ -228,7 +255,7 @@ tool({
   description: 'Pause, resume or stop a strategy that is being generated (Monthly Strategy controls). Finished steps are kept on resume.',
   input_schema: obj({ id: int, action: { type: 'string', enum: ['pause', 'resume', 'stop'] } }, ['id', 'action']),
   summarize: (i) => `${i.action[0].toUpperCase()}${i.action.slice(1)} the generation of strategy #${i.id}`,
-  preview: async (i) => ({ warning: i.action === 'resume' ? await costNote('Resuming spends AI credits again.') : null }),
+  preview: async (i) => ({ warning: i.action === 'resume' ? await costNote('Resuming spends AI credits again.', { resumes: true }) : null }),
   run: async (i, ctx) => {
     const { controlStrategyJob } = await import('@/lib/strategy/jobs');
     return { result: await controlStrategyJob(i.id, i.action, actorOf(ctx)) };
@@ -276,7 +303,7 @@ tool({
     ctx?.emit?.({ type: 'tool_progress', text: 'Updating the strategy (a few minutes)…' });
     const { refreshStrategy } = await import('@/lib/strategy/refresh');
     const { timed } = await import('@/lib/jobTimer');
-    return { result: await timed(`refresh-${i.id}`, 'refresh', 'Updating the strategy with the latest changes', () => refreshStrategy(i.id, actorOf(ctx))) };
+    return runOrQueue(ctx, `Update strategy #${i.id}`, 'Monthly Strategy', async () => ({ result: await timed(`refresh-${i.id}`, 'refresh', 'Updating the strategy with the latest changes', () => refreshStrategy(i.id, actorOf(ctx))) }));
   },
 });
 
@@ -317,7 +344,7 @@ tool({
   preview: async () => ({ warning: await costNote('A new guide uses AI credits.') }),
   run: async (i, ctx) => {
     const { manualTaskAction } = await import('@/lib/strategy/manualActions');
-    return { result: ok(await manualTaskAction({ kind: i.kind, id: i.id, action: 'guide', regenerate: i.regenerate }, ctx?.me || null)) };
+    return runOrQueue(ctx, `Guide for ${i.kind} task #${i.id}`, 'the task on Monthly Strategy', async () => ({ result: ok(await manualTaskAction({ kind: i.kind, id: i.id, action: 'guide', regenerate: i.regenerate }, ctx?.me || null)) }));
   },
 });
 
@@ -396,7 +423,9 @@ tool({
   },
   run: async (i, ctx) => {
     const { topicAction } = await import('@/lib/topicsView');
-    return { result: ok(await topicAction(i.id, i.action, String(i.comments || ''), actorOf(ctx))) };
+    const go = async () => ({ result: ok(await topicAction(i.id, i.action, String(i.comments || ''), actorOf(ctx))) });
+    // relevance and compare wait for their AI answer; blog, article and finalize start in the background.
+    return ['relevance', 'compare'].includes(i.action) ? runOrQueue(ctx, `Topic #${i.id}: ${i.action}`, 'Topics & News', go) : go();
   },
 });
 
@@ -414,13 +443,14 @@ tool({
   input_schema: obj({ keyword_id: int }),
   summarize: (i) => (i.keyword_id ? `Write a blog draft for keyword #${i.keyword_id}` : 'Write the next blog draft in the queue'),
   preview: async (i) => {
+    const { generationRefusal } = await import('@/lib/generateActions');
     const k = i.keyword_id
       ? await prisma.keywords.findUnique({ where: { id: i.keyword_id } })
       : await prisma.keywords.findFirst({ where: { status: 'pending', OR: [{ batch_name: null }, { NOT: { batch_name: { startsWith: 'Strategy #' } } }] }, orderBy: { id: 'asc' } });
     return {
       target: k ? `Keyword #${k.id}: "${k.keyword}" (${k.status})` : null,
-      warning: await costNote('Uses AI credits, SerpHouse searches, SE Ranking units and Surfer; several minutes.'),
-      problem: !k ? 'No pending keyword found.' : k.status === 'generating' ? 'This keyword is already being generated.' : null,
+      warning: await costNote('Uses AI credits, SerpHouse searches, SE Ranking units and Surfer; several minutes.', { resumes: true }),
+      problem: !k ? 'No pending keyword found.' : generationRefusal(k),
     };
   },
   run: async (i) => {
@@ -561,7 +591,7 @@ for (const fix of [false, true]) {
     run: async (i, ctx) => {
       ctx?.emit?.({ type: 'tool_progress', text: fix ? 'Fixing and checking the issues (a few minutes)…' : 'Checking the issues (a minute or two)…' });
       const { recheckDraft } = await import('@/lib/draftRecheck');
-      return { result: ok(await recheckDraft(i.id, fix, actorOf(ctx))) };
+      return runOrQueue(ctx, `${fix ? 'Check and fix' : 'Check again'}: draft #${i.id}`, 'Drafts & Review', async () => ({ result: ok(await recheckDraft(i.id, fix, actorOf(ctx))) }));
     },
   });
 }
@@ -896,8 +926,10 @@ tool({
   run: async (_i, ctx) => {
     ctx?.emit?.({ type: 'tool_progress', text: 'Researching and writing the new skill (several minutes)…' });
     const { generateSkillNow } = await import('@/lib/writingRules');
-    const body = ok(await generateSkillNow());
-    return { result: { id: body.id, sources: (body.sources || []).length } };
+    return runOrQueue(ctx, 'Update the content-writing skill', 'Writing rules', async () => {
+      const body = ok(await generateSkillNow());
+      return { result: { id: body.id, sources: (body.sources || []).length } };
+    });
   },
 });
 
@@ -1010,9 +1042,9 @@ tool({
   input_schema: obj({ view: { type: 'string', enum: ['overall', 'seo', 'aeo', 'geo'] }, days: { type: 'integer', minimum: 7, maximum: 90 }, fresh: { type: 'boolean' } }, ['view']),
   summarize: (i) => `Explain the ${i.view} report (${i.days || 28} days)`,
   preview: async () => ({ warning: await costNote('Uses AI credits when it is not written yet for this period.') }),
-  run: async (i) => {
+  run: async (i, ctx) => {
     const { explainPerformance } = await import('@/lib/performanceExplain');
-    return { result: await explainPerformance(i.view, Math.min(90, Math.max(7, i.days || 28)), { fresh: !!i.fresh }) };
+    return runOrQueue(ctx, `Explain the ${i.view} report`, `the ${i.view === 'overall' ? 'Overall' : i.view.toUpperCase()} report page`, async () => ({ result: await explainPerformance(i.view, Math.min(90, Math.max(7, i.days || 28)), { fresh: !!i.fresh }) }));
   },
 });
 
@@ -1094,13 +1126,16 @@ tool({
 tool({
   name: 'training_status',
   kind: 'read',
-  description: "Associate Training as the page shows it to the person asking: an associate gets their own lesson, open test (questions only, no answers) and results; an admin or manager gets today's lessons and everyone's progress (person: one associate's page by email). Taking a test stays on the page.",
+  description: "Associate Training as the page shows it to the person asking: an associate gets their own lesson, whether a test is open (never its questions) and results; an admin or manager gets today's lessons and everyone's progress (person: one associate's page by email). Taking a test stays on the page.",
   input_schema: obj({ person: str }),
   summarize: (i) => `Read associate training${i.person ? ` for ${i.person}` : ''}`,
   run: async (i, ctx) => {
     if (!ctx?.me) throw new Error('Sign in first');
     const { trainingView } = await import('@/lib/associateTrainingView');
-    return ok(await trainingView(ctx.me, { person: String(i.person || '').toLowerCase() }));
+    const v = ok(await trainingView(ctx.me, { person: String(i.person || '').toLowerCase() }));
+    // An open test is the associate's to answer alone: the assistant sees that it is open, never its questions.
+    const hideTest = (p: any) => (p?.test ? { ...p, test: { id: p.test.id, day: p.test.day, total: p.test.total, open: true, note: 'Open test: taken on the Associate Training page.' } } : p);
+    return { ...v, me: hideTest(v.me), person: hideTest(v.person) };
   },
 });
 

@@ -22,7 +22,36 @@ const getClient = anthropicClient;
 async function loadConversation(id): Promise<any> {
   const row = await prisma.assistant_conversations.findUnique({ where: { id } });
   if (!row) return null;
-  return { ...row, messages: JSON.parse(row.messages || '[]'), pending: row.pending ? JSON.parse(row.pending) : null };
+  const conv = { ...row, messages: JSON.parse(row.messages || '[]'), pending: row.pending ? JSON.parse(row.pending) : null };
+  return recoverStale(conv);
+}
+
+// Conversations this server process is working on now (sendMessage or decide in progress).
+const liveRuns: Set<number> = ((globalThis as any).__assistantLiveRuns ||= new Set<number>());
+const STALE_MS = 15 * 60000;
+const sqlMs = (t: string | null | undefined) => Date.parse(String(t || '').replace(' ', 'T') + 'Z');
+
+// A conversation left 'running' by a restart or a run that never came back (no run in this process
+// and nothing saved for 15 minutes) is put back to idle, so the person can carry on. Tool calls left
+// without an answer are answered, which keeps the history valid for the API.
+async function recoverStale(conv) {
+  if (conv.status !== 'running' || liveRuns.has(conv.id)) return conv;
+  const at = sqlMs(conv.updated_at);
+  if (Number.isFinite(at) && Date.now() - at < STALE_MS) return conv;
+  closeDanglingToolUses(conv, 'Not finished: the run stopped (the server restarted or the step did not come back). Check the dashboard for what was done before trying again.');
+  const r = await prisma.assistant_conversations.updateMany({ where: { id: conv.id, status: 'running', updated_at: conv.updated_at }, data: { status: 'idle', messages: JSON.stringify(conv.messages), updated_at: sqlNow() } });
+  if (r.count === 1) conv.status = 'idle';
+  return conv;
+}
+
+// Marks the conversation as worked on by this process while fn runs.
+async function live<T>(id: number, fn: () => Promise<T>): Promise<T> {
+  liveRuns.add(id);
+  try {
+    return await fn();
+  } finally {
+    liveRuns.delete(id);
+  }
 }
 
 async function saveConversation(conv) {
@@ -301,7 +330,15 @@ async function sendMessage({ conversationId, text, imageIds = [], actor = null, 
   }
   if (!conv) conv = await createConversation((text || 'New conversation').replace(/<attached_document[\s\S]*$/, '').trim().slice(0, 70) || 'New conversation', actor);
   emit({ type: 'conversation', id: conv.id, title: conv.title });
+  liveRuns.add(conv.id);
+  try {
+    return await continueMessage(conv, { text, imageIds, me }, emit, signal);
+  } finally {
+    liveRuns.delete(conv.id);
+  }
+}
 
+async function continueMessage(conv, { text, imageIds, me }: any, emit, signal) {
   const content: any[] = [];
   if (conv.pending) {
     content.push(...conv.pending.readResults);
@@ -334,6 +371,10 @@ async function decide({ conversationId, decisions, me = null }: any, emit, signa
   // Claim the pending batch atomically so a double-click on Approve cannot run the writes twice.
   const claim = await prisma.assistant_conversations.updateMany({ where: { id: conv.id, status: 'awaiting_approval' }, data: { status: 'running' } });
   if (claim.count !== 1) throw new Error('Nothing is waiting for approval in this conversation.');
+  return live(conv.id, () => runDecisions(conv, decisions, me, emit, signal));
+}
+
+async function runDecisions(conv, decisions, me, emit, signal) {
 
   const { readResults, actions } = conv.pending;
   conv.pending = null;
@@ -360,4 +401,4 @@ async function decide({ conversationId, decisions, me = null }: any, emit, signa
   await runLoop(conv, emit, signal, me);
 }
 
-export { sendMessage, decide, loadConversation, proposeTools, IMAGE_MARKER, MODEL };
+export { sendMessage, decide, loadConversation, proposeTools, recoverStale, IMAGE_MARKER, MODEL };

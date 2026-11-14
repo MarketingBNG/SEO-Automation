@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+// @ts-nocheck -- not type checked: the project's full type check (npm run typecheck) runs at the edge of
+// the default heap, and this file is test scaffolding over untyped (any) tool definitions.
 // The assistant's tab tools (lib/assistant/tabTools.ts): every write tool is refused, at the card and
 // again when approved, to a person without the permission its tab needs; every one calls the same
 // lib function as its route; and the important ones behave as the tabs do. Database tests use
@@ -137,7 +140,7 @@ test('the system prompt names only tools that exist, and says what stays in the 
   for (const t of TOOLS.filter((x: any) => x.kind === 'write')) assert.ok(SYSTEM_PROMPT.includes(t.name), `prompt lists ${t.name}`);
   assert.match(SYSTEM_PROMPT, /approval card/);
   assert.match(SYSTEM_PROMPT, /STAYS IN THE DASHBOARD/);
-  for (const w of ['Team & Roles', 'Testing / Live mode', 'OAuth', 'Associate Training test', 'approving the monthly strategy', 'Smartlead', 'make_word_file']) assert.ok(SYSTEM_PROMPT.includes(w), w);
+  for (const w of ['Team & Roles', 'Testing / Live mode', 'OAuth', 'Associate Training test', 'approving the monthly strategy', 'Smartlead', 'make_word_file', 'set a level', 'importing a meeting insight', 'keyword suggestions for an older draft', 'Surfer terms', 'try again after someone presses Resume', 'keyword_research and serp_top_results are paid']) assert.ok(SYSTEM_PROMPT.includes(w), w);
   assert.doesNotMatch(SYSTEM_PROMPT, /You cannot change the company website/);
 });
 
@@ -147,7 +150,7 @@ test('every write tool is refused at the card and when approved to a role withou
   const { TOOLS, getTool, toolNeeds } = await tools();
   const { proposeTools, decide } = await import('../lib/assistant/engine');
   const { can } = await import('../lib/permissions');
-  const prisma = (await import('../lib/prisma')).default;
+  const prisma: any = (await import('../lib/prisma')).default;
   const g = globalThis as any;
   const writes = TOOLS.filter((t: any) => t.kind === 'write');
   assert.ok(writes.length >= 45, `${writes.length} write tools`);
@@ -218,7 +221,7 @@ async function calendarFixture(prisma: any, opts: { status?: string; draftStatus
 }
 
 test('calendar_decide: pause, resume, reschedule, reject needs feedback, approve; calendar_publish_now needs blog.publish_now', { skip: !db, timeout: 60000 }, async () => {
-  const prisma = (await import('../lib/prisma')).default;
+  const prisma: any = (await import('../lib/prisma')).default;
   const { getTool } = await tools();
   const { proposeTools } = await import('../lib/assistant/engine');
   const f = await calendarFixture(prisma);
@@ -270,7 +273,7 @@ test('calendar_decide: pause, resume, reschedule, reject needs feedback, approve
 });
 
 test('the calendar route answers exactly as before through the shared function', { skip: !db, timeout: 30000 }, async () => {
-  const prisma = (await import('../lib/prisma')).default;
+  const prisma: any = (await import('../lib/prisma')).default;
   const { PATCH } = await import('../app/api/strategy/schedule/[id]/route');
   const f = await calendarFixture(prisma);
   try {
@@ -291,7 +294,7 @@ test('the calendar route answers exactly as before through the shared function',
 });
 
 test('draft_set_status: approving a calendar draft approves its slot; a published blog keeps its status', { skip: !db, timeout: 30000 }, async () => {
-  const prisma = (await import('../lib/prisma')).default;
+  const prisma: any = (await import('../lib/prisma')).default;
   const { getTool } = await tools();
   const f = await calendarFixture(prisma);
   try {
@@ -321,7 +324,7 @@ test('draft_set_status: approving a calendar draft approves its slot; a publishe
 });
 
 test('generate_blog_draft in Testing mode: the keyword is claimed and its AI step waits in the Claude Code queue', { skip: !db, timeout: 90000 }, async () => {
-  const prisma = (await import('../lib/prisma')).default;
+  const prisma: any = (await import('../lib/prisma')).default;
   const { getTool } = await tools();
   const g = globalThis as any;
   const kw = await prisma.keywords.create({ data: { keyword: `zz assistant queue test ${stamp()}`, status: 'pending', batch_name: 'Assistant test' } });
@@ -364,7 +367,7 @@ test('generate_blog_draft in Testing mode: the keyword is claimed and its AI ste
 });
 
 test('site content: saving and deleting need website.change; an allowed save stores it and tells the website', { skip: !db, timeout: 30000 }, async () => {
-  const prisma = (await import('../lib/prisma')).default;
+  const prisma: any = (await import('../lib/prisma')).default;
   const { getTool } = await tools();
   const { proposeTools } = await import('../lib/assistant/engine');
   const slug = `/blog/assistant-test-${stamp()}`;
@@ -397,7 +400,7 @@ test('site content: saving and deleting need website.change; an allowed save sto
 });
 
 test('manual_task_update: assigning needs manual.assign; a user works only on tasks assigned to them', { skip: !db, timeout: 30000 }, async () => {
-  const prisma = (await import('../lib/prisma')).default;
+  const prisma: any = (await import('../lib/prisma')).default;
   const { getTool } = await tools();
   const { proposeTools } = await import('../lib/assistant/engine');
   const r = await proposeTools({ id: 0 }, [{ id: 'a', name: 'manual_task_update', input: { kind: 'backlink', id: 1, action: 'assign', email: USER.email } }], () => {}, USER);
@@ -412,5 +415,106 @@ test('manual_task_update: assigning needs manual.assign; a user works only on ta
   } finally {
     await prisma.backlink_tasks.deleteMany({ where: { id: task.id } });
     await prisma.seo_strategies.deleteMany({ where: { id: s.id } });
+  }
+});
+
+test('generate_blog_draft with a chosen keyword takes only a pending or failed one, never a written or calendar blog', { skip: !db, timeout: 30000 }, async () => {
+  const prisma: any = (await import('../lib/prisma')).default;
+  const { getTool } = await tools();
+  const { claimKeywordForGeneration } = await import('../lib/generateActions');
+  const s = stamp();
+  const drafted = await prisma.keywords.create({ data: { keyword: `zz drafted ${s}`, status: 'drafted', batch_name: 'Assistant test' } });
+  const calendar = await prisma.keywords.create({ data: { keyword: `zz calendar ${s}`, status: 'pending', batch_name: 'Strategy #999999' } });
+  const failed = await prisma.keywords.create({ data: { keyword: `zz failed ${s}`, status: 'failed', batch_name: 'Assistant test' } });
+  try {
+    const t = getTool('generate_blog_draft');
+    assert.match((await t.preview({ keyword_id: drafted.id }, { me: ANALYST })).problem, /already written/);
+    assert.match((await t.preview({ keyword_id: calendar.id }, { me: ANALYST })).problem, /Monthly Strategy calendar/);
+    assert.equal((await t.preview({ keyword_id: failed.id }, { me: ANALYST })).problem, null);
+    for (const k of [drafted, calendar]) {
+      const r: any = await claimKeywordForGeneration(k.id);
+      assert.equal(r.error.status, 409);
+      assert.equal((await prisma.keywords.findUnique({ where: { id: k.id } })).status, k.status, 'not claimed');
+    }
+    await assert.rejects(t.run({ keyword_id: drafted.id }, { me: ANALYST }), /already written/);
+    const ok: any = await claimKeywordForGeneration(failed.id);
+    assert.equal(ok.keyword.id, failed.id);
+    assert.equal((await prisma.keywords.findUnique({ where: { id: failed.id } })).status, 'generating');
+  } finally {
+    await prisma.keywords.deleteMany({ where: { id: { in: [drafted.id, calendar.id, failed.id] } } });
+  }
+});
+
+test('in Testing mode a tool that waits for AI runs in the background and the card returns at once', async () => {
+  const { runOrQueue } = await tab();
+  const g = globalThis as any;
+  let finished = false;
+  let release: () => void = () => {};
+  const work = () => new Promise<any>((res) => (release = () => res({ result: { done: true } }))).then((r) => ((finished = true), r));
+  g.__AI_MODE_PIN = 'testing';
+  try {
+    const r: any = await runOrQueue({ me: ANALYST }, 'Check again: draft #1', 'Drafts & Review', work);
+    assert.equal(r.result.started, true);
+    assert.match(r.result.note, /Claude Code queue.*Drafts & Review/);
+    assert.equal(finished, false, 'returned before the work finished');
+    release();
+  } finally {
+    g.__AI_MODE_PIN = 'live';
+  }
+  const live: any = await runOrQueue({ me: ANALYST }, 'x', 'y', async () => ({ result: { done: true } }));
+  assert.deepEqual(live, { result: { done: true } }, 'Live mode: runs here and returns its result');
+  // The tools that wait for AI answers go through it.
+  const { getTool } = await tools();
+  for (const n of ['draft_recheck', 'draft_fix_issues', 'generate_writing_skill', 'strategy_refresh', 'manual_task_guide', 'topic_action', 'performance_explain', 'calendar_publish_now', 'post_my_blog']) {
+    assert.match(getTool(n).run.toString(), /runOrQueue/, n);
+  }
+});
+
+test('a conversation stuck in "running" (restart, a step that never came back) is put back to idle after 15 minutes', { skip: !db, timeout: 30000 }, async () => {
+  const prisma: any = (await import('../lib/prisma')).default;
+  const { loadConversation } = await import('../lib/assistant/engine');
+  const old = new Date(Date.now() - 20 * 60000).toISOString().slice(0, 19).replace('T', ' ');
+  const recent = new Date(Date.now() - 2 * 60000).toISOString().slice(0, 19).replace('T', ' ');
+  const messages = JSON.stringify([{ role: 'user', content: 'hi' }, { role: 'assistant', content: [{ type: 'tool_use', id: 'tu_x', name: 'list_calendar', input: {} }] }]);
+  const stuck = await prisma.assistant_conversations.create({ data: { title: `stuck ${stamp()}`, status: 'running', messages, updated_at: old } });
+  const busy = await prisma.assistant_conversations.create({ data: { title: `busy ${stamp()}`, status: 'running', messages, updated_at: recent } });
+  try {
+    const c = await loadConversation(stuck.id);
+    assert.equal(c.status, 'idle');
+    const last = c.messages[c.messages.length - 1];
+    assert.equal(last.content[0].tool_use_id, 'tu_x', 'the unanswered tool call is answered');
+    assert.equal((await prisma.assistant_conversations.findUnique({ where: { id: stuck.id } })).status, 'idle');
+    assert.equal((await loadConversation(busy.id)).status, 'running', 'a recent run is left alone');
+  } finally {
+    await prisma.assistant_conversations.deleteMany({ where: { id: { in: [stuck.id, busy.id] } } });
+  }
+});
+
+test('keyword_research and serp_top_results are paid, so they wait for the card', async () => {
+  const { getTool, toolNeeds } = await tools();
+  for (const n of ['keyword_research', 'serp_top_results']) {
+    assert.equal(getTool(n).kind, 'write', n);
+    assert.match((await getTool(n).preview({ keyword: 'itin' })).warning, /SE Ranking|SerpHouse/, n);
+    assert.deepEqual(toolNeeds(n, {}), ['reports.view'], n);
+  }
+});
+
+test('training_status never shows the assistant an open test', { skip: !db, timeout: 30000 }, async () => {
+  const prisma: any = (await import('../lib/prisma')).default;
+  const { getTool } = await tools();
+  const email = `assoc-${stamp()}@test.local`;
+  await prisma.training_profiles.create({ data: { email, name: 'Assoc Test' } });
+  const qs = JSON.stringify([{ id: 'q1', q: 'What is an ITIN?', options: ['A tax number', 'A visa'], answer: 0, explain: 'IRS number' }]);
+  await prisma.training_tests.create({ data: { email, day: '2026-11-14', level: 1, questions: qs, total: 1, status: 'open' } });
+  try {
+    const mine: any = await getTool('training_status').run({}, { me: { email, name: 'Assoc Test', role: 'user', blocked: false } });
+    assert.equal(mine.me.test.open, true);
+    assert.equal(mine.me.test.questions, undefined);
+    assert.doesNotMatch(JSON.stringify(mine), /What is an ITIN|A tax number/);
+    const viewer: any = await getTool('training_status').run({ person: email }, { me: ADMIN });
+    assert.doesNotMatch(JSON.stringify(viewer), /What is an ITIN|A tax number/);
+  } finally {
+    await prisma.training_tests.deleteMany({ where: { email } });
+    await prisma.training_profiles.deleteMany({ where: { email } });
   }
 });
