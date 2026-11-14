@@ -7,9 +7,8 @@ import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { readFile } from '@/lib/storage';
 import { sqlNow } from '@/lib/time';
-import { API_TOOLS, getTool, toolNeeds, validate, riskOf, serializeResult } from './tools';
-import { canDo } from '@/lib/access';
-import { deniedMessage } from '@/lib/permissions';
+import { API_TOOLS, getTool, missingNeed, validate, riskOf, serializeResult } from './tools';
+import { deniedMessage, ACTION_LABEL } from '@/lib/permissions';
 import { SYSTEM_PROMPT } from './prompt';
 
 const MODEL = process.env.ASSISTANT_MODEL || 'claude-opus-5-5';
@@ -109,13 +108,17 @@ async function recordChange(conv, toolName, change) {
   return Number(r.id);
 }
 
+const deniedTo = (action) => `${deniedMessage(action)} Tell the user this is not open to their role (it needs "${ACTION_LABEL[action]}"); someone with that access can do it.`;
+
 // me: the person asking (getMe), so a tool shows only what their role may see.
 async function runTool(conv, name, input, emit, toolUseId, me) {
   const tool = getTool(name);
   emit({ type: 'tool_start', toolUseId, name, summary: tool.summarize(input) });
   try {
-    const needs = toolNeeds(name);
-    if (needs && !(me && (me.role === 'admin' || (await canDo(me, needs))))) throw new Error(`${deniedMessage(needs)} Tell the user this tool is not open to their role.`);
+    // The permission is checked for the person running it now: for a write tool, the person who
+    // approved the card (the card itself was refused earlier to someone without it).
+    const missing = await missingNeed(me, name, input);
+    if (missing) throw new Error(deniedTo(missing));
     const out = await tool.run(input, { conversationId: conv.id, emit, me });
     let result = tool.kind === 'write' ? out.result : out;
     let changeId: number | null = null;
@@ -129,6 +132,47 @@ async function runTool(conv, name, input, emit, toolUseId, me) {
     emit({ type: 'tool_result', toolUseId, name, ok: false, error: err.message });
     return { type: 'tool_result', tool_use_id: toolUseId, content: `Error: ${err.message}`, is_error: true };
   }
+}
+
+// The model's tool calls of one step: read tools run now; write tools become approval cards, with a
+// preview, unless the person's role cannot make that change (then the model is told so, no card).
+async function proposeTools(conv, toolUses, emit, me) {
+  const readResults: any[] = [];
+  const actions: any[] = [];
+  for (const tu of toolUses) {
+    const tool = getTool(tu.name);
+    if (!tool) {
+      readResults.push({ type: 'tool_result', tool_use_id: tu.id, content: `Unknown tool "${tu.name}"`, is_error: true });
+      continue;
+    }
+    const invalid = validate(tool.input_schema, tu.input);
+    if (invalid) {
+      readResults.push({ type: 'tool_result', tool_use_id: tu.id, content: `Invalid input: ${invalid}`, is_error: true });
+      continue;
+    }
+    if (tool.kind === 'read') {
+      readResults.push(await runTool(conv, tu.name, tu.input, emit, tu.id, me));
+      continue;
+    }
+    // No card for a change this person's role cannot make: it would only be refused when approved.
+    const missing = await missingNeed(me, tu.name, tu.input);
+    if (missing) {
+      emit({ type: 'tool_start', toolUseId: tu.id, name: tu.name, summary: tool.summarize(tu.input) });
+      emit({ type: 'tool_result', toolUseId: tu.id, name: tu.name, ok: false, error: deniedMessage(missing) });
+      readResults.push({ type: 'tool_result', tool_use_id: tu.id, content: `Error: ${deniedTo(missing)}`, is_error: true });
+      continue;
+    }
+    let preview: any = null;
+    if (tool.preview) {
+      try {
+        preview = await tool.preview(tu.input, { conversationId: conv.id, me });
+      } catch (err: any) {
+        preview = { problem: `Could not build a preview: ${err.message}` };
+      }
+    }
+    actions.push({ toolUseId: tu.id, name: tu.name, input: tu.input, summary: tool.summarize(tu.input), risk: riskOf(tool, tu.input), preview });
+  }
+  return { readResults, actions };
 }
 
 async function runLoop(conv, emit, signal, me) {
@@ -220,33 +264,7 @@ async function runLoop(conv, emit, signal, me) {
         continue;
       }
 
-      const readResults: any[] = [];
-      const actions: any[] = [];
-      for (const tu of toolUses) {
-        const tool = getTool(tu.name);
-        if (!tool) {
-          readResults.push({ type: 'tool_result', tool_use_id: tu.id, content: `Unknown tool "${tu.name}"`, is_error: true });
-          continue;
-        }
-        const invalid = validate(tool.input_schema, tu.input);
-        if (invalid) {
-          readResults.push({ type: 'tool_result', tool_use_id: tu.id, content: `Invalid input: ${invalid}`, is_error: true });
-          continue;
-        }
-        if (tool.kind === 'read') {
-          readResults.push(await runTool(conv, tu.name, tu.input, emit, tu.id, me));
-          continue;
-        }
-        let preview: any = null;
-        if (tool.preview) {
-          try {
-            preview = await tool.preview(tu.input, { conversationId: conv.id, me });
-          } catch (err: any) {
-            preview = { problem: `Could not build a preview: ${err.message}` };
-          }
-        }
-        actions.push({ toolUseId: tu.id, name: tu.name, input: tu.input, summary: tool.summarize(tu.input), risk: riskOf(tool, tu.input), preview });
-      }
+      const { readResults, actions } = await proposeTools(conv, toolUses, emit, me);
 
       if (actions.length) {
         conv.pending = { readResults, actions };
@@ -342,4 +360,4 @@ async function decide({ conversationId, decisions, me = null }: any, emit, signa
   await runLoop(conv, emit, signal, me);
 }
 
-export { sendMessage, decide, loadConversation, IMAGE_MARKER, MODEL };
+export { sendMessage, decide, loadConversation, proposeTools, IMAGE_MARKER, MODEL };
