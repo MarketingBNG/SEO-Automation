@@ -324,6 +324,75 @@ defineTool({
 });
 
 defineTool({
+  name: 'post_my_blog',
+  kind: 'write',
+  riskFor: (i) => (i.mode === 'post' ? 'high' : 'low'),
+  description:
+    'Post the user\'s OWN blog (pasted text or HTML, or an attached Word file\'s text) as it is: it is saved to Drafts & Review and, with mode "post", put live on the website straight away through the same publish step as Drafts & Review. Use when the user says to post or publish their blog as it is ("bas post kar do", "without fact check"). Do not change their words. Every check is off unless the user asks: fact_check (reads every claim against official sources, uses AI credits, and a wrong claim stops the post and saves it to Drafts with the issues), originality (paid plagiarism check), optimise (keeps their words and adds SEO; saved to Drafts for review, never posted), ask_reviewer (needs the CA/CPA reviewer name). Placeholders like [VERIFY] or [AUTHOR NAME] and AI notes always stop a post. mode "save" only saves to Drafts & Review. Only an admin or a manager can post live; for others use mode "save". content_html starts at <h2> or a paragraph (the title is printed as the H1).',
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      content_html: { type: 'string', description: 'The whole article, HTML or plain text.' },
+      meta_description: { type: 'string' },
+      keyword: { type: 'string', description: 'Main keyword; defaults to the title.' },
+      author: { type: 'string', description: 'Byline author; defaults to one of the blog authors.' },
+      reviewer: { type: 'string', description: 'CA/CPA reviewer name, with ask_reviewer.' },
+      mode: { type: 'string', enum: ['post', 'save'] },
+      fact_check: { type: 'boolean' },
+      originality: { type: 'boolean' },
+      optimise: { type: 'boolean' },
+      ask_reviewer: { type: 'boolean' },
+    },
+    required: ['title', 'content_html', 'mode'],
+    additionalProperties: false,
+  },
+  summarize: (i) => {
+    const checks = ['fact_check', 'originality', 'optimise', 'ask_reviewer'].filter((k) => i[k]).map((k) => k.replace('_', ' '));
+    return `${i.mode === 'post' && !i.optimise ? 'Post live on the website' : 'Save to Drafts & Review'}: "${snippet(i.title, 80)}" (checks: ${checks.length ? checks.join(', ') : 'none'})`;
+  },
+  preview: async (i, ctx) => {
+    const { articleHtml, wordCount } = await import('@/lib/myBlog');
+    const { liveTextProblem, canPublishNow } = await import('@/lib/publishDraft');
+    const html = articleHtml(i.content_html);
+    const post = i.mode === 'post' && !i.optimise;
+    const problems = [
+      post && !(await canPublishNow(ctx?.me || null)) ? 'Your role cannot post live straight away; ask for mode "save" (Save to Drafts) instead.' : '',
+      post ? liveTextProblem({ title: i.title, meta_description: i.meta_description, content_html: html }) || '' : '',
+      wordCount(html) < 50 ? 'The blog has under 50 words.' : '',
+    ].filter(Boolean);
+    return {
+      target: `${post ? 'Live on the website' : 'Drafts & Review'}: ${i.title}`,
+      words: wordCount(html),
+      keyword: i.keyword || i.title,
+      author: i.author || '(one of the blog authors)',
+      checks: ['fact_check', 'originality', 'optimise', 'ask_reviewer'].filter((k) => i[k]).join(', ') || 'none',
+      warning: i.fact_check || i.originality || i.optimise ? 'The ticked checks use AI credits or paid lookups.' : null,
+      problem: problems.length ? problems.join(' ') : null,
+    };
+  },
+  run: async (i, ctx) => {
+    if (i.fact_check) ctx.emit?.({ type: 'tool_progress', text: 'Fact checking every claim before posting (a few minutes)…' });
+    const { postMyBlog } = await import('@/lib/myBlog');
+    const r = await postMyBlog(
+      { title: i.title, html: i.content_html, meta_description: i.meta_description, keyword: i.keyword, author: i.author, reviewer: i.reviewer, mode: i.mode, fact_check: i.fact_check, originality: i.originality, optimise: i.optimise, ask_reviewer: i.ask_reviewer },
+      { me: ctx?.me || null, actor: ctx?.me?.name ? `${ctx.me.name} (assistant)` : 'Assistant' },
+    );
+    if (r.status !== 200 && !r.body?.draftId) throw new Error(r.body?.error || 'The blog could not be posted.');
+    return {
+      result: {
+        draft_id: r.body.draftId ?? null,
+        posted: Boolean(r.body.posted),
+        url: r.body.url || null,
+        message: r.body.message || r.body.error || null,
+        issues: r.body.issues || [],
+        notes: r.body.notes || [],
+      },
+    };
+  },
+});
+
+defineTool({
   name: 'list_audits',
   kind: 'read',
   description: 'List past blog audits (Blog Audit and Blog Renewal tabs) with verdict, issue count and rewrite status.',
@@ -1001,6 +1070,8 @@ const READ_NEEDS: Record<string, Action> = {
   list_audits: 'content.work',
   list_keywords: 'content.work',
   list_site_changes: 'content.work',
+  // Post my blog: content work to save; posting live is checked again (blog.publish_now) in lib/myBlog.ts.
+  post_my_blog: 'content.work',
   latest_technical_crawl: 'reports.view',
 };
 function toolNeeds(name: string): Action | null {

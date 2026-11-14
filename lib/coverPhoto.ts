@@ -8,8 +8,9 @@
 // banner first: better photo searches, a better AI photo prompt, and which words of the title go gold.
 import prisma from './prisma';
 import * as settings from './settings';
-import { saveFile } from './storage';
-import { composeCover } from './cover';
+import { saveFile, readFile } from './storage';
+import { CANDIDATE_PREFIX } from './bannerOptions';
+import { composeCover, makeCover } from './cover';
 
 // A photo source that fails (wrong key, unknown model, size refused) is said in the server log and,
 // at most once a day per source, in the Activity Log, so a broken cover path does not go unseen.
@@ -164,6 +165,46 @@ async function makePhotoCover(draftId: number): Promise<string | null> {
   // Only if nobody uploaded a cover meanwhile.
   await prisma.drafts.updateMany({ where: { id: draftId, featured_image_path: null }, data: { featured_image_path: key } });
   return key;
+}
+
+// One banner made for a person to preview ("Make banner" / "Try another design" in Drafts & Review and
+// Post my blog). main (the title words to make bold) and cutout (the picture) come from the person
+// when given; the art director fills in what is missing (a small AI call, skipped in Testing mode,
+// while AI work is paused, or when the design skills are not shared). variant counts up with each
+// "Try another design", so the Social dashboard and the local renderer give a different design.
+// Order: the Social dashboard's banner, then a stock or AI photo (Pexels picks an unused photo each
+// time; the paid AI photo is not made in Testing mode or while paused), then the local design,
+// which always works. Nothing is saved here: the caller stores the picture as a candidate.
+export async function makeBanner(b: { title: string; topic?: string; author?: string | null; main?: string; cutout?: string; variant?: number; draftId?: number }): Promise<{ image: Buffer; ext: 'jpg' | 'png'; source: 'social' | 'photo' | 'local' }> {
+  const title = String(b.title || '').trim() || 'USAIndiaCFO';
+  const topic = String(b.topic || title).trim();
+  const variant = Math.max(0, Math.floor(Number(b.variant) || 0));
+  const given = { main: String(b.main || '').trim().slice(0, 120), cutout: String(b.cutout || '').trim().slice(0, 40) };
+  const paused = (await settings.get('ai_paused').catch(() => null)) === '1';
+  const dir = given.main && given.cutout ? null : paused ? null : await artDirection(title, topic);
+  const main = given.main || dir?.main || '';
+  const cutout = given.cutout || dir?.cutout || '';
+  const { socialBanner } = await import('./socialSkills');
+  const social = await socialBanner({ title, topic, author: b.author || null, main, cutout, variant });
+  if (social) return { image: social, ext: 'jpg', source: 'social' };
+  const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo, b.draftId).catch(() => null));
+  if (photo) return { image: await composeCover(photo, title, { gold: dir?.gold }), ext: 'jpg', source: 'photo' };
+  return { image: await makeCover(title, b.author || null, variant, main), ext: 'png', source: 'local' };
+}
+
+// A banner for preview, stored as a candidate (served at /api/uploads/<key>) until a person picks it.
+// scope: the draft id, or 'new' for Post my blog before the draft exists.
+export async function bannerCandidate(b: Parameters<typeof makeBanner>[0], scope: string | number): Promise<{ key: string; source: string }> {
+  const made = await makeBanner(b);
+  const key = await saveFile(`${CANDIDATE_PREFIX}${String(scope).replace(/[^a-z0-9]/gi, '')}-${Date.now()}.${made.ext}`, made.image, made.ext === 'png' ? 'image/png' : 'image/jpeg');
+  return { key, source: made.source };
+}
+
+// A stored candidate key, or null when the key is not one (never any other stored file).
+export async function checkCandidate(key: unknown): Promise<string | null> {
+  const k = String(key || '');
+  if (!k.startsWith(CANDIDATE_PREFIX) || !/^[a-z0-9/.-]+$/i.test(k) || k.includes('..')) return null;
+  return (await readFile(k).catch(() => null)) ? k : null;
 }
 
 // Every blog not yet on the website gets its banner by itself: a few per scheduler run, so nobody has to press anything.

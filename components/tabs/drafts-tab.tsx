@@ -22,6 +22,8 @@ import { OriginLabel } from '@/components/shared/origin-details';
 import { useRole } from '@/hooks/use-role';
 import { useSiteStatus } from '@/hooks/use-site-status';
 import DraftChanges from '@/components/shared/draft-changes';
+import { PostMyBlog } from '@/components/shared/post-my-blog';
+import { BannerDesigner } from '@/components/shared/banner-designer';
 
 export { PeopleAlsoAskList };
 
@@ -57,6 +59,7 @@ export default function DraftsTab() {
 
   return (
     <div className="space-y-4">
+      <PostMyBlog onSaved={load} />
       <Card>
         <CardContent>
           <DataTable head={['Title / Keyword', 'Production', 'Status', 'Words', 'Updated', '']}>
@@ -201,6 +204,8 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
   }, [pub?.state]);
 
   const [chosenWpStatus, setWpStatus] = useState('publish');
+  // Admin and manager: publish without the CA/CPA reviewer name and the paid originality check.
+  const [skipChecks, setSkipChecks] = useState(false);
   // A hidden website draft only while the website keeps drafts hidden (SITE_CONNECTOR_DRAFTS=on).
   const { draftsAllowed } = useSiteStatus();
   const wpStatus = draftsAllowed ? chosenWpStatus : 'publish';
@@ -435,7 +440,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
       const res = await fetch(`/api/drafts/${draft.id}/publish`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wpStatus }),
+        body: JSON.stringify({ wpStatus, ...(skipChecks && canPublishNow ? { skipChecks: true } : {}) }),
       });
       const json = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (!res.ok) throw new Error(json.error);
@@ -697,6 +702,29 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
               </Button>
             )}
           </div>
+          {!draft.wp_post_url && draft.kind !== 'article' && (
+            <div className="mt-3">
+              <div className="mb-1 text-sm text-muted-foreground">Design a banner: see it first, then keep it. Publishing uses the banner you choose.</div>
+              <BannerDesigner
+                currentUrl={`/api/drafts/${draft.id}/cover?v=${encodeURIComponent(draft.updated_at || '')}`}
+                currentLabel={draft.featured_image_path ? 'Banner now (chosen)' : 'Banner now (automatic, not chosen yet)'}
+                disabled={saving}
+                make={async (ask) => {
+                  const res = await fetch(`/api/drafts/${draft.id}/cover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'preview', ...ask }) });
+                  const j = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+                  return j;
+                }}
+                choose={async (key) => {
+                  const res = await fetch(`/api/drafts/${draft.id}/cover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'use', key }) });
+                  const j = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+                  setMessage('Banner chosen. Publishing uses it. Check its alt text above.');
+                  loadDraft(false);
+                }}
+              />
+            </div>
+          )}
         </div>
 
         {draft.kind === 'article' ? (
@@ -713,6 +741,12 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
             <Send />
             {draft.wp_post_id ? 'Update the live post' : draft.schedule ? 'Publish now (skips the scheduled slot)' : 'Publish to the website'}
           </Button>
+          {canPublishNow && (
+            <label className="flex items-center gap-1.5 text-sm" title="Publish without the CA/CPA reviewer name and the paid originality check. Placeholders and AI notes are still checked.">
+              <input type="checkbox" checked={skipChecks} onChange={(e) => setSkipChecks(e.target.checked)} />
+              Skip checks (reviewer name, originality)
+            </label>
+          )}
           {draft.wp_post_id && !draft.wp_post_url ? (
             <span className="text-sm text-amber-700 dark:text-amber-400">On the website as a hidden draft only: it is NOT live. Choose &quot;Publish live&quot; to make it live.</span>
           ) : draft.status === 'published' ? (

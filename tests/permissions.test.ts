@@ -44,6 +44,18 @@ test('users ask the assistant and do manual tasks, nothing else', () => {
   assert.equal(allowed('analyst', 'POST', '/api/generate'), true);
 });
 
+test('Post my blog: content roles save to Drafts; posting live also needs blog.publish_now (checked in the route)', () => {
+  for (const p of ['/api/my-blog', '/api/my-blog/banner']) {
+    assert.equal(actionFor('POST', p), 'content.work', p);
+    assert.equal(allowed('analyst', 'POST', p), true, p);
+    assert.equal(allowed('user', 'POST', p), false, p);
+  }
+  assert.equal(actionFor('GET', '/api/my-blog'), null, 'the author list is open to anyone signed in');
+  assert.equal(can('manager', 'blog.publish_now'), true);
+  assert.equal(can('analyst', 'blog.publish_now'), false);
+  assert.equal(can('user', 'blog.publish_now'), false);
+});
+
 test('blocking: admin blocks anyone but the owner; managers block users and analysts', () => {
   assert.equal(canBlock('admin', 'manager', 'm@usaindiacfo.com'), true);
   assert.equal(canBlock('admin', 'admin', 'abhuday@usaindiacfo.com'), false);

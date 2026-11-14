@@ -81,17 +81,30 @@ export async function composeCover(photo: Buffer, title: string, opts: { png?: b
 
 // Without a photo: a deep navy background with a soft city skyline, in the same design, plus the
 // author. No API, so it is always available and looks the same on every server.
-export async function makeCover(title: string, author?: string | null): Promise<Buffer> {
+// variant (0 = the usual navy; "Try another design" counts up): another background colour, glow
+// position and skyline, so a person can pick between designs when no banner service is set up.
+const PALETTES: [string, string][] = [
+  ['#16244F', '#0A1330'],
+  ['#123B4A', '#071E27'],
+  ['#3A1C2E', '#1A0B16'],
+  ['#25282F', '#101216'],
+  ['#1F3A2C', '#0B1A12'],
+];
+export async function makeCover(title: string, author?: string | null, variant = 0, main?: string): Promise<Buffer> {
+  const v = Math.max(0, Math.floor(Number(variant) || 0));
+  const [from, to] = PALETTES[v % PALETTES.length];
+  const glowX = [0.82, 0.7, 0.9, 0.6][v % 4];
+  const shift = (v * 37) % 90;
   const towers = [
     [640, 300, 60], [705, 230, 44], [752, 330, 70], [828, 180, 52], [884, 260, 64], [952, 140, 46], [1002, 280, 58], [1064, 210, 50], [1118, 300, 82],
   ]
-    .map(([x, h, w]) => `<rect x="${x}" y="${H - h}" width="${w}" height="${h}" fill="#ffffff" fill-opacity="0.06"/>`)
+    .map(([x, h, w], i) => `<rect x="${x}" y="${H - (v ? Math.max(120, h + ((i * shift) % 120) - 60) : h)}" width="${w}" height="${v ? Math.max(120, h + ((i * shift) % 120) - 60) : h}" fill="#ffffff" fill-opacity="0.06"/>`)
     .join('');
   const bg = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
       <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16244F"/><stop offset="1" stop-color="#0A1330"/></linearGradient>
-        <radialGradient id="glow" cx="0.82" cy="0.35" r="0.55"><stop offset="0" stop-color="#E8B04B" stop-opacity="0.22"/><stop offset="1" stop-color="#E8B04B" stop-opacity="0"/></radialGradient>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient>
+        <radialGradient id="glow" cx="${glowX}" cy="0.35" r="0.55"><stop offset="0" stop-color="#E8B04B" stop-opacity="0.22"/><stop offset="1" stop-color="#E8B04B" stop-opacity="0"/></radialGradient>
       </defs>
       <rect width="100%" height="100%" fill="url(#g)"/>
       <rect width="100%" height="100%" fill="url(#glow)"/>
@@ -100,7 +113,10 @@ export async function makeCover(title: string, author?: string | null): Promise<
     </svg>`
   );
   const base = await sharp(bg).png().toBuffer();
-  const cover = await composeCover(base, title, { png: true });
+  // The words a person chose to make bold (the start of the title): the rest of the title goes gold.
+  const m = String(main || '').trim();
+  const gold = m && m.length < title.length && title.toLowerCase().startsWith(m.toLowerCase()) ? title.slice(m.length).replace(/^[\s:,\u2013-]+/, '') : undefined;
+  const cover = await composeCover(base, title, { png: true, gold });
   if (!author) return cover;
   const by = await fontText(`<span foreground="#C9D1E8">By ${esc(author)}</span>`, REGULAR, 'Montserrat', 700, 110);
   return sharp(cover).composite([{ input: by, left: 66, top: H - 70 }]).png().toBuffer();

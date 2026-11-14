@@ -38,11 +38,13 @@ export async function designSkills(set = 'banner'): Promise<string> {
 // the title, the author and a cut-out picture). It gets the title, the topic, the author and the art direction (the
 // title's main part, which picture fits) and sends back the finished JPEG. null when the link is not set up or anything
 // fails, so the banner is then made here (lib/coverPhoto.ts).
-export async function socialBanner(b: { title: string; topic: string; author?: string | null; main?: string; cutout?: string }): Promise<Buffer | null> {
+// variant: which design to try (0 the usual one; 1, 2, ... from "Try another design"). The Social dashboard is being
+// asked to vary the layout or style by it; until it does, the extra field is ignored there.
+export async function socialBanner(b: { title: string; topic: string; author?: string | null; main?: string; cutout?: string; variant?: number }): Promise<Buffer | null> {
   const secret = process.env.SOCIAL_SKILLS_SECRET || '';
   if (secret.length < 32) return null;
   try {
-    const body = JSON.stringify({ action: 'banner', title: b.title, topic: b.topic, author: b.author || '', main: b.main || '', cutout: b.cutout || '', nonce: crypto.randomBytes(12).toString('hex') });
+    const body = JSON.stringify({ action: 'banner', title: b.title, topic: b.topic, author: b.author || '', main: b.main || '', cutout: b.cutout || '', variant: Math.max(0, Math.floor(Number(b.variant) || 0)), nonce: crypto.randomBytes(12).toString('hex') });
     const ts = String(Math.floor(Date.now() / 1000));
     const sig = crypto.createHmac('sha256', secret).update(`${ts}\n${body}`).digest('hex');
     const res = await fetch(`${BASE()}/api/share/banner`, {

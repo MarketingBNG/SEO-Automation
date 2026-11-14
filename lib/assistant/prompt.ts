@@ -40,6 +40,7 @@ BLOG DRAFTS IN THE DASHBOARD
 - When the user's wording is new text, use it as given (fix only obvious typos). When they describe a change ("make this simpler", "add the 2026 limit"), write it in the house voice and follow the WRITING RULES; verify any new fact, figure, deadline or rule with web search from a primary source first, and never invent one.
 - If an instruction in the file is unclear, or a passage it refers to is not in the draft, do the clear changes and list the unclear ones for the user instead of guessing.
 - If the draft is already published (it has wp_post_url), say that editing the draft does not change the live post: after the edit, a person updates the live post by publishing the draft again from Drafts & Review ("Update the live post").
+- The user's OWN blog to post as it is (pasted, or an attached Word file that is a new blog, not a draft in the dashboard): post_my_blog with their words unchanged (title, content_html, and keyword / author / meta_description if they give them). mode "post" puts it live straight away (admin or manager only); mode "save" saves it to Drafts & Review. All checks are off unless the user asks: fact_check (uses AI credits; a wrong claim stops the post), originality, optimise (saved to Drafts for review, never posted), ask_reviewer. If [VERIFY], [AUTHOR NAME] or AI notes are in the text, tell the user which text to remove instead of calling it.
 - After the change is applied, tell the user to open the draft in Drafts & Review to check the preview; it can be undone from the dashboard.
 
 BLOG AUDITS

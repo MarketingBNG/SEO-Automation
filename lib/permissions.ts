@@ -150,6 +150,9 @@ export function actionFor(method: string, path: string): Action | null {
 
   // Writing
   if (/^\/api\/seranking\/topup/.test(p)) return 'settings.change';
+  // Post my blog: saving to Drafts is content work; posting live also needs blog.publish_now (checked
+  // in lib/myBlog.ts, which knows whether the person asked to post or to save).
+  if (/^\/api\/my-blog(\/banner)?$/.test(p)) return 'content.work';
   if (/^\/api\/assistant\/(chat|upload)/.test(p)) return 'assistant.ask';
   if (/^\/api\/assistant\/(decide|undo)/.test(p)) return 'website.change';
   if (/^\/api\/associate-training/.test(p)) return 'manual.do'; // admin-only actions are checked in the route
