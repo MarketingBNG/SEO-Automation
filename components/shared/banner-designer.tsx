@@ -9,10 +9,11 @@ import { useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { NativeSelect } from '@/components/shared/content-ui';
 import { BANNER_CUTOUTS, BANNER_STYLES } from '@/lib/bannerOptions';
 
-export type BannerAsk = { main: string; cutout: string; variant: number; style: string };
+export type BannerAsk = { main: string; cutout: string; variant: number; style: string; feedback: string };
 
 export function BannerDesigner({
   currentUrl,
@@ -30,6 +31,8 @@ export function BannerDesigner({
   const [main, setMain] = useState('');
   const [cutout, setCutout] = useState('');
   const [style, setStyle] = useState('');
+  // What the person wants changed in the next design ("the statue is cut, add a shadow").
+  const [feedback, setFeedback] = useState('');
   const [variant, setVariant] = useState(0);
   const [candidate, setCandidate] = useState<{ key: string; url: string; source?: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +42,7 @@ export function BannerDesigner({
     setBusy(true);
     setNote('');
     try {
-      const c = await make({ main: main.trim(), cutout, variant, style });
+      const c = await make({ main: main.trim(), cutout, variant, style, feedback: feedback.trim() });
       setCandidate(c);
       // The next press asks for a different design.
       setVariant((v) => v + 1);
@@ -107,6 +110,14 @@ export function BannerDesigner({
           ))}
         </NativeSelect>
       </div>
+      <Textarea
+        rows={2}
+        maxLength={500}
+        value={feedback}
+        onChange={(e) => setFeedback(e.target.value)}
+        placeholder='Comment for the next design (optional), e.g. "The statue is cut at the bottom, make it smaller with a soft shadow" or "Lighter background, bigger title"'
+        aria-label="What to change in the next design"
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" onClick={makeOne} disabled={busy || disabled}>
           {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />}

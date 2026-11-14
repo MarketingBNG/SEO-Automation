@@ -40,11 +40,11 @@ export async function designSkills(set = 'banner'): Promise<string> {
 // fails, so the banner is then made here (lib/coverPhoto.ts).
 // variant: which design to try (0 the usual one; 1, 2, ... from "Try another design"). The Social dashboard is being
 // asked to vary the layout or style by it; until it does, the extra field is ignored there.
-export async function socialBanner(b: { title: string; topic: string; author?: string | null; main?: string; cutout?: string; variant?: number; style?: string }): Promise<Buffer | null> {
+export async function socialBanner(b: { title: string; topic: string; author?: string | null; main?: string; cutout?: string; variant?: number; style?: string; feedback?: string }): Promise<Buffer | null> {
   const secret = process.env.SOCIAL_SKILLS_SECRET || '';
   if (secret.length < 32) return null;
   try {
-    const body = JSON.stringify({ action: 'banner', title: b.title, topic: b.topic, author: b.author || '', main: b.main || '', cutout: b.cutout || '', variant: Math.max(0, Math.floor(Number(b.variant) || 0)), ...(b.style ? { style: b.style } : {}), nonce: crypto.randomBytes(12).toString('hex') });
+    const body = JSON.stringify({ action: 'banner', title: b.title, topic: b.topic, author: b.author || '', main: b.main || '', cutout: b.cutout || '', variant: Math.max(0, Math.floor(Number(b.variant) || 0)), ...(b.style ? { style: b.style } : {}), ...(b.feedback ? { feedback: String(b.feedback).slice(0, 500) } : {}), nonce: crypto.randomBytes(12).toString('hex') });
     const ts = String(Math.floor(Date.now() / 1000));
     const sig = crypto.createHmac('sha256', secret).update(`${ts}\n${body}`).digest('hex');
     const res = await fetch(`${BASE()}/api/share/banner`, {

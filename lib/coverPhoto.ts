@@ -175,7 +175,7 @@ async function makePhotoCover(draftId: number): Promise<string | null> {
 // Order: the Social dashboard's banner, then a stock or AI photo (Pexels picks an unused photo each
 // time; the paid AI photo is not made in Testing mode or while paused), then the local design,
 // which always works. Nothing is saved here: the caller stores the picture as a candidate.
-export async function makeBanner(b: { title: string; topic?: string; author?: string | null; main?: string; cutout?: string; variant?: number; style?: string; draftId?: number }): Promise<{ image: Buffer; ext: 'jpg' | 'png'; source: 'social' | 'photo' | 'local' }> {
+export async function makeBanner(b: { title: string; topic?: string; author?: string | null; main?: string; cutout?: string; variant?: number; style?: string; feedback?: string; draftId?: number }): Promise<{ image: Buffer; ext: 'jpg' | 'png'; source: 'social' | 'photo' | 'local' }> {
   const title = String(b.title || '').trim() || 'USAIndiaCFO';
   const topic = String(b.topic || title).trim();
   const variant = Math.max(0, Math.floor(Number(b.variant) || 0));
@@ -186,7 +186,7 @@ export async function makeBanner(b: { title: string; topic?: string; author?: st
   const cutout = given.cutout || dir?.cutout || '';
   const { socialBanner } = await import('./socialSkills');
   const { isBannerStyle } = await import('./bannerOptions');
-  const social = await socialBanner({ title, topic, author: b.author || null, main, cutout, variant, style: isBannerStyle(b.style) ? b.style : undefined });
+  const social = await socialBanner({ title, topic, author: b.author || null, main, cutout, variant, style: isBannerStyle(b.style) ? b.style : undefined, feedback: String(b.feedback || '').trim().slice(0, 500) || undefined });
   if (social) return { image: social, ext: 'jpg', source: 'social' };
   const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo, b.draftId).catch(() => null));
   if (photo) return { image: await composeCover(photo, title, { gold: dir?.gold }), ext: 'jpg', source: 'photo' };
