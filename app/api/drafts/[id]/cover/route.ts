@@ -6,6 +6,7 @@ import { sqlNow } from '@/lib/time';
 import * as activity from '@/lib/activity';
 import { getActor } from '@/lib/auth';
 import { methodNotAllowed, toId } from '../../../_lib/http';
+import { newPhotoCover } from '@/lib/draftActions';
 
 export const runtime = 'nodejs';
 
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body: any = await req.json().catch(() => ({}));
   const draft = await prisma.drafts.findUnique({ where: { id }, select: { id: true, title: true, author: true, featured_image_path: true, wp_post_url: true, keyword: { select: { keyword: true } } } });
   if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 });
-  const { ensurePhotoCover, bannerCandidate, checkCandidate } = await import('@/lib/coverPhoto');
+  const { bannerCandidate, checkCandidate } = await import('@/lib/coverPhoto');
   if (body?.action === 'preview') {
     const row = await prisma.blog_schedule.findFirst({ where: { draft_id: id }, select: { author: true } });
     const title = draft.title || draft.keyword?.keyword || 'Untitled';
@@ -64,13 +65,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await activity.log('draft.creative_uploaded', { entityType: 'draft', entityId: id, details: `"${draft.title}" (banner chosen from the preview)`, actor: await getActor() });
     return NextResponse.json({ ok: true, key });
   }
-  await prisma.drafts.update({ where: { id }, data: { featured_image_path: null } });
-  const key = await ensurePhotoCover(id).catch(() => null);
-  if (!key) {
-    await prisma.drafts.update({ where: { id }, data: { featured_image_path: draft.featured_image_path } });
-    return NextResponse.json({ error: 'No photo cover could be made. Add PEXELS_API_KEY (free) or OPENAI_API_KEY in Coolify.' }, { status: 400 });
-  }
-  await prisma.drafts.update({ where: { id }, data: { updated_at: sqlNow() } });
-  return NextResponse.json({ ok: true, key });
+  // "New photo cover" (shared with the assistant's draft_new_cover, lib/draftActions.ts).
+  const r = await newPhotoCover(id);
+  return NextResponse.json(r.body, { status: r.status });
 }
 export { methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

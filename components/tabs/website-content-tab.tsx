@@ -121,7 +121,8 @@ function Editor({ type, start, canEdit, onDone }: { type: 'page' | 'post'; start
 
 export default function WebsiteContentTab() {
   const { can } = useRole();
-  const canEdit = can('content.work');
+  // Saving or deleting changes the live website: website.change, as the server checks (lib/permissions.ts).
+  const canEdit = can('website.change');
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ type: 'page' | 'post'; item: any } | null>(null);

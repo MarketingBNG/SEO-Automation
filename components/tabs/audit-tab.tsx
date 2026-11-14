@@ -139,6 +139,8 @@ const linkCls = 'text-primary underline underline-offset-4 break-all';
 export function RewritePublishControls({ audit, busy, onRewrite, onPublish }: { audit: any; busy: any; onRewrite: () => void; onPublish: (s: string) => void }) {
   const [chosen, setWpStatus] = useState('publish');
   const { draftsAllowed } = useSiteStatus();
+  // Sending a rewrite to the website (new post, replaced live post or website draft): blog.publish_now.
+  const canPublish = useRole().can('blog.publish_now');
   const wpStatus = draftsAllowed ? chosen : 'publish';
   const existing = Boolean(audit.wp_post_id);
   const liveLink = safeHref(audit.wp_post_url);
@@ -153,6 +155,15 @@ export function RewritePublishControls({ audit, busy, onRewrite, onPublish }: { 
       {busy === 'rewrite' ? 'Rewriting… (can take 1-2 min)' : 'Rewrite again'}
     </Button>
   );
+
+  if (!canPublish) {
+    return (
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {rewriteButton}
+        <span className="text-sm text-muted-foreground">Only an admin or a manager can send this rewrite to the website.</span>
+      </div>
+    );
+  }
 
   if (existing && audit.rewrite_status === 'sent_as_draft') {
     const draftLink = safeHref(audit.rewrite_wp_draft_url);

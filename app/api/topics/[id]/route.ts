@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import mammoth from 'mammoth';
 import { getActor } from '@/lib/auth';
-import { startTopicBlog, startTopicArticle, attachManual, compareManual, finalizeManual, explainRelevance } from '@/lib/topics';
+import { attachManual } from '@/lib/topics';
+import { topicAction } from '@/lib/topicsView';
 import { methodNotAllowed, toId } from '../../_lib/http';
 
 export const runtime = 'nodejs';
@@ -24,20 +25,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json(await attachManual(id, { title, contentHtml: html, actor }), { status: 202 });
     }
     const body: any = (await req.json().catch(() => ({}))) || {};
-    switch (body.action) {
-      case 'blog':
-        return NextResponse.json(await startTopicBlog(id), { status: 202 });
-      case 'article':
-        return NextResponse.json(await startTopicArticle(id), { status: 202 });
-      case 'relevance':
-        return NextResponse.json(await explainRelevance(id));
-      case 'compare':
-        return NextResponse.json(await compareManual(id));
-      case 'finalize':
-        return NextResponse.json(await finalizeManual(id, String(body.comments || ''), actor), { status: 202 });
-      default:
-        return NextResponse.json({ error: 'action must be blog, article, relevance, compare or finalize' }, { status: 400 });
-    }
+    // Shared with the assistant's topic_action (lib/topicsView.ts).
+    const r = await topicAction(id, body.action, String(body.comments || ''), actor);
+    return NextResponse.json(r.body, { status: r.status });
   } catch (err: any) {
     if (!err.status) console.error(err);
     return NextResponse.json({ error: err.message }, { status: err.status || 500 });
