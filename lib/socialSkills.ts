@@ -47,7 +47,7 @@ export async function socialBanner(b: SocialBannerAsk): Promise<Buffer | null> {
 type SocialBannerAsk = { title: string; topic: string; author?: string | null; main?: string; cutout?: string; variant?: number; style?: string; feedback?: string };
 
 // The banner plus what the Social dashboard did with the person's comment (X-Banner-Applied / X-Banner-Ignored).
-export async function socialBannerResult(b: SocialBannerAsk): Promise<{ image: Buffer; applied: string; ignored: string } | null> {
+export async function socialBannerResult(b: SocialBannerAsk): Promise<{ image: Buffer; applied: string; ignored: string; style: string } | null> {
   const secret = process.env.SOCIAL_SKILLS_SECRET || '';
   if (secret.length < 32) return null;
   try {
@@ -63,7 +63,7 @@ export async function socialBannerResult(b: SocialBannerAsk): Promise<{ image: B
     if (!res.ok || !(res.headers.get('content-type') || '').startsWith('image/')) return null;
     const out = Buffer.from(await res.arrayBuffer());
     if (out.length <= 5000) return null;
-    return { image: out, applied: (res.headers.get('x-banner-applied') || '').slice(0, 300), ignored: (res.headers.get('x-banner-ignored') || '').slice(0, 300) };
+    return { image: out, applied: (res.headers.get('x-banner-applied') || '').slice(0, 300), ignored: (res.headers.get('x-banner-ignored') || '').slice(0, 300), style: (res.headers.get('x-banner-style') || '').slice(0, 40) };
   } catch {
     return null;
   }

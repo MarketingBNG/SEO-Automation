@@ -31,7 +31,7 @@ globalThis.fetch = (async (url: any, init?: any) => {
     const ask = JSON.parse(String(init?.body || '{}'));
     bannerAsks.push(ask);
     // Like the Social dashboard: says what it did with a comment.
-    const said: Record<string, string> = ask.feedback ? { 'X-Banner-Applied': 'smaller picture', 'X-Banner-Ignored': 'move the logo' } : {};
+    const said: Record<string, string> = { 'X-Banner-Style': ask.style || 'classic', ...(ask.feedback ? { 'X-Banner-Applied': 'smaller picture', 'X-Banner-Ignored': 'move the logo' } : {}) };
     return new Response(new Uint8Array(bannerBytes!), { status: 200, headers: { 'Content-Type': 'image/jpeg', ...said } });
   }
   // No design skills shared: the art director (an AI call) is skipped.
@@ -291,6 +291,9 @@ test('Make banner sends the design variant and the steering to the Social dashbo
     assert.equal(b.applied, 'smaller picture');
     assert.equal(b.ignored, 'move the logo');
     assert.equal(a.applied, '');
+    // The layout used comes back, so a comment keeps it when the person left the choice open.
+    assert.equal(a.style, 'classic');
+    assert.equal(b.style, 'split');
     assert.match(a.key, /^covers\/candidate-new-\d+\.jpg$/);
     assert.equal(await checkCandidate(b.key), b.key);
     assert.equal(await checkCandidate('covers/other.png'), null, 'only a candidate can be chosen');

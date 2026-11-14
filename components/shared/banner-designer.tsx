@@ -16,7 +16,7 @@ import { BANNER_CUTOUTS, BANNER_STYLES } from '@/lib/bannerOptions';
 
 export type BannerAsk = { main: string; cutout: string; variant: number; style: string; feedback: string };
 
-type Made = { key: string; url: string; source?: string; main?: string; cutout?: string; applied?: string; ignored?: string };
+type Made = { key: string; url: string; source?: string; main?: string; cutout?: string; applied?: string; ignored?: string; style?: string };
 
 export function BannerDesigner({
   currentUrl,
@@ -61,7 +61,8 @@ export function BannerDesigner({
       const c = await make(ask);
       setCandidate(c);
       setComments(list);
-      setShown({ variant: ask.variant, style: ask.style, main: c.main ?? ask.main, cutout: c.cutout ?? ask.cutout });
+      // The layout the banner service actually used, so a comment keeps it even when the person left the choice to it.
+      setShown({ variant: ask.variant, style: c.style || ask.style, main: c.main ?? ask.main, cutout: c.cutout ?? ask.cutout });
       if (fresh) setVariant((v) => v + 1);
       else setFeedback('');
       const notes: string[] = [];

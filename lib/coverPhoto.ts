@@ -175,7 +175,7 @@ async function makePhotoCover(draftId: number): Promise<string | null> {
 // Order: the Social dashboard's banner, then a stock or AI photo (Pexels picks an unused photo each
 // time; the paid AI photo is not made in Testing mode or while paused), then the local design,
 // which always works. Nothing is saved here: the caller stores the picture as a candidate.
-export async function makeBanner(b: { title: string; topic?: string; author?: string | null; main?: string; cutout?: string; variant?: number; style?: string; feedback?: string; draftId?: number }): Promise<{ image: Buffer; ext: 'jpg' | 'png'; source: 'social' | 'photo' | 'local'; main: string; cutout: string; applied?: string; ignored?: string }> {
+export async function makeBanner(b: { title: string; topic?: string; author?: string | null; main?: string; cutout?: string; variant?: number; style?: string; feedback?: string; draftId?: number }): Promise<{ image: Buffer; ext: 'jpg' | 'png'; source: 'social' | 'photo' | 'local'; main: string; cutout: string; applied?: string; ignored?: string; style?: string }> {
   const title = String(b.title || '').trim() || 'USAIndiaCFO';
   const topic = String(b.topic || title).trim();
   const variant = Math.max(0, Math.floor(Number(b.variant) || 0));
@@ -187,7 +187,7 @@ export async function makeBanner(b: { title: string; topic?: string; author?: st
   const { socialBannerResult } = await import('./socialSkills');
   const { isBannerStyle } = await import('./bannerOptions');
   const social = await socialBannerResult({ title, topic, author: b.author || null, main, cutout, variant, style: isBannerStyle(b.style) ? b.style : undefined, feedback: String(b.feedback || '').trim().slice(0, 500) || undefined });
-  if (social) return { image: social.image, ext: 'jpg', source: 'social', main, cutout, applied: social.applied, ignored: social.ignored };
+  if (social) return { image: social.image, ext: 'jpg', source: 'social', main, cutout, applied: social.applied, ignored: social.ignored, style: social.style };
   const photo = (await pexelsPhoto(topic, dir?.queries).catch(() => null)) || (await aiPhoto(topic, dir?.photo, b.draftId).catch(() => null));
   if (photo) return { image: await composeCover(photo, title, { gold: dir?.gold }), ext: 'jpg', source: 'photo', main, cutout };
   return { image: await makeCover(title, b.author || null, variant, main), ext: 'png', source: 'local', main, cutout };
@@ -195,10 +195,10 @@ export async function makeBanner(b: { title: string; topic?: string; author?: st
 
 // A banner for preview, stored as a candidate (served at /api/uploads/<key>) until a person picks it.
 // scope: the draft id, or 'new' for Post my blog before the draft exists.
-export async function bannerCandidate(b: Parameters<typeof makeBanner>[0], scope: string | number): Promise<{ key: string; source: string; main: string; cutout: string; applied: string; ignored: string }> {
+export async function bannerCandidate(b: Parameters<typeof makeBanner>[0], scope: string | number): Promise<{ key: string; source: string; main: string; cutout: string; applied: string; ignored: string; style: string }> {
   const made = await makeBanner(b);
   const key = await saveFile(`${CANDIDATE_PREFIX}${String(scope).replace(/[^a-z0-9]/gi, '')}-${Date.now()}.${made.ext}`, made.image, made.ext === 'png' ? 'image/png' : 'image/jpeg');
-  return { key, source: made.source, main: made.main, cutout: made.cutout, applied: made.applied || '', ignored: made.ignored || '' };
+  return { key, source: made.source, main: made.main, cutout: made.cutout, applied: made.applied || '', ignored: made.ignored || '', style: made.style || '' };
 }
 
 // Banners made for a preview and never chosen are removed after a day (the scheduler's daily cleanup).

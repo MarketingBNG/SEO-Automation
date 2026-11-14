@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-15
+- (social) Apply my comment keeps the layout the banner was made with, also when the layout was left to the designer.
 - (social) Banner designer: "Apply my comment" redoes the banner on show with the same design and changes only what the comments ask (earlier comments are kept), and says what was changed and what could not be done. "Try another design" makes a fresh one. The layouts are now Classic and Split (navy and marble).
 
 ## 2026-11-14
