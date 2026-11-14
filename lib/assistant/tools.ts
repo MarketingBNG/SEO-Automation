@@ -375,23 +375,32 @@ defineTool({
   run: async (i, ctx) => {
     if (i.fact_check) ctx.emit?.({ type: 'tool_progress', text: 'Fact checking every claim before posting (a few minutes)…' });
     const { postMyBlog } = await import('@/lib/myBlog');
-    const r = await postMyBlog(
-      { title: i.title, html: i.content_html, meta_description: i.meta_description, keyword: i.keyword, author: i.author, reviewer: i.reviewer, mode: i.mode, fact_check: i.fact_check, originality: i.originality, optimise: i.optimise, ask_reviewer: i.ask_reviewer },
-      { me: ctx?.me || null, actor: ctx?.me?.name ? `${ctx.me.name} (assistant)` : 'Assistant' },
-    );
-    if (r.status !== 200 && !r.body?.draftId) throw new Error(r.body?.error || 'The blog could not be posted.');
-    return {
-      result: {
-        draft_id: r.body.draftId ?? null,
-        posted: Boolean(r.body.posted),
-        url: r.body.url || null,
-        message: r.body.message || r.body.error || null,
-        issues: r.body.issues || [],
-        notes: r.body.notes || [],
-      },
-    };
+    // A fact check waits for AI answers: in Testing mode they come from the Claude Code queue, so it runs in the background.
+    if (i.fact_check) {
+      const { runOrQueue } = await import('./tabTools');
+      return runOrQueue(ctx, `Post my blog "${String(i.title).slice(0, 60)}" with a fact check`, 'Drafts & Review', () => postMyBlogResult(i, ctx, postMyBlog));
+    }
+    return postMyBlogResult(i, ctx, postMyBlog);
   },
 });
+
+async function postMyBlogResult(i, ctx, postMyBlog) {
+  const r = await postMyBlog(
+    { title: i.title, html: i.content_html, meta_description: i.meta_description, keyword: i.keyword, author: i.author, reviewer: i.reviewer, mode: i.mode, fact_check: i.fact_check, originality: i.originality, optimise: i.optimise, ask_reviewer: i.ask_reviewer },
+    { me: ctx?.me || null, actor: ctx?.me?.name ? `${ctx.me.name} (assistant)` : 'Assistant' },
+  );
+  if (r.status !== 200 && !r.body?.draftId) throw new Error(r.body?.error || 'The blog could not be posted.');
+  return {
+    result: {
+      draft_id: r.body.draftId ?? null,
+      posted: Boolean(r.body.posted),
+      url: r.body.url || null,
+      message: r.body.message || r.body.error || null,
+      issues: r.body.issues || [],
+      notes: r.body.notes || [],
+    },
+  };
+}
 
 defineTool({
   name: 'list_audits',
@@ -536,9 +545,10 @@ defineTool({
 
 defineTool({
   name: 'keyword_research',
-  kind: 'read',
+  // A paid SE Ranking lookup: shown as a card first, like every step that spends money.
+  kind: 'write',
   description:
-    'SE Ranking keyword research for a seed keyword: similar, related, question-style, or long-tail keywords with volume, difficulty and CPC (US database).',
+    'SE Ranking keyword research for a seed keyword: similar, related, question-style, or long-tail keywords with volume, difficulty and CPC (US database). Uses SE Ranking units, so the person approves it first; ask for several seeds in one turn so they approve them together.',
   input_schema: {
     type: 'object',
     properties: {
@@ -550,16 +560,18 @@ defineTool({
     additionalProperties: false,
   },
   summarize: (i) => `Keyword research: "${i.keyword}" (${i.type || 'related'})`,
+  preview: async () => ({ warning: 'Uses SE Ranking API units.' }),
   run: async ({ keyword, type = 'related', limit = 30 }) => {
-    return researchKeywords(type, keyword, { limit });
+    return { result: await researchKeywords(type, keyword, { limit }) };
   },
 });
 
 defineTool({
   name: 'serp_top_results',
-  kind: 'read',
+  // A paid SerpHouse search: shown as a card first, like every step that spends money.
+  kind: 'write',
   description:
-    'Live Google results (SERPHouse) for a keyword in the US or India: the top organic results, where usaindiacfo.com ranks, the "People also ask" questions (use these for FAQ sections), related searches, and what the Google AI Overview says and cites.',
+    'Live Google results (SERPHouse) for a keyword in the US or India: the top organic results, where usaindiacfo.com ranks, the "People also ask" questions (use these for FAQ sections), related searches, and what the Google AI Overview says and cites. A paid search, so the person approves it first.',
   input_schema: {
     type: 'object',
     properties: { keyword: { type: 'string' }, market: { type: 'string', enum: ['US', 'India'], description: 'Default US.' } },
@@ -567,12 +579,13 @@ defineTool({
     additionalProperties: false,
   },
   summarize: (i) => `Live Google results for "${i.keyword}" (${i.market || 'US'})`,
+  preview: async () => ({ warning: 'Uses one paid SerpHouse search.' }),
   run: async ({ keyword, market }) => {
     const json = await liveSearch({ q: keyword, loc: market === 'India' ? 'India' : 'United States' });
     const results = json.results?.results || {};
     const organic = results.organic || [];
     const ours = organic.find((r) => String(r.link || '').includes('usaindiacfo.com'));
-    return {
+    return { result: {
       keyword,
       market: market || 'US',
       ourPosition: ours ? ours.position : null,
@@ -580,7 +593,7 @@ defineTool({
       peopleAlsoAsk: peopleAlsoAsk({ serp: json }).map((q) => q.question),
       relatedSearches: (results.related_search || []).map((r) => decode(r.title)),
       aiOverview: aiOverviewSummary(json),
-    };
+    } };
   },
 });
 
@@ -854,6 +867,13 @@ defineTool({
   summarize: (i) => `Run a blog audit on ${i.post_id ? `website post #${i.post_id}` : i.source_url ? i.source_url : 'the pasted blog'}`,
   run: async (i, ctx) => {
     ctx.emit?.({ type: 'tool_progress', text: 'Auditing the blog (researching every claim, 1-2 minutes)…' });
+    // Testing mode: the audit's AI steps wait for Claude Code, so it runs as Check a blog runs it.
+    const { aiMode } = await import('@/lib/aiQueue');
+    if ((await aiMode()) === 'testing') {
+      const { startAudit } = await import('@/lib/auditJobs');
+      const row: any = await startAudit({ title: i.title, contentHtml: i.content_html, sourceUrl: i.source_url, wpPostId: i.post_id, actor: ctx?.me?.name ? `${ctx.me.name} (assistant)` : 'Assistant' });
+      return { result: { audit_id: row.id, started: true, note: 'Testing mode: the audit runs in the background and its AI steps wait in the Claude Code queue. See it in Check a blog (or audit_get) when Claude Code has answered.' } };
+    }
     const audit = await createAudit({ title: i.title, contentHtml: i.content_html, sourceUrl: i.source_url, wpPostId: i.post_id });
     return {
       result: {
@@ -1062,8 +1082,6 @@ const READ_NEEDS: Record<string, Action> = {
   search_console_pages: 'reports.view',
   ga4_overview: 'reports.view',
   rank_tracking: 'reports.view',
-  keyword_research: 'reports.view',
-  serp_top_results: 'reports.view',
   clarity_overview: 'reports.view',
   pagespeed_check: 'reports.view',
   zoho_leads: 'reports.view',
@@ -1089,6 +1107,9 @@ const WRITE_NEEDS: Record<string, Action | Action[]> = {
   add_keywords_to_pipeline: 'content.work',
   save_people_also_ask: 'content.work',
   run_blog_audit: 'content.work',
+  // Paid lookups (SE Ranking units, SerpHouse searches), open to the roles that see reports.
+  keyword_research: 'reports.view',
+  serp_top_results: 'reports.view',
 };
 
 // Every action a tool needs for this input (all of them are required).

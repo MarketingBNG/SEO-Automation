@@ -18,6 +18,14 @@ async function claimNextPending(): Promise<any | null> {
   return null;
 }
 
+// Why a chosen keyword cannot be written now, or null when it can (pending or failed, not a calendar blog).
+export function generationRefusal(k: { status: string; batch_name?: string | null }): string | null {
+  if (k.status === 'generating') return 'This keyword is already being generated';
+  if (String(k.batch_name || '').startsWith('Strategy #')) return 'This blog is on the Monthly Strategy calendar, which writes it by itself. Use its calendar row instead.';
+  if (!['pending', 'failed'].includes(k.status)) return `This keyword is already written (status ${k.status}); its draft is in Drafts & Review. Add it again as a new keyword only if a second blog is really wanted.`;
+  return null;
+}
+
 // The keyword a new run writes (claimed: status 'generating'), or the error the route answers.
 export async function claimKeywordForGeneration(keywordId?: unknown): Promise<{ keyword: any } | { error: Result }> {
   let keyword: any;
@@ -25,8 +33,12 @@ export async function claimKeywordForGeneration(keywordId?: unknown): Promise<{ 
     const n = Number(keywordId);
     keyword = Number.isSafeInteger(n) ? await prisma.keywords.findUnique({ where: { id: n } }) : null;
     if (keyword) {
-      // Atomic claim: a keyword already being generated (another tab, double-click) is not started twice.
-      const r = await prisma.keywords.updateMany({ where: { id: keyword.id, status: { not: 'generating' } }, data: { status: 'generating' } });
+      // A chosen keyword is written only while it waits to be written (pending) or failed. One already
+      // written (drafted) or on the Monthly Strategy calendar ('Strategy #', written by its schedule)
+      // would become a second, paid copy. Atomic: another tab or a double-click cannot start it twice.
+      const why = generationRefusal(keyword);
+      if (why) return { error: { status: 409, body: { error: why } } };
+      const r = await prisma.keywords.updateMany({ where: { id: keyword.id, status: { in: ['pending', 'failed'] }, OR: [{ batch_name: null }, { NOT: { batch_name: { startsWith: 'Strategy #' } } }] }, data: { status: 'generating' } });
       if (r.count !== 1) return { error: { status: 409, body: { error: 'This keyword is already being generated' } } };
     }
   } else {

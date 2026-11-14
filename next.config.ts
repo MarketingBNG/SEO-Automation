@@ -2,6 +2,9 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // The build's type check leaves out tests/ (tsconfig.build.json): they never ship, `npm run
+  // typecheck` still checks them, and with them the check ran out of the default memory.
+  typescript: { tsconfigPath: 'tsconfig.build.json' },
   // Shown at the bottom of the sidebar, so anyone can tell which version is live.
   env: { NEXT_PUBLIC_BUILD_TIME: new Date().toISOString() },
   // Node-only libraries: load them from node_modules at runtime instead of bundling.
