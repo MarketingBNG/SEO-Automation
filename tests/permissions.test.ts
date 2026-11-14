@@ -37,7 +37,9 @@ test('reports: managers view but do not download; analysts download; users neith
 
 test('users ask the assistant and do manual tasks, nothing else', () => {
   assert.equal(allowed('user', 'POST', '/api/assistant/chat'), true);
-  assert.equal(allowed('user', 'POST', '/api/assistant/decide'), false, 'cannot approve website changes');
+  // Approving a card is open to the assistant's users; each tool checks its own permission (tests/assistant-tools.test.ts).
+  assert.equal(actionFor('POST', '/api/assistant/decide'), 'assistant.ask');
+  assert.equal(allowed('user', 'POST', '/api/assistant/undo'), false, 'cannot undo website changes');
   assert.equal(allowed('user', 'POST', '/api/strategy/manual'), true);
   assert.equal(allowed('user', 'POST', '/api/generate'), false);
   assert.equal(allowed('user', 'POST', '/api/keywords/add'), false);
@@ -54,6 +56,22 @@ test('Post my blog: content roles save to Drafts; posting live also needs blog.p
   assert.equal(can('manager', 'blog.publish_now'), true);
   assert.equal(can('analyst', 'blog.publish_now'), false);
   assert.equal(can('user', 'blog.publish_now'), false);
+});
+
+test('routes that change the website need more than content work', () => {
+  // Replacing a live post with an audit's rewrite: the same permission as publishing a blog straight away.
+  for (const p of ['/api/audit/7/publish', '/api/audit/7/publish/']) {
+    assert.equal(actionFor('POST', p), 'blog.publish_now', p);
+    assert.equal(allowed('analyst', 'POST', p), false, p);
+    assert.equal(allowed('manager', 'POST', p), true, p);
+  }
+  // Rewriting an audit stays content work (nothing reaches the website).
+  assert.equal(actionFor('POST', '/api/audit/7/rewrite'), 'content.work');
+  // Website Content: saving or deleting a page or post changes the live website.
+  assert.equal(actionFor('POST', '/api/site-content'), 'website.change');
+  assert.equal(actionFor('GET', '/api/site-content'), null);
+  assert.equal(allowed('user', 'POST', '/api/site-content'), false);
+  assert.equal(allowed('analyst', 'POST', '/api/site-content'), true);
 });
 
 test('blocking: admin blocks anyone but the owner; managers block users and analysts', () => {

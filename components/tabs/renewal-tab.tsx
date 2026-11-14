@@ -27,6 +27,8 @@ export default function RenewalTab() {
   const publishWpStatus = draftsAllowed ? chosenWpStatus : 'publish';
   const [message, setMessage] = useState<string | null>(null);
   const canDownload = useRole().can('reports.download');
+  // Replacing the live post (or saving a website draft of it) changes the website: blog.publish_now.
+  const canPublish = useRole().can('blog.publish_now');
 
   const loadPosts = useCallback(async () => {
     setLoadingPosts(true);
@@ -297,15 +299,19 @@ export default function RenewalTab() {
                     <Button variant="outline" onClick={() => rewriteAudit(activeAudit.id)} disabled={busyActive}>
                       Rewrite again
                     </Button>
-                    {draftsAllowed && (
+                    {canPublish && draftsAllowed && (
                       <NativeSelect value={publishWpStatus} onChange={(e) => setPublishWpStatus(e.target.value)}>
                         <option value="draft">Save as a separate website draft (live post unchanged)</option>
                         <option value="publish">Replace live now</option>
                       </NativeSelect>
                     )}
-                    <Button onClick={() => publishAudit(activeAudit.id)} disabled={busyActive}>
-                      {busyActive ? 'Working…' : publishWpStatus === 'draft' ? 'Approve – save as a draft' : 'Approve – replace the live post'}
-                    </Button>
+                    {canPublish ? (
+                      <Button onClick={() => publishAudit(activeAudit.id)} disabled={busyActive}>
+                        {busyActive ? 'Working…' : publishWpStatus === 'draft' ? 'Approve – save as a draft' : 'Approve – replace the live post'}
+                      </Button>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Only an admin or a manager can replace the live post.</span>
+                    )}
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">Already replaced live.</p>

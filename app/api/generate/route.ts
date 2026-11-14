@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import { claimKeywordForGeneration } from '@/lib/generateActions';
 import { runBlogJob } from '@/lib/blogJob';
 import { methodNotAllowed } from '../_lib/http';
 
@@ -12,35 +12,13 @@ export const runtime = 'nodejs';
 // Vercel Hobby plan limit. On Pro, raise to 800 for long generations.
 export const maxDuration = 300;
 
-// Claims the oldest pending keyword atomically: two concurrent requests can't both pick the same one.
-async function claimNextPending(): Promise<any | null> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    // Calendar blogs ('Strategy #') are written by their schedule, never as a separate blog here.
-    const candidate = await prisma.keywords.findFirst({ where: { status: 'pending', OR: [{ batch_name: null }, { NOT: { batch_name: { startsWith: 'Strategy #' } } }] }, orderBy: { id: 'asc' } });
-    if (!candidate) return null;
-    const res = await prisma.keywords.updateMany({ where: { id: candidate.id, status: 'pending' }, data: { status: 'generating' } });
-    if (res.count === 1) return { ...candidate, status: 'generating' };
-  }
-  return null;
-}
-
 export async function POST(req: NextRequest) {
   const { keywordId }: any = (await req.json().catch(() => ({}))) || {};
 
-  let keyword: any;
-  if (keywordId) {
-    const n = Number(keywordId);
-    keyword = Number.isSafeInteger(n) ? await prisma.keywords.findUnique({ where: { id: n } }) : null;
-    if (keyword) {
-      // Atomic claim: a keyword already being generated (another tab, double-click) is not started twice.
-      const r = await prisma.keywords.updateMany({ where: { id: keyword.id, status: { not: 'generating' } }, data: { status: 'generating' } });
-      if (r.count !== 1) return NextResponse.json({ error: 'This keyword is already being generated' }, { status: 409 });
-    }
-  } else {
-    keyword = await claimNextPending();
-  }
-
-  if (!keyword) return NextResponse.json({ error: 'No pending keyword found' }, { status: 404 });
+  // The claim is shared with the assistant's generate_blog_draft (lib/generateActions.ts).
+  const claimed = await claimKeywordForGeneration(keywordId);
+  if ('error' in claimed) return NextResponse.json(claimed.error.body, { status: claimed.error.status });
+  const keyword = claimed.keyword;
 
   // The run belongs to the server, not to the browser tab: closing the tab, a dropped connection or a
   // proxy timeout no longer stops it. Only the Stop button (POST /api/generate/stop) does.

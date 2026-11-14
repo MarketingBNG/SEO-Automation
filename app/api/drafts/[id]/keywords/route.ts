@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { analyzeKeywords, buildKeywordPlan } from '@/lib/blogKeywords';
+import { buildKeywordPlan } from '@/lib/blogKeywords';
+import { loadDraftWithKeyword, draftKeywordAnalysis } from '@/lib/draftKeywords';
 import { gatherBrief } from '@/lib/researchBrief';
 import { methodNotAllowed, toId } from '../../../_lib/http';
 
@@ -9,23 +10,8 @@ export const maxDuration = 120;
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// Was: SELECT drafts.*, keywords.keyword AS keyword FROM drafts JOIN keywords ... WHERE drafts.id = ?
-async function load(nid: number) {
-  const found: any = await prisma.drafts.findUnique({ where: { id: nid }, include: { keyword: { select: { keyword: true } } } });
-  if (!found || !found.keyword) return null;
-  const { keyword, ...rest } = found;
-  return { ...rest, keyword: keyword.keyword };
-}
-
-async function analysis(draft: any) {
-  let plan = null;
-  try {
-    plan = draft.keyword_plan ? JSON.parse(draft.keyword_plan) : null;
-  } catch {
-    plan = null;
-  }
-  return analyzeKeywords({ keyword: draft.keyword, title: draft.title, meta: draft.meta_description, content: draft.content_html, plan });
-}
+const load = loadDraftWithKeyword;
+const analysis = draftKeywordAnalysis;
 
 // GET: which keywords this draft uses, by type, checked against the article as it is now.
 export async function GET(req: NextRequest, { params }: Ctx) {

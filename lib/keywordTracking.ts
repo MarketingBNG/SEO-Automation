@@ -131,3 +131,15 @@ export async function strategyTrackingStatus(strategyId: number) {
   await settings.set('strategy_tracking_status', JSON.stringify(status));
   return status;
 }
+
+// "Add keywords to tracking now" (Settings): runs in the background (it also runs every Monday), so a
+// closed page or a dropped connection cannot stop it. Shared by POST /api/seranking/topup and the
+// assistant's seranking_topup. Uses SE Ranking units.
+export async function startKeywordTopup(): Promise<{ started: boolean; running?: boolean }> {
+  const { timed, startedAt } = await import('./jobTimer');
+  if (startedAt('keywords-topup')) return { started: false, running: true };
+  void timed('keywords-topup', 'keywords', 'Adding keywords to SE Ranking tracking', () => topUpTrackedKeywords())
+    .then((r) => settings.set('last_keyword_topup_result', JSON.stringify({ ...r, at: new Date().toISOString() })))
+    .catch((e) => settings.set('last_keyword_topup_result', JSON.stringify({ error: e.message, at: new Date().toISOString() })));
+  return { started: true };
+}

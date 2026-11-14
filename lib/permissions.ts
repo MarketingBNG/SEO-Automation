@@ -153,8 +153,16 @@ export function actionFor(method: string, path: string): Action | null {
   // Post my blog: saving to Drafts is content work; posting live also needs blog.publish_now (checked
   // in lib/myBlog.ts, which knows whether the person asked to post or to save).
   if (/^\/api\/my-blog(\/banner)?$/.test(p)) return 'content.work';
-  if (/^\/api\/assistant\/(chat|upload)/.test(p)) return 'assistant.ask';
-  if (/^\/api\/assistant\/(decide|undo)/.test(p)) return 'website.change';
+  // Replacing a live post with an audit's rewrite (Check a blog / Refresh a live blog) changes the
+  // website at once: the same permission as publishing a calendar blog straight away.
+  if (/^\/api\/audit\/[^/]+\/publish$/.test(p)) return 'blog.publish_now';
+  // Website Content: saving or deleting a page or post changes the live website.
+  if (/^\/api\/site-content$/.test(p)) return 'website.change';
+  // Approving the assistant's cards: each tool checks its own permission for the person who approves
+  // it (WRITE_NEEDS in lib/assistant/tools.ts, at the card and again when it runs), so a user may
+  // approve, say, a manual task they are allowed to do, and nothing their role cannot do.
+  if (/^\/api\/assistant\/(chat|upload|decide)/.test(p)) return 'assistant.ask';
+  if (/^\/api\/assistant\/undo/.test(p)) return 'website.change';
   if (/^\/api\/associate-training/.test(p)) return 'manual.do'; // admin-only actions are checked in the route
   if (/^\/api\/strategy\/manual|^\/api\/strategy\/backlinks\//.test(p)) return 'manual.do';
   // Everyone on the team (managers and associates too) can approve, reject, pause and reschedule calendar blogs.
