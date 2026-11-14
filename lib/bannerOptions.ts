@@ -9,6 +9,17 @@ export const BANNER_CUTOUTS: { value: string; label: string }[] = [
   { value: 'legal', label: 'Legal (scales of justice, gavel)' },
   { value: 'business', label: 'Business (modern office tower)' },
 ];
+// The banner layouts the Social Media dashboard offers (its banner_styles answer); empty = it chooses.
+// split, statue and floor use the marble statues from the Social picture library.
+export const BANNER_STYLES: { value: string; label: string }[] = [
+  { value: 'classic', label: 'Classic' },
+  { value: 'split', label: 'Split (marble statue)' },
+  { value: 'circle', label: 'Circle' },
+  { value: 'statue', label: 'Statue (marble)' },
+  { value: 'card', label: 'Card' },
+  { value: 'floor', label: 'Floor (marble statue)' },
+];
+export const isBannerStyle = (v: unknown) => BANNER_STYLES.some((s) => s.value === v);
 export const isBannerCutout = (v: unknown) => BANNER_CUTOUTS.some((c) => c.value === v);
 
 // A banner made for preview is kept under this prefix until a person picks it ("Use this banner").

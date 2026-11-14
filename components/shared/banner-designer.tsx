@@ -10,9 +10,9 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/shared/content-ui';
-import { BANNER_CUTOUTS } from '@/lib/bannerOptions';
+import { BANNER_CUTOUTS, BANNER_STYLES } from '@/lib/bannerOptions';
 
-export type BannerAsk = { main: string; cutout: string; variant: number };
+export type BannerAsk = { main: string; cutout: string; variant: number; style: string };
 
 export function BannerDesigner({
   currentUrl,
@@ -29,6 +29,7 @@ export function BannerDesigner({
 }) {
   const [main, setMain] = useState('');
   const [cutout, setCutout] = useState('');
+  const [style, setStyle] = useState('');
   const [variant, setVariant] = useState(0);
   const [candidate, setCandidate] = useState<{ key: string; url: string; source?: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,7 +39,7 @@ export function BannerDesigner({
     setBusy(true);
     setNote('');
     try {
-      const c = await make({ main: main.trim(), cutout, variant });
+      const c = await make({ main: main.trim(), cutout, variant, style });
       setCandidate(c);
       // The next press asks for a different design.
       setVariant((v) => v + 1);
@@ -94,6 +95,14 @@ export function BannerDesigner({
           {BANNER_CUTOUTS.map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}
+            </option>
+          ))}
+        </NativeSelect>
+        <NativeSelect value={style} onChange={(e) => setStyle(e.target.value)} aria-label="Banner layout">
+          <option value="">Layout: a different one each time</option>
+          {BANNER_STYLES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
             </option>
           ))}
         </NativeSelect>
