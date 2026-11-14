@@ -1,7 +1,8 @@
 'use client';
 
 // Banner (cover) design with a preview before posting: "Make banner" / "Try another design" makes a
-// banner and shows it next to the current one; "Use this banner" keeps it, and posting uses the chosen
+// fresh banner and shows it next to the current one; "Apply my comment" redoes the banner on show with
+// the same design (same variant, layout, words and picture) and changes only what the comments ask; "Use this banner" keeps it, and posting uses the chosen
 // banner (never an automatic one instead). The person can steer it: the title words to make bold
 // (art direction "main") and the picture on it (art direction "cutout"). Used by Drafts & Review
 // (an open draft) and Post my blog (before the draft exists).
@@ -15,6 +16,8 @@ import { BANNER_CUTOUTS, BANNER_STYLES } from '@/lib/bannerOptions';
 
 export type BannerAsk = { main: string; cutout: string; variant: number; style: string; feedback: string };
 
+type Made = { key: string; url: string; source?: string; main?: string; cutout?: string; applied?: string; ignored?: string };
+
 export function BannerDesigner({
   currentUrl,
   currentLabel,
@@ -24,29 +27,49 @@ export function BannerDesigner({
 }: {
   currentUrl: string | null; // the banner the post carries now, or null for "no banner yet"
   currentLabel?: string;
-  make: (ask: BannerAsk) => Promise<{ key: string; url: string; source?: string }>;
+  make: (ask: BannerAsk) => Promise<Made>;
   choose: (key: string) => Promise<void>;
   disabled?: boolean;
 }) {
   const [main, setMain] = useState('');
   const [cutout, setCutout] = useState('');
   const [style, setStyle] = useState('');
-  // What the person wants changed in the next design ("the statue is cut, add a shadow").
+  // What the person wants changed in the banner on show ("the statue is cut, add a shadow").
   const [feedback, setFeedback] = useState('');
+  // Comments already applied to the banner on show: each new comment is added to them, so earlier
+  // fixes stay. A fresh design starts the list again.
+  const [comments, setComments] = useState<string[]>([]);
   const [variant, setVariant] = useState(0);
-  const [candidate, setCandidate] = useState<{ key: string; url: string; source?: string } | null>(null);
+  // The design on show: its variant, layout, bold words and picture, reused by "Apply my comment".
+  const [shown, setShown] = useState<{ variant: number; style: string; main: string; cutout: string } | null>(null);
+  const [candidate, setCandidate] = useState<Made | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
 
-  async function makeOne() {
+  // fresh: a new design (next variant, no comments). Otherwise the design on show again, with every
+  // comment so far plus the new one, and nothing else changed.
+  async function makeOne(fresh: boolean) {
+    const comment = feedback.trim();
+    if (!fresh && (!shown || !comment)) return;
     setBusy(true);
     setNote('');
     try {
-      const c = await make({ main: main.trim(), cutout, variant, style, feedback: feedback.trim() });
+      const list = fresh ? [] : [...comments, comment];
+      const ask: BannerAsk = fresh
+        ? { main: main.trim(), cutout, variant, style, feedback: '' }
+        : { main: shown!.main, cutout: shown!.cutout, variant: shown!.variant, style: shown!.style, feedback: list.join(' | ') };
+      const c = await make(ask);
       setCandidate(c);
-      // The next press asks for a different design.
-      setVariant((v) => v + 1);
-      if (c.source === 'local') setNote('Made with the built-in design (the banner service is not set up or did not answer). Try another design for a different colour and layout.');
+      setComments(list);
+      setShown({ variant: ask.variant, style: ask.style, main: c.main ?? ask.main, cutout: c.cutout ?? ask.cutout });
+      if (fresh) setVariant((v) => v + 1);
+      else setFeedback('');
+      const notes: string[] = [];
+      if (c.source === 'local') notes.push('Made with the built-in design (the banner service is not set up or did not answer).');
+      if (!fresh && c.applied) notes.push(`Changed: ${c.applied}.`);
+      if (!fresh && c.ignored) notes.push(`Could not do: ${c.ignored}.`);
+      if (!fresh && !c.applied && !c.ignored && c.source !== 'local') notes.push('Your comment was sent with the same design.');
+      setNote(notes.join(' '));
     } catch (e: any) {
       setNote(`Error: ${e.message}`);
     } finally {
@@ -102,7 +125,7 @@ export function BannerDesigner({
           ))}
         </NativeSelect>
         <NativeSelect value={style} onChange={(e) => setStyle(e.target.value)} aria-label="Banner layout">
-          <option value="">Layout: a different one each time</option>
+          <option value="">Layout: let the designer choose</option>
           {BANNER_STYLES.map((s) => (
             <option key={s.value} value={s.value}>
               {s.label}
@@ -115,13 +138,18 @@ export function BannerDesigner({
         maxLength={500}
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
-        placeholder='Comment for the next design (optional), e.g. "The statue is cut at the bottom, make it smaller with a soft shadow" or "Lighter background, bigger title"'
-        aria-label="What to change in the next design"
+        placeholder='What to change in this banner, e.g. "The statue is cut at the bottom, make it smaller" or "Bigger title". Only that is changed.'
+        aria-label="What to change in the banner on show"
       />
+      {comments.length > 0 && <p className="text-xs text-muted-foreground">Comments applied so far: {comments.join(' · ')}</p>}
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" onClick={makeOne} disabled={busy || disabled}>
+        <Button variant="outline" onClick={() => makeOne(false)} disabled={busy || disabled || !shown || !feedback.trim()} title={!shown ? 'Make a banner first' : !feedback.trim() ? 'Write what to change first' : 'Same design, only your comment changed'}>
           {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-          {candidate || variant > 0 ? 'Try another design' : 'Make banner'}
+          Apply my comment
+        </Button>
+        <Button variant="outline" onClick={() => makeOne(true)} disabled={busy || disabled}>
+          {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          {shown ? 'Try another design' : 'Make banner'}
         </Button>
         <Button onClick={keep} disabled={busy || disabled || !candidate}>
           Use this banner

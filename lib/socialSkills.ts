@@ -40,7 +40,14 @@ export async function designSkills(set = 'banner'): Promise<string> {
 // fails, so the banner is then made here (lib/coverPhoto.ts).
 // variant: which design to try (0 the usual one; 1, 2, ... from "Try another design"). The Social dashboard is being
 // asked to vary the layout or style by it; until it does, the extra field is ignored there.
-export async function socialBanner(b: { title: string; topic: string; author?: string | null; main?: string; cutout?: string; variant?: number; style?: string; feedback?: string }): Promise<Buffer | null> {
+export async function socialBanner(b: SocialBannerAsk): Promise<Buffer | null> {
+  return (await socialBannerResult(b))?.image || null;
+}
+
+type SocialBannerAsk = { title: string; topic: string; author?: string | null; main?: string; cutout?: string; variant?: number; style?: string; feedback?: string };
+
+// The banner plus what the Social dashboard did with the person's comment (X-Banner-Applied / X-Banner-Ignored).
+export async function socialBannerResult(b: SocialBannerAsk): Promise<{ image: Buffer; applied: string; ignored: string } | null> {
   const secret = process.env.SOCIAL_SKILLS_SECRET || '';
   if (secret.length < 32) return null;
   try {
@@ -55,7 +62,8 @@ export async function socialBanner(b: { title: string; topic: string; author?: s
     });
     if (!res.ok || !(res.headers.get('content-type') || '').startsWith('image/')) return null;
     const out = Buffer.from(await res.arrayBuffer());
-    return out.length > 5000 ? out : null;
+    if (out.length <= 5000) return null;
+    return { image: out, applied: (res.headers.get('x-banner-applied') || '').slice(0, 300), ignored: (res.headers.get('x-banner-ignored') || '').slice(0, 300) };
   } catch {
     return null;
   }

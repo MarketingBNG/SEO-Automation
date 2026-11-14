@@ -53,7 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const title = draft.title || draft.keyword?.keyword || 'Untitled';
     try {
       const c = await bannerCandidate({ title, topic: `${title} ${draft.keyword?.keyword || ''}`.trim(), author: row?.author || draft.author || null, main: body.main, cutout: body.cutout, variant: body.variant, style: body.style, feedback: body.feedback, draftId: id }, id);
-      return NextResponse.json({ ok: true, key: c.key, url: `/api/uploads/${c.key}`, source: c.source });
+      return NextResponse.json({ ok: true, key: c.key, url: `/api/uploads/${c.key}`, source: c.source, main: c.main, cutout: c.cutout, applied: c.applied, ignored: c.ignored });
     } catch (e: any) {
       return NextResponse.json({ error: `The banner could not be made: ${String(e?.message || e).slice(0, 200)}` }, { status: 500 });
     }

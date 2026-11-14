@@ -4,6 +4,9 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-15
+- (social) Banner designer: "Apply my comment" redoes the banner on show with the same design and changes only what the comments ask (earlier comments are kept), and says what was changed and what could not be done. "Try another design" makes a fresh one. The layouts are now Classic and Split (navy and marble).
+
 ## 2026-11-14
 - (social) Banner designer: a comment box for the next design ("the statue is cut, add a shadow"); it goes to the Social dashboard with Try another design, as many times as needed.
 - (ops) The assistant can now do the work of every tab, each behind that tab's permission and an approval card: Blog Calendar (approve, reject, pause, reschedule, publish now), Monthly Strategy (generate, refresh, edit, manual and backlink tasks), Topics, Write a blog (generate, stop, retry), Drafts & Review (status, author, recheck and fix, originality, optimise, new cover, facts, restore, publish), Check a blog (rewrite, publish live), Writing rules, Website Content, reports, meeting insights and the AI credits status. Paid lookups also wait for a card. Team & Roles, AI credit controls and Testing/Live mode, connections, taking a training test and strategy approval stay in the dashboard only. A chat left stuck as running is freed after 15 minutes.

@@ -28,8 +28,11 @@ globalThis.fetch = (async (url: any, init?: any) => {
   const u = String(url instanceof Request ? url.url : url);
   const reply = (status: number, json: any) => new Response(JSON.stringify(json), { status, headers: { 'Content-Type': 'application/json' } });
   if (u === `${SOCIAL}/api/share/banner`) {
-    bannerAsks.push(JSON.parse(String(init?.body || '{}')));
-    return new Response(new Uint8Array(bannerBytes!), { status: 200, headers: { 'Content-Type': 'image/jpeg' } });
+    const ask = JSON.parse(String(init?.body || '{}'));
+    bannerAsks.push(ask);
+    // Like the Social dashboard: says what it did with a comment.
+    const said: Record<string, string> = ask.feedback ? { 'X-Banner-Applied': 'smaller picture', 'X-Banner-Ignored': 'move the logo' } : {};
+    return new Response(new Uint8Array(bannerBytes!), { status: 200, headers: { 'Content-Type': 'image/jpeg', ...said } });
   }
   // No design skills shared: the art director (an AI call) is skipped.
   if (u === `${SOCIAL}/api/share/skills`) return reply(200, { text: '' });
@@ -278,9 +281,16 @@ test('Make banner sends the design variant and the steering to the Social dashbo
   bannerAsks.length = 0;
   await withEnv({ SOCIAL_SKILLS_SECRET: SOCIAL_SECRET, SOCIAL_DASHBOARD_URL: SOCIAL }, async () => {
     const a = await bannerCandidate({ title: 'ITIN guide: how to apply from India', main: 'ITIN guide', cutout: 'tax-documents', variant: 0 }, 'new');
-    const b = await bannerCandidate({ title: 'ITIN guide: how to apply from India', main: 'ITIN guide', cutout: 'tax-documents', variant: 3, style: 'statue', feedback: 'The statue is cut, add a shadow' }, 'new');
+    const b = await bannerCandidate({ title: 'ITIN guide: how to apply from India', main: 'ITIN guide', cutout: 'tax-documents', variant: 3, style: 'split', feedback: 'The statue is cut, add a shadow' }, 'new');
     await bannerCandidate({ title: 'ITIN guide: how to apply from India', variant: 4, style: 'not-a-layout' }, 'new');
     assert.equal(a.source, 'social');
+    // The design's words and picture come back, so "Apply my comment" can send the same ones again,
+    // and the comment's result is passed on to the screen.
+    assert.equal(b.main, 'ITIN guide');
+    assert.equal(b.cutout, 'tax-documents');
+    assert.equal(b.applied, 'smaller picture');
+    assert.equal(b.ignored, 'move the logo');
+    assert.equal(a.applied, '');
     assert.match(a.key, /^covers\/candidate-new-\d+\.jpg$/);
     assert.equal(await checkCandidate(b.key), b.key);
     assert.equal(await checkCandidate('covers/other.png'), null, 'only a candidate can be chosen');
@@ -288,7 +298,7 @@ test('Make banner sends the design variant and the steering to the Social dashbo
   assert.equal(bannerAsks.length, 3);
   assert.deepEqual(bannerAsks.map((x) => x.variant), [0, 3, 4]);
   // The chosen layout is sent; an unknown one, or none, is not (the Social dashboard then chooses).
-  assert.deepEqual(bannerAsks.map((x) => x.style), [undefined, 'statue', undefined]);
+  assert.deepEqual(bannerAsks.map((x) => x.style), [undefined, 'split', undefined]);
   assert.deepEqual(bannerAsks.map((x) => x.feedback), [undefined, 'The statue is cut, add a shadow', undefined]);
   assert.equal(bannerAsks[1].main, 'ITIN guide');
   assert.equal(bannerAsks[1].cutout, 'tax-documents');

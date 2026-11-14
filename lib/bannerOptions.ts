@@ -11,13 +11,11 @@ export const BANNER_CUTOUTS: { value: string; label: string }[] = [
 ];
 // The banner layouts the Social Media dashboard offers (its banner_styles answer); empty = it chooses.
 // split, statue and floor use the marble statues from the Social picture library.
+// The owner keeps two: Classic, and Split (navy with the title on one side, marble on the other,
+// a light blue line along the bottom).
 export const BANNER_STYLES: { value: string; label: string }[] = [
   { value: 'classic', label: 'Classic' },
-  { value: 'split', label: 'Split (marble statue)' },
-  { value: 'circle', label: 'Circle' },
-  { value: 'statue', label: 'Statue (marble)' },
-  { value: 'card', label: 'Card' },
-  { value: 'floor', label: 'Floor (marble statue)' },
+  { value: 'split', label: 'Split: navy and marble' },
 ];
 export const isBannerStyle = (v: unknown) => BANNER_STYLES.some((s) => s.value === v);
 export const isBannerCutout = (v: unknown) => BANNER_CUTOUTS.some((c) => c.value === v);
