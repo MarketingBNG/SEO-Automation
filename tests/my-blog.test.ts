@@ -278,14 +278,17 @@ test('Make banner sends the design variant and the steering to the Social dashbo
   bannerAsks.length = 0;
   await withEnv({ SOCIAL_SKILLS_SECRET: SOCIAL_SECRET, SOCIAL_DASHBOARD_URL: SOCIAL }, async () => {
     const a = await bannerCandidate({ title: 'ITIN guide: how to apply from India', main: 'ITIN guide', cutout: 'tax-documents', variant: 0 }, 'new');
-    const b = await bannerCandidate({ title: 'ITIN guide: how to apply from India', main: 'ITIN guide', cutout: 'tax-documents', variant: 3 }, 'new');
+    const b = await bannerCandidate({ title: 'ITIN guide: how to apply from India', main: 'ITIN guide', cutout: 'tax-documents', variant: 3, style: 'statue' }, 'new');
+    await bannerCandidate({ title: 'ITIN guide: how to apply from India', variant: 4, style: 'not-a-layout' }, 'new');
     assert.equal(a.source, 'social');
     assert.match(a.key, /^covers\/candidate-new-\d+\.jpg$/);
     assert.equal(await checkCandidate(b.key), b.key);
     assert.equal(await checkCandidate('covers/other.png'), null, 'only a candidate can be chosen');
   });
-  assert.equal(bannerAsks.length, 2);
-  assert.deepEqual(bannerAsks.map((x) => x.variant), [0, 3]);
+  assert.equal(bannerAsks.length, 3);
+  assert.deepEqual(bannerAsks.map((x) => x.variant), [0, 3, 4]);
+  // The chosen layout is sent; an unknown one, or none, is not (the Social dashboard then chooses).
+  assert.deepEqual(bannerAsks.map((x) => x.style), [undefined, 'statue', undefined]);
   assert.equal(bannerAsks[1].main, 'ITIN guide');
   assert.equal(bannerAsks[1].cutout, 'tax-documents');
   // Without the Social dashboard the local design is used, and the variant changes it.

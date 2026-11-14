@@ -36,7 +36,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   return new Response(new Uint8Array(png), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=300' } });
 }
 // POST, three uses:
-//  { action: 'preview', main?, cutout?, variant? }: make a banner to look at (Make banner / Try another
+//  { action: 'preview', main?, cutout?, variant?, style? }: make a banner to look at (Make banner / Try another
 //    design). Saved as a candidate, NOT as the cover: { key, url, source }. May spend a small AI call
 //    (art direction) and an image; the AI parts are skipped in Testing mode and while AI work is paused.
 //  { action: 'use', key }: the person picked that banner; it becomes the cover the post carries.
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const row = await prisma.blog_schedule.findFirst({ where: { draft_id: id }, select: { author: true } });
     const title = draft.title || draft.keyword?.keyword || 'Untitled';
     try {
-      const c = await bannerCandidate({ title, topic: `${title} ${draft.keyword?.keyword || ''}`.trim(), author: row?.author || draft.author || null, main: body.main, cutout: body.cutout, variant: body.variant, draftId: id }, id);
+      const c = await bannerCandidate({ title, topic: `${title} ${draft.keyword?.keyword || ''}`.trim(), author: row?.author || draft.author || null, main: body.main, cutout: body.cutout, variant: body.variant, style: body.style, draftId: id }, id);
       return NextResponse.json({ ok: true, key: c.key, url: `/api/uploads/${c.key}`, source: c.source });
     } catch (e: any) {
       return NextResponse.json({ error: `The banner could not be made: ${String(e?.message || e).slice(0, 200)}` }, { status: 500 });
