@@ -4,6 +4,11 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-14
+- (publisher) Post my blog (top of Drafts & Review): upload a Word file or paste your own blog and post it as it is, or save it to Drafts. Fact check, plagiarism check, SEO optimise and the CA/CPA reviewer name are options, all off by default. Reviewer placeholders like [VERIFY] still stop a post. With fact check ticked, a wrong claim or a check that could not run keeps the blog in Drafts. Pressing again never saves or posts twice. Drafts & Review also gets "Skip checks" for admins and managers.
+- (social) Banner designer with a preview, in Post my blog and Drafts & Review: Try another design (a new design each time), choose the words to make bold and the picture, or upload your own; the chosen banner is the one published.
+- (ops) The assistant can post a blog the same way (post_my_blog), after the person approves the card.
+
 ## 2026-11-13
 - (publisher) WordPress is removed: blogs are published, updated and given images only through the custom website connector (SITE_CONNECTOR_URL, SITE_CONNECTOR_SECRET). When the connection is not set up nothing is sent, calendar blogs wait with that reason and Settings shows "Website connection". A blog already live is never copied: if its live post cannot be found or read, nothing is sent. WordPress-only work (plugins, Yoast, menus, cache and WebP speed fixes, automatic redirects) is gone; redirects and page fixes become developer tasks. The public site address is SITE_URL (WORDPRESS_SITE_URL still read for now).
 - (ops) Assistant: asked for a document, it makes a Word file and gives the download link in the chat (private to the person who asked). It no longer edits the website or saves anything there. After publishing, related-post links go only to posts whose titles really match.
