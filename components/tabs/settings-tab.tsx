@@ -100,6 +100,7 @@ function ConnCard({
 
 export default function SettingsTab() {
   const canChange = useRole().can('settings.change');
+  const isAdmin = useRole().role === 'admin';
   const [status, setStatus] = useState<string | null>(null);
 
   // Connection status for each connector, checked automatically when Settings opens. Each check
@@ -204,6 +205,26 @@ export default function SettingsTab() {
               : 'Drafts are off: the website makes every saved post live, so blogs are only published live.')
         );
       }
+    } catch (err: any) {
+      setStatus('Failed: ' + err.message);
+    }
+  }
+
+  // Live posts whose headings start with "1.", "2)": the website numbers its own "On this page" list.
+  async function cleanHeadings() {
+    setStatus('Checking live posts for numbered headings…');
+    try {
+      const res = await fetch('/api/site/headings');
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      if (!json.posts.length) return setStatus('No live post has numbered headings. Nothing to change.');
+      const names = json.posts.map((p: any) => `- ${p.title} (${p.headings} heading${p.headings === 1 ? '' : 's'})`).join('\n');
+      if (!window.confirm(`Remove the numbers at the start of the headings in ${json.posts.length} post(s)?\n\n${names}\n\nOnly the headings change; address, text, author, cover and SEO fields stay the same.`)) return setStatus(null);
+      setStatus(`Updating ${json.posts.length} post(s)…`);
+      const r = await fetch('/api/site/headings', { method: 'POST' });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error);
+      setStatus(`Fixed ${out.fixed.length} post(s).${out.failed.length ? ` Failed: ${out.failed.join('; ')}` : ''}`);
     } catch (err: any) {
       setStatus('Failed: ' + err.message);
     }
@@ -522,6 +543,7 @@ export default function SettingsTab() {
         >
           <Actions>
             <Button onClick={test}><PlugZap /> Test website connection</Button>
+            {isAdmin && <Button variant="outline" onClick={cleanHeadings}>Remove heading numbers from live posts</Button>}
           </Actions>
           {status && <Status>{status}</Status>}
         </ConnCard>
