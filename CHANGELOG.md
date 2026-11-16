@@ -4,6 +4,10 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-16
+- (publisher) Headings no longer start with "1.", "2.": the website numbers its own "On this page" list, which showed "1. 1. ...". The writer stops numbering H2/H3, and numbers at the start of H2 to H4 are removed from every post sent to the website (new posts and updates).
+- (publisher) Settings > Website connection: "Remove heading numbers from live posts" (admin) lists the posts already on the website with numbered headings and removes those numbers; only the headings change.
+
 ## 2026-11-15
 - (social) Banner designer: "Apply my comment" redoes the banner on show with the same design and changes only what the comments ask (earlier comments are kept), and says what was changed and what could not be done. "Try another design" makes a fresh one. The layouts are now Classic and Split (navy and marble).
 
