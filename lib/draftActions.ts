@@ -8,6 +8,7 @@ import { sqlNow } from '@/lib/time';
 import { needsExpertReview, publishPlan } from '@/lib/strategy/core';
 import { requireExpert } from '@/lib/reviewers';
 import { DRAFT_TOKEN_ACTOR } from '@/lib/draftToken';
+import { stripActiveContent } from '@/lib/htmlSanitize';
 import { authorNames, pickAuthor } from '@/lib/authors';
 import { requeueAfterDelete } from '@/lib/draftDelete';
 import { linkLiveTopic } from '@/lib/topics';
@@ -57,7 +58,7 @@ export async function patchDraft(nid: number, input: any, { actor, viaToken = fa
   if (title != null) data.title = title;
   if (meta_description != null) data.meta_description = meta_description;
   if (content_html != null) {
-    data.content_html = content_html;
+    data.content_html = stripActiveContent(String(content_html));
     data.word_count = String(content_html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
   }
   if (status != null) data.status = status;

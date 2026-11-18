@@ -6,6 +6,7 @@
 // originality check can be skipped by the caller (skipExpert / skipOriginality), which the routes
 // allow only to a person who may publish straight away. The calendar autopilot does not use this.
 import prisma from '@/lib/prisma';
+import { stripActiveContent } from '@/lib/htmlSanitize';
 import { ensurePhotoCover } from '@/lib/coverPhoto';
 import { uploadImage, publishPost, updatePost, seoSlug, freeSlug, getPost, postStatus, postBySlug, siteConfigured, draftsRefused, SITE_NOT_SET_UP } from '@/lib/site';
 import { slugFromUrl } from '@/lib/siteConnector';
@@ -213,7 +214,7 @@ export async function publishDraft(nid: number, opts: PublishOptions = {}): Prom
       const cover = imageKey ? await uploadImage(imageKey, { altText: coverAlt(draft) }) : null;
 
       // Images a person placed in the article are uploaded to the website first.
-      const inline = await publishDraftImages(nid, draft.content_html || '');
+      const inline = await publishDraftImages(nid, stripActiveContent(draft.content_html || ''));
       const contentHtml = `${withByline(faqAccordion(inline.html), author, reviewer || null)}\n${faqSchema(draft.content_html) || ''}\n${expertSchema({ title: draft.title, author, reviewer: reviewer || null, image: cover?.url || null }) || ''}`;
       // The address is set only on a new post: a live post (or the page a refresh replaces) keeps its URL.
       const keepAddress = Boolean(refreshUrl) || wpLive === 'publish';
