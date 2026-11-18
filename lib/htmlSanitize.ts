@@ -114,3 +114,18 @@ export function sanitizeHtml(input: string): string {
   }
   return out;
 }
+
+/**
+ * Removes only active content from article HTML (scripts, frames, embedded objects, on* handlers and javascript:,
+ * vbscript: or data: links), keeping every other tag and attribute (ids for the table of contents, classes, styles).
+ * Used on every saved draft and again before publishing, because the review preview hides script tags and a reviewer
+ * would otherwise approve something they never saw.
+ */
+export function stripActiveContent(input: string): string {
+  let html = String(input || '');
+  html = html.replace(/<(script|style|iframe|frame|frameset|object|embed|applet|noscript|template|form)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  html = html.replace(/<\/?(script|iframe|frame|frameset|object|embed|applet|base|meta|link|form)\b[^>]*>/gi, '');
+  html = html.replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  html = html.replace(/\s(href|src|action|formaction|xlink:href)\s*=\s*("|')?\s*(javascript|vbscript|data:(?!image\/(png|jpe?g|gif|webp)))[^"'>\s]*\2?/gi, '');
+  return html;
+}
