@@ -1,4 +1,5 @@
-// Blog covers, 1200x630. Text is drawn with font files shipped in the repo (Montserrat), so it
+// Blog covers, 1200x630. Text is drawn with font files shipped in the repo (Schibsted Grotesk; Montserrat was turned
+// down by the team as looking machine-made, Nov 2026), so it
 // renders the same on any server. makeCover needs no photo and no API.
 import path from 'path';
 import sharp, { type OverlayOptions } from 'sharp';
@@ -9,8 +10,8 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // The house design (also used for photo covers, lib/coverPhoto.ts): the picture darkened on the
 // left, the logo top left, the title in bold white with its second part in gold, a short gold line.
-const BOLD = path.join(process.cwd(), 'assets/fonts/Montserrat-Bold.ttf');
-const REGULAR = path.join(process.cwd(), 'assets/fonts/Montserrat-Regular.ttf');
+const BOLD = path.join(process.cwd(), 'assets/fonts/Schibsted-800.ttf');
+const REGULAR = path.join(process.cwd(), 'assets/fonts/Schibsted-400.ttf');
 // The full logo with white lettering (made for dark backgrounds).
 const LOGO_WHITE = path.join(process.cwd(), 'public/logo-mark.png');
 const GOLD = '#E8B04B';
@@ -62,7 +63,7 @@ export async function composeCover(photo: Buffer, title: string, opts: { png?: b
   );
   const { white, gold } = splitTitle(title, opts.gold);
   const size = title.length > 70 ? 230 : title.length > 45 ? 270 : 320;
-  const head = await fontText(`<span foreground="#FFFFFF">${esc(white)}</span>${gold ? `\n<span foreground="${GOLD}">${esc(gold)}</span>` : ''}`, BOLD, 'Montserrat Bold', 640, size);
+  const head = await fontText(`<span foreground="#FFFFFF">${esc(white)}</span>${gold ? `\n<span foreground="${GOLD}">${esc(gold)}</span>` : ''}`, BOLD, 'Schibsted Grotesk Ultra-Bold', 640, size);
   const headMeta = await sharp(head).metadata();
   const top = Math.max(150, Math.round((H - (headMeta.height || 300)) / 2) + 10);
   const layers: OverlayOptions[] = [
@@ -118,7 +119,7 @@ export async function makeCover(title: string, author?: string | null, variant =
   const gold = m && m.length < title.length && title.toLowerCase().startsWith(m.toLowerCase()) ? title.slice(m.length).replace(/^[\s:,\u2013-]+/, '') : undefined;
   const cover = await composeCover(base, title, { png: true, gold });
   if (!author) return cover;
-  const by = await fontText(`<span foreground="#C9D1E8">By ${esc(author)}</span>`, REGULAR, 'Montserrat', 700, 110);
+  const by = await fontText(`<span foreground="#C9D1E8">By ${esc(author)}</span>`, REGULAR, 'Schibsted Grotesk', 700, 110);
   return sharp(cover).composite([{ input: by, left: 66, top: H - 70 }]).png().toBuffer();
 }
 
