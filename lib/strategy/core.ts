@@ -2,6 +2,7 @@
 // calls here, so every rule is unit tested (tests/strategy.test.ts) and shared by the server
 // routes, the cron jobs and the UI.
 import { PILLAR_KEYS } from '../goal';
+import { istText } from '../time';
 
 export const CHANNELS = ['SEO', 'AEO', 'GEO'] as const;
 export type Channel = (typeof CHANNELS)[number];
@@ -241,7 +242,7 @@ const toMs = (s: string) => Date.parse(String(s).replace(' ', 'T') + (String(s).
 type ScheduleRow = { status: string; publish_at: string; review_started?: string | null; reviewed_at?: string | null; main_keyword?: string | null; title?: string | null; draft_id?: number | null };
 type PlanRow = ScheduleRow & { reviewed_by?: string | null; hold_reasons?: string | null; wp_post_url?: string | null; updated_at?: string | null };
 
-const fmtIst = (ms: number) => new Date(ms).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
+const fmtIst = (ms: number) => istText(ms);
 export type PublishPlan = { when: string | null; headline: string; detail: string };
 
 // Plain words on when a calendar blog goes live, for the review screens. Same rules as

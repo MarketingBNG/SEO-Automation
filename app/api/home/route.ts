@@ -39,7 +39,8 @@ export async function GET() {
   const loose = pendingDrafts.filter((d) => !calendarDraftIds.has(d.id)).slice(0, 20);
   // The newest approved strategy's calendar, plus the blogs of an older approved month that are not
   // live yet (the autopilot still reviews and publishes those, so they must stay visible).
-  const rows = strategy ? await prisma.blog_schedule.findMany({ where: await calendarRowsWhere(strategy.id), orderBy: { publish_at: 'asc' } }) : [];
+  // The publish logs, rewrite notes and reject feedback of every calendar row are not shown on Home.
+  const rows = strategy ? await prisma.blog_schedule.findMany({ where: await calendarRowsWhere(strategy.id), orderBy: { publish_at: 'asc' }, omit: { post_publish_log: true, revision_note: true, reject_feedback: true } }) : [];
   const expertOn = rows.length ? await requireExpert() : false;
   const reviewers = expertOn ? await expertReviewers() : [];
   const view = (r: any) => ({
@@ -65,6 +66,9 @@ export async function GET() {
   const upcoming = rows.filter((r) => ['planned', 'drafting', 'in_review', 'held', 'revising', 'rejected', 'paused'].includes(r.status) && !(['in_review', 'held'].includes(r.status) && !r.reviewed_at && r.draft_id)).slice(0, 8).map(view);
 
   const attention: { kind: string; title: string; detail: string; href: string; row?: unknown }[] = [];
+  // The buttons on an attention item (components/shared/blog-move-controls.tsx) need only these; the
+  // full row (fact-check log, publish log, CTA...) made Home several hundred KB with many failures.
+  const slim = (r: any) => ({ id: r.id, title: r.title, status: r.status, draft_id: r.draft_id, publish_at: r.publish_at, paused_from: r.paused_from, paused_by: r.paused_by });
   if (aiPaused === '1') attention.push({ kind: 'credits', title: 'AI work is paused', detail: `${aiPausedReason || 'AI credits are low.'} Enter the new balance in Settings > AI credits.`, href: '/?tab=settings' });
   else if (creditAlert && creditAlert === creditStamp) attention.push({ kind: 'credits', title: 'AI credits: 80% used', detail: 'Top up at console.anthropic.com, then enter the new balance in Settings > AI credits.', href: '/?tab=settings' });
   if (!strategy) attention.push({ kind: 'strategy', title: 'No approved strategy', detail: generating ? `The ${generating.period} strategy is ${generating.status.replace('_', ' ')}${generating.error ? `: ${generating.error}` : ''}.` : 'Generate a strategy for the next 30 days and approve it; blogs, tracking and fixes start from there.', href: '/?tab=strategy' });
@@ -75,14 +79,14 @@ export async function GET() {
   const readyNow = new Set(
     heldIds.length ? (await prisma.drafts.findMany({ where: { id: { in: heldIds }, production_state: 'READY_FOR_REVIEW' }, select: { id: true } })).map((d) => d.id) : []
   );
-  for (const r of rows.filter((x) => x.status === 'held' && !readyNow.has(x.draft_id as number))) attention.push({ kind: 'held', title: `Held: ${r.title}`, detail: JSON.parse(r.hold_reasons || '[]').join(' ') || 'See Monthly Strategy.', href: r.draft_id ? `/?tab=drafts&draft=${r.draft_id}` : '/?tab=strategy', row: r });
+  for (const r of rows.filter((x) => x.status === 'held' && !readyNow.has(x.draft_id as number))) attention.push({ kind: 'held', title: `Held: ${r.title}`, detail: JSON.parse(r.hold_reasons || '[]').join(' ') || 'See Monthly Strategy.', href: r.draft_id ? `/?tab=drafts&draft=${r.draft_id}` : '/?tab=strategy', row: slim(r) });
   // Failed or stopped-after-a-failure blogs from any month (an older month's blog is not in rows),
   // with their buttons (Resume, Publish now, Already done) right here.
   const broken = await prisma.blog_schedule.findMany({ where: { OR: [{ status: 'failed' }, { status: 'paused', paused_by: { startsWith: 'Automatic' } }] }, orderBy: { publish_at: 'asc' } });
   for (const r of broken) {
     const why = JSON.parse(r.hold_reasons || '[]').join(' ');
-    if (r.status === 'failed') attention.push({ kind: 'failed', title: `Publishing failed: ${r.title}`, detail: why || 'The activity log has the error. Fix the cause, or press Already done if it is published.', href: '/?tab=strategy', row: r });
-    else attention.push({ kind: 'stopped', title: `Stopped after a failure: ${r.title}`, detail: why || 'Fix the cause, then press Resume. If it is already published, press Already done.', href: '/?tab=strategy', row: r });
+    if (r.status === 'failed') attention.push({ kind: 'failed', title: `Publishing failed: ${r.title}`, detail: why || 'The activity log has the error. Fix the cause, or press Already done if it is published.', href: '/?tab=strategy', row: slim(r) });
+    else attention.push({ kind: 'stopped', title: `Stopped after a failure: ${r.title}`, detail: why || 'Fix the cause, then press Resume. If it is already published, press Already done.', href: '/?tab=strategy', row: slim(r) });
   }
   for (const r of approvals.filter((x) => x.overdue)) attention.push({ kind: 'overdue', title: `Review overdue: ${r.title}`, detail: 'It has waited more than 48 hours. Approve or reject it.', href: `/?tab=drafts&draft=${r.draft_id}` });
   if (failedNames.length) attention.push({ kind: 'keywords', title: `${failedNames.length} keyword blog${failedNames.length === 1 ? '' : 's'} failed`, detail: `${failedNames.slice(0, 3).join(', ')}${failedNames.length > 3 ? ' and more' : ''}. Open Keywords and press "Try again".`, href: '/?tab=keywords' });

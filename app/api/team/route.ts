@@ -57,9 +57,15 @@ export async function POST(req: NextRequest) {
     notes.push(data.blocked ? 'blocked' : 'unblocked');
   }
 
+  // The same person added twice at the same moment (two admins, or a double press): the second add
+  // was a unique-key 500. It is refused instead, since its role checks were made for a new person.
   const row = existing
     ? await prisma.team_members.update({ where: { email }, data })
-    : await prisma.team_members.create({ data: { email, role: data.role || 'user', role_expires_at: data.role_expires_at || null, name: data.name || null, blocked: Boolean(data.blocked), updated_by: me.name } });
+    : await prisma.team_members.create({ data: { email, role: data.role || 'user', role_expires_at: data.role_expires_at || null, name: data.name || null, blocked: Boolean(data.blocked), updated_by: me.name } }).catch((e: any) => {
+        if (e?.code === 'P2002') return null;
+        throw e;
+      });
+  if (!row) return NextResponse.json({ error: `${email} was just added by someone else. Reload the Team list to see their role.` }, { status: 409 });
   await activity.log('team.changed', { details: `${email}: ${notes.join(', ') || 'updated'}`, actor: me.name });
   return NextResponse.json(row);
 }

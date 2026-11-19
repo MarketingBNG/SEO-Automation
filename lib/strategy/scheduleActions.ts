@@ -24,6 +24,17 @@ export type ScheduleMe = { email: string; role: Role; blocked?: boolean } | null
 export type ScheduleResult = { status: number; body: any };
 const res = (body: any, status = 200): ScheduleResult => ({ status, body });
 
+// Writes the decision only if nobody changed the row since it was read: a second press, another
+// reviewer or the autopilot. Two people pressing Approve and Reject at the same moment otherwise
+// left the row rejected with an approval on it (and the draft approved), and each press was logged.
+// null when the row changed meanwhile.
+type Row = NonNullable<Awaited<ReturnType<typeof prisma.blog_schedule.findUnique>>>;
+async function writeIfUnchanged(row: Row, data: Record<string, unknown>) {
+  const { count } = await prisma.blog_schedule.updateMany({ where: { id: row.id, status: row.status, reviewed_at: row.reviewed_at, updated_at: row.updated_at }, data });
+  return count ? prisma.blog_schedule.findUnique({ where: { id: row.id } }) : null;
+}
+const CHANGED = () => res({ error: 'Someone else changed this blog at the same moment. Reload to see where it stands.' }, 409);
+
 export const SCHEDULE_ACTIONS = ['approve', 'reject', 'pause', 'resume', 'publish_now', 'mark_done', 'reschedule'] as const;
 
 export async function decideSchedule(id: number, input: any, { me, actor }: { me: ScheduleMe; actor: string }): Promise<ScheduleResult> {
@@ -43,7 +54,12 @@ export async function decideSchedule(id: number, input: any, { me, actor }: { me
       if (!expert) return res({ error: 'This is a tax, legal or compliance blog. Pick the CA/CPA who reviewed it.', reviewers: known }, 400);
       if (!known.includes(expert) && !CREDENTIAL.test(expert)) return res({ error: 'Give the reviewer as "Name, credential" (for example "Akshay Nahar, CA"), so the byline can name them.' }, 400);
     }
-    const updated = await prisma.blog_schedule.update({ where: { id }, data: { reviewed_by: actor, reviewed_at: sqlNow(), expert_reviewer: expert || null, updated_at: sqlNow() } });
+    const updated = await writeIfUnchanged(row, { reviewed_by: actor, reviewed_at: sqlNow(), expert_reviewer: expert || null, updated_at: sqlNow() });
+    if (!updated) {
+      // A second press of Approve (or two reviewers at once): approved once, logged once.
+      const now = await prisma.blog_schedule.findUnique({ where: { id } });
+      return now?.reviewed_at && now.status === row.status ? res(now) : CHANGED();
+    }
     await prisma.drafts.update({ where: { id: row.draft_id }, data: { status: 'approved', updated_at: sqlNow() } }).catch(() => {});
     await activity.log('schedule.approved', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}" approved${expert ? ` (reviewed by ${expert})` : ''}; publishes at its slot`, actor });
     return res(updated);
@@ -53,10 +69,8 @@ export async function decideSchedule(id: number, input: any, { me, actor }: { me
     const text = String(feedback || '').trim();
     if (text.length < 10) return res({ error: 'Say what should change (at least a sentence), so the rewrite can fix it.' }, 400);
     if (!['in_review', 'held'].includes(row.status)) return res({ error: 'Only a blog in review can be rejected.' }, 409);
-    const updated = await prisma.blog_schedule.update({
-      where: { id },
-      data: { status: 'rejected', reject_feedback: text.slice(0, 4000), rejected_by: actor, reviewed_at: null, reviewed_by: null, updated_at: sqlNow() },
-    });
+    const updated = await writeIfUnchanged(row, { status: 'rejected', reject_feedback: text.slice(0, 4000), rejected_by: actor, reviewed_at: null, reviewed_by: null, updated_at: sqlNow() });
+    if (!updated) return CHANGED();
     if (row.draft_id) await prisma.drafts.update({ where: { id: row.draft_id }, data: { status: 'rejected', updated_at: sqlNow() } }).catch(() => {});
     await activity.log('schedule.rejected', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}" rejected: ${text.slice(0, 200)}`, actor });
     // The Writer agent remembers what the reviewer did not want, for every blog after this one.
@@ -70,14 +84,16 @@ export async function decideSchedule(id: number, input: any, { me, actor }: { me
     if (['drafting', 'revising'].includes(row.status)) return res({ error: 'It is being written right now. Try again in a few minutes.' }, 409);
     const url = String(postUrl || '').trim();
     if (url && !/^https:\/\/\S+$/i.test(url)) return res({ error: 'Give the full post address starting with https://, or leave it empty.' }, 400);
-    const updated = await prisma.blog_schedule.update({ where: { id }, data: { status: 'published', wp_post_url: url || row.wp_post_url, paused_from: null, paused_by: null, hold_reasons: null, updated_at: sqlNow() } });
+    const updated = await writeIfUnchanged(row, { status: 'published', wp_post_url: url || row.wp_post_url, paused_from: null, paused_by: null, hold_reasons: null, updated_at: sqlNow() });
+    if (!updated) return CHANGED();
     await activity.log('schedule.marked_done', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}": marked as already done${url ? ` (${url})` : ''}`, actor });
     return res(updated);
   }
 
   if (action === 'pause') {
     if (!PAUSABLE.includes(row.status)) return res({ error: row.status === 'paused' ? 'Already paused.' : 'It is being written right now. Pause it in a few minutes.' }, 409);
-    const updated = await prisma.blog_schedule.update({ where: { id }, data: { status: 'paused', paused_from: row.status, paused_by: actor, updated_at: sqlNow() } });
+    const updated = await writeIfUnchanged(row, { status: 'paused', paused_from: row.status, paused_by: actor, updated_at: sqlNow() });
+    if (!updated) return CHANGED();
     await activity.log('schedule.paused', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}" paused (was ${row.status})`, actor });
     return res(updated);
   }
@@ -88,7 +104,8 @@ export async function decideSchedule(id: number, input: any, { me, actor }: { me
     if (Date.parse(row.publish_at.replace(' ', 'T') + 'Z') < earliestPublish({ ...row, status: back })) {
       return res({ error: 'Its publish time is too close or has passed. Pick a new time.', needsReschedule: true, suggestions: await suggestSlots({ ...row, status: back }) }, 409);
     }
-    const updated = await prisma.blog_schedule.update({ where: { id }, data: { status: back, paused_from: null, paused_by: null, updated_at: sqlNow() } });
+    const updated = await writeIfUnchanged(row, { status: back, paused_from: null, paused_by: null, updated_at: sqlNow() });
+    if (!updated) return CHANGED();
     await activity.log('schedule.resumed', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}" resumed`, actor });
     return res(updated);
   }
@@ -114,7 +131,8 @@ export async function decideSchedule(id: number, input: any, { me, actor }: { me
     if (!Number.isFinite(ms)) return res({ error: 'Pick a date and time.' }, 400);
     if (ms < Date.now() + 30 * 60000) return res({ error: 'Pick a time at least 30 minutes from now.' }, 400);
     const back = row.status === 'paused' ? row.paused_from || 'planned' : row.status;
-    const updated = await prisma.blog_schedule.update({ where: { id }, data: { publish_at: toSql(ms), status: back, paused_from: null, paused_by: null, reminded_at: null, updated_at: sqlNow() } });
+    const updated = await writeIfUnchanged(row, { publish_at: toSql(ms), status: back, paused_from: null, paused_by: null, reminded_at: null, updated_at: sqlNow() });
+    if (!updated) return CHANGED();
     const early = ms < earliestPublish({ ...row, status: back });
     await activity.log('schedule.rescheduled', { entityType: 'blog_schedule', entityId: id, details: `"${row.title}" moved from ${row.publish_at} to ${toSql(ms)} UTC`, actor });
     return res({ ...updated, note: early ? 'This is earlier than its writing and 48-hour review can finish, so it publishes when the review ends.' : null });
