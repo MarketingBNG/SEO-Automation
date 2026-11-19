@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fmtIst } from '@/lib/time';
 import { Loader2, Plus, Search, Sparkles, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -338,7 +339,7 @@ export default function KeywordsTab() {
                     </div>
                   )}
                 </td>
-                <td className={`${TD_MUTED} whitespace-nowrap`}>{k.created_at}</td>
+                <td className={`${TD_MUTED} whitespace-nowrap`}>{fmtIst(k.created_at)}</td>
               </tr>
             ))}
             {keywords.length === 0 && (

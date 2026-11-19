@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
-import { actionFor, allows, deniedMessage, isRole, roleAccess, type Access, type Grant } from '@/lib/permissions';
+import { actionFor, allows, deniedMessage, isPaidRead, isRole, roleAccess, type Access, type Grant } from '@/lib/permissions';
 import { draftTokenAllows, hasDraftToken } from '@/lib/draftToken';
 import { cronAllows, hasCronSecret } from '@/lib/cronSecret';
 
@@ -49,8 +49,9 @@ export async function proxy(req: NextRequest) {
       const blocked = live ? live.blocked : Boolean(token.blocked);
       const write = req.method !== 'GET' && req.method !== 'HEAD';
       const action = actionFor(req.method, pathname);
-      // A GET that changes a connection or spends on a paid lookup (settings.change) counts as an action.
-      if ((write || action === 'settings.change') && blocked) {
+      // A GET that changes a connection (settings.change) or spends on a paid lookup (isPaidRead:
+      // SE Ranking, a fresh AI explanation) counts as an action.
+      if ((write || action === 'settings.change' || isPaidRead(req.method, pathname, req.nextUrl.searchParams)) && blocked) {
         return NextResponse.json({ error: 'Your account is blocked from taking actions. Ask an admin or your manager.' }, { status: 403 });
       }
       // Access is the role access as the admin set it, plus own grants; without it (an older token

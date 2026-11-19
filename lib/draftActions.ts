@@ -204,23 +204,19 @@ export async function restoreDraftVersion(id: number, changeId: unknown, actor: 
   return { status: 200, body: { ok: true } };
 }
 
-// A claim in the Facts Register marked by a reviewer (PATCH /api/facts/[id]): { status, reviewer? }.
-// The reviewer is the signed-in person unless one is given.
+// A claim in the Facts Register marked by a reviewer (PATCH /api/facts/[id]): { status }.
+export const FACT_STATUSES = ['verified', 'needs_verify'] as const;
+
+// actor: the signed-in person who marks the claim; always recorded as the reviewer (a reviewer name
+// in the request is ignored).
 export async function setFactStatus(nid: number, input: any, actor: string): Promise<Result> {
-  const { status } = input || {};
-  const reviewer = input?.reviewer ?? (status != null ? actor : null);
+  const status = input?.status;
+  if (!FACT_STATUSES.includes(status)) return { status: 400, body: { error: `status must be ${FACT_STATUSES.join(' or ')}.` } };
+  const reviewer = actor || 'system';
   const existing = await prisma.facts.findUnique({ where: { id: nid } });
   if (!existing) return { status: 404, body: { error: 'Not found' } };
-  const data: any = {};
-  if (status != null) {
-    data.status = status;
-    data.review_date = sqlNow();
-  }
-  if (reviewer != null) data.reviewer = reviewer;
-  if (Object.keys(data).length) await prisma.facts.update({ where: { id: nid }, data });
+  await prisma.facts.update({ where: { id: nid }, data: { status, review_date: sqlNow(), reviewer } });
   const updated: any = await prisma.facts.findUnique({ where: { id: nid } });
-  if (status) {
-    await activity.log('fact.status_changed', { entityType: 'fact', entityId: nid, details: `"${updated.claim}" → ${status}`, actor: reviewer || 'system' });
-  }
+  await activity.log('fact.status_changed', { entityType: 'fact', entityId: nid, details: `"${updated.claim}" → ${status}`, actor: reviewer });
   return { status: 200, body: updated };
 }

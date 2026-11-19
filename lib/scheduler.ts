@@ -4,12 +4,18 @@
 //    rank check; each step has its own once-a-day guard where needed),
 //  - Mondays: plan vs actual (once per Monday),
 //  - daily: a new strategy is generated when none covers the coming 3 days (it still needs approval).
+//  - every 15 minutes: the sweep of runs left stuck by a killed process (lib/sweep.ts),
+//  - daily after 03:00 UTC: the writing skill's 15-day refresh check (lib/skillAutoRefresh.ts),
+// so none of these needs a Coolify Scheduled Task.
+// A tick never starts while the previous one is still going (the Monday steps and the banners would
+// otherwise run, and pay, twice).
 // An external cron calling the same routes is still safe: overlapping runs are skipped.
 // Set BUILTIN_SCHEDULER=off to disable.
 const EVERY_MS = 15 * 60 * 1000;
 
 declare global {
   var __seoScheduler: NodeJS.Timeout | undefined;
+  var __seoSchedulerRunning: boolean | undefined;
 }
 
 async function tick() {
@@ -56,6 +62,10 @@ async function tick() {
   // A blog cut off by a server restart (for example a deploy) is started again automatically.
   const { resumeInterruptedBlog } = await import('./blogJob');
   if (!testing) await resumeInterruptedBlog().catch((e: any) => console.error('Scheduler: blog resume failed:', e.message));
+
+  // Keywords, assistant chats and strategies left stuck by a killed process are freed (was /api/cron/sweep).
+  const { sweepStuck } = await import('./sweep');
+  await sweepStuck().catch((e: any) => console.error('Scheduler: sweep failed:', e.message));
 
   // Blogs not yet on the website get their banner by themselves (made in the Social Media dashboard).
   const { fillMissingCovers } = await import('./coverPhoto');
@@ -106,6 +116,14 @@ async function tick() {
     if (!paused) await settings.set('last_lessons_run', today);
   }
 
+  // The writing skill is refreshed when it is 15+ days old: checked once a day after 03:00 UTC (was
+  // /api/skill/auto-check). The refresh runs in the background (Batch API) and has its own run guard.
+  if (now.getUTCHours() >= 3 && (await settings.get('last_skill_check')) !== today) {
+    const { autoRefreshSkill } = await import('./skillAutoRefresh');
+    const ok = await autoRefreshSkill().then(() => true, (e: any) => (console.error('Scheduler: skill check failed:', e.message), false));
+    if (ok) await settings.set('last_skill_check', today);
+  }
+
   if ((await settings.get('last_strategy_check')) !== today) {
     const soon = new Date(now.getTime() + 3 * 86400000).toISOString().slice(0, 10);
     const covering = await prisma.seo_strategies.findFirst({
@@ -136,7 +154,22 @@ export function startScheduler() {
     })
     .catch(() => {});
   // Everything the scheduler starts is automatic work: in Testing mode it does not use AI (lib/aiQueue.ts).
-  const run = () => import('./aiQueue').then(({ runAutomatic }) => runAutomatic(tick)).catch((e) => console.error('Scheduler error:', e?.message || e));
+  const run = async () => {
+    if (globalThis.__seoSchedulerRunning) {
+      // The previous tick is still going: only the heartbeat, so the status light stays green.
+      await import('./settings').then((st) => st.set('scheduler_heartbeat', new Date().toISOString())).catch(() => {});
+      console.log('Scheduler: previous run still going, this tick is skipped.');
+      return;
+    }
+    globalThis.__seoSchedulerRunning = true;
+    try {
+      await import('./aiQueue').then(({ runAutomatic }) => runAutomatic(tick));
+    } catch (e: any) {
+      console.error('Scheduler error:', e?.message || e);
+    } finally {
+      globalThis.__seoSchedulerRunning = false;
+    }
+  };
   // First run a minute after start, so the server is fully up.
   setTimeout(run, 60 * 1000);
   globalThis.__seoScheduler = setInterval(run, EVERY_MS);

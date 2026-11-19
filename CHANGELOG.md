@@ -4,6 +4,12 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-19
+- (security) The Learning page (and /api/learning) needs content-work access, and lists only your own assistant questions (the admin sees everyone's). Publishing a Drafts & Review blog needs the website permission, as the assistant's draft_publish does. A blocked person can no longer run paid lookups (SE Ranking research and AI visibility, a fresh "why it changed" explanation). Only an admin can give or take away the admin role. A Facts Register mark takes only verified or needs_verify and always records the signed-in person as reviewer. A bad chat id to the assistant gets a clear error instead of a server error.
+- (scheduler) The built-in scheduler never starts a run while the previous one is still going (the Monday steps and banners could run, and pay, twice). It now also frees runs left stuck by a restart every 15 minutes and checks the writing skill's 15-day refresh daily after 03:00 UTC, so the Coolify tasks for /api/cron/sweep and /api/skill/auto-check are optional.
+- (ops) Dashboard: Back returns to the previous page of the dashboard. Crawl, audit, keyword and writing-skill dates are shown in India time (IST).
+- (publisher) Blog covers made without a photo: a long title is made smaller so it never runs into the "By author" line.
+
 ## 2026-11-16
 - (publisher) Headings no longer start with "1.", "2.": the website numbers its own "On this page" list, which showed "1. 1. ...". The writer stops numbering H2/H3, and numbers at the start of H2 to H4 are removed from every post sent to the website (new posts and updates).
 - (publisher) Settings > Website connection: "Remove heading numbers from live posts" (admin) lists the posts already on the website with numbered headings and removes those numbers; only the headings change.

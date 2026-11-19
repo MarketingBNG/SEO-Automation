@@ -1068,7 +1068,7 @@ tool({
   description: 'The Learning page: what the team changed in blogs, what the writer learned from it (lessons), and what the team asked the dashboard for in the last 30 days.',
   input_schema: obj({}),
   summarize: () => 'Read the Learning page',
-  run: async () => (await import('@/lib/learningFeed')).learningFeed(),
+  run: async (_i, ctx) => (await import('@/lib/learningFeed')).learningFeed(ctx?.me),
 });
 
 tool({

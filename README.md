@@ -36,8 +36,8 @@ node -e "fetch('http://localhost:'+(process.env.PORT||3000)+'/api/cron/daily',{h
 | `/api/cron/daily` | `*/15 * * * *` (every 15 min) | Blog drafts, 24-hour review window, auto-approve and publish after the automatic fact check; once a day: rank check and Fireflies meeting sync (meetings are cleaned of names, prices and contact details, then auto-approved) |
 | `/api/cron/weekly` | `0 5 * * 1` (Mondays) | Plan vs actual check |
 | `/api/strategy/auto-check` | `30 3 * * *` (daily) | Generates a new 30-day strategy when the current one has 3 days left |
-| `/api/skill/auto-check` | `0 3 * * *` | Refreshes the writing skill when it is 15+ days old |
-| `/api/cron/sweep` | `*/15 * * * *` | Frees keywords/assistant runs left stuck by a killed process |
+| `/api/skill/auto-check` | `0 3 * * *` | Refreshes the writing skill when it is 15+ days old (the built-in scheduler also checks daily after 03:00 UTC; the task is optional) |
+| `/api/cron/sweep` | `*/15 * * * *` | Frees keywords/assistant runs left stuck by a killed process (the built-in scheduler also runs it every 15 minutes; the task is optional) |
 
 `CRON_SECRET` must be set in the app's environment. Uploads (Screaming Frog files, images) are
 stored under `UPLOADS_DIR`; mount it as a persistent volume so they survive redeploys.
