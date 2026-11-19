@@ -5,11 +5,12 @@ import { publishPlan } from '@/lib/strategy/core';
 import { blogRuns } from '@/lib/blogRuns';
 import { methodNotAllowed } from '../_lib/http';
 import { calendarRowsWhere } from '@/lib/strategy/calendarRows';
+import { istText } from '@/lib/time';
 
 export const runtime = 'nodejs';
 
 const DRAFT_LEAD_HOURS = 72;
-const fmt = (ms: number) => new Date(ms).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
+const fmt = (ms: number) => istText(ms);
 const toMs = (s: string) => Date.parse(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z'));
 
 // The status light in the header: is the automation alive, did its last run go cleanly, and what
@@ -24,7 +25,15 @@ export async function GET() {
     last = JSON.parse(st.scheduler_last_run || 'null');
   } catch {}
   const strategy = await prisma.seo_strategies.findFirst({ where: { status: 'approved', plan_json: { not: null } }, orderBy: { id: 'desc' }, select: { id: true, period: true } });
-  const rows = strategy ? await prisma.blog_schedule.findMany({ where: await calendarRowsWhere(strategy.id), orderBy: { publish_at: 'asc' } }) : [];
+  // Only what the light and publishPlan read: the fact-check, publish logs and CTAs of every calendar
+  // row made this route (polled by every open tab) several times slower.
+  const rows = strategy
+    ? await prisma.blog_schedule.findMany({
+        where: await calendarRowsWhere(strategy.id),
+        orderBy: { publish_at: 'asc' },
+        select: { id: true, status: true, title: true, main_keyword: true, publish_at: true, draft_id: true, review_started: true, reviewed_at: true, reviewed_by: true, hold_reasons: true, wp_post_url: true, updated_at: true },
+      })
+    : [];
   const writing = await prisma.keywords.count({ where: { status: 'generating' } });
 
   const problems: string[] = [];

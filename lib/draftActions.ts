@@ -71,12 +71,23 @@ export async function patchDraft(nid: number, input: any, { actor, viaToken = fa
   // between is not overwritten.
   // Both can be sent (scripts/draft.ts does): an image placed in the dashboard keeps updated_at but
   // changes the words, so each guard applies.
+  // A status change is written only over the status it was read with: Approve pressed twice (or by
+  // two reviewers) is done and logged once, Approve and Reject at the same moment do not both land,
+  // and a draft published in between is not moved back to review.
   const guard = {
     ...(if_updated_at != null ? { updated_at: existing.updated_at } : {}),
     ...(if_text_hash != null ? { title: existing.title, meta_description: existing.meta_description, content_html: existing.content_html } : {}),
+    ...(status != null ? { status: existing.status } : {}),
   };
   const { count } = await prisma.drafts.updateMany({ where: { id: nid, ...guard }, data });
-  if (!count) return { status: 409, body: changedMeanwhile };
+  if (!count) {
+    if (status != null && title == null && meta_description == null && content_html == null) {
+      const now: any = await prisma.drafts.findUnique({ where: { id: nid } });
+      if (now?.status === status) return { status: 200, body: { ...now, text_hash: wordsHash(now), calendar: null } };
+      return { status: 409, body: { error: `The draft was ${now?.status === 'published' ? 'published' : `set to ${String(now?.status || 'another status').replace('_', ' ')}`} at the same moment by someone else. Reload it.` } };
+    }
+    return { status: 409, body: changedMeanwhile };
+  }
   const updated: any = await prisma.drafts.findUnique({ where: { id: nid } });
   // What changed in the words, how much and by whom: shown on the draft and learned from daily.
   if (title != null || meta_description != null || content_html != null) {
@@ -179,7 +190,9 @@ export async function newPhotoCover(id: number): Promise<Result> {
   await prisma.drafts.update({ where: { id }, data: { featured_image_path: null } });
   const key = await ensurePhotoCover(id).catch(() => null);
   if (!key) {
-    await prisma.drafts.update({ where: { id }, data: { featured_image_path: draft.featured_image_path } });
+    // Put the old cover back, unless a press at the same moment already did: that press read the
+    // cleared cover as its "old" one, and restoring it unconditionally lost the cover for good.
+    await prisma.drafts.updateMany({ where: { id, featured_image_path: null }, data: { featured_image_path: draft.featured_image_path } });
     return { status: 400, body: { error: 'No photo cover could be made. Add PEXELS_API_KEY (free) or OPENAI_API_KEY in Coolify.' } };
   }
   await prisma.drafts.update({ where: { id }, data: { updated_at: sqlNow() } });
@@ -215,8 +228,10 @@ export async function setFactStatus(nid: number, input: any, actor: string): Pro
   const reviewer = actor || 'system';
   const existing = await prisma.facts.findUnique({ where: { id: nid } });
   if (!existing) return { status: 404, body: { error: 'Not found' } };
-  await prisma.facts.update({ where: { id: nid }, data: { status, review_date: sqlNow(), reviewer } });
+  // Over the status it was read with: the same mark pressed twice at once is saved and logged once.
+  const { count } = await prisma.facts.updateMany({ where: { id: nid, status: existing.status }, data: { status, review_date: sqlNow(), reviewer } });
   const updated: any = await prisma.facts.findUnique({ where: { id: nid } });
+  if (!count) return updated?.status === status ? { status: 200, body: updated } : { status: 409, body: { error: 'Someone else marked this claim at the same moment. Reload to see its status.' } };
   await activity.log('fact.status_changed', { entityType: 'fact', entityId: nid, details: `"${updated.claim}" → ${status}`, actor: reviewer });
   return { status: 200, body: updated };
 }

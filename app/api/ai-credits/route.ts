@@ -59,20 +59,32 @@ async function thisMonth() {
 }
 
 // US dollar to rupee rate for showing costs in rupees, refreshed every 12 hours (null if unavailable).
+// One lookup at a time, and after a failed one the next try waits 15 minutes: every open AI credits
+// page used to start its own lookup, each waiting up to 8 seconds while the rate service was down.
+const fx = globalThis as unknown as { __usdInrLookup?: Promise<number | null>; __usdInrFailedAt?: number };
 async function usdInr(): Promise<{ rate: number; at: string } | null> {
   const [rate, at] = await Promise.all([settings.get('usd_inr_rate'), settings.get('usd_inr_at')]);
-  if (rate && at && Date.now() - Date.parse(at) < 12 * 3600000) return { rate: Number(rate), at };
-  try {
-    const j: any = await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(8000) }).then((r) => r.json());
-    const r = Number(j?.rates?.INR);
-    if (!r) throw new Error('no rate');
-    const now = new Date().toISOString();
-    await settings.set('usd_inr_rate', String(r));
-    await settings.set('usd_inr_at', now);
-    return { rate: r, at: now };
-  } catch {
-    return rate && at ? { rate: Number(rate), at } : null;
-  }
+  const saved = rate && at ? { rate: Number(rate), at } : null;
+  if (saved && Date.now() - Date.parse(saved.at) < 12 * 3600000) return saved;
+  if (Date.now() - (fx.__usdInrFailedAt || 0) < 15 * 60000) return saved;
+  fx.__usdInrLookup ||= fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(8000) })
+    .then((r) => r.json())
+    .then(async (j: any) => {
+      const r = Number(j?.rates?.INR);
+      if (!r) throw new Error('no rate');
+      await settings.set('usd_inr_rate', String(r));
+      await settings.set('usd_inr_at', new Date().toISOString());
+      return r;
+    })
+    .catch(() => {
+      fx.__usdInrFailedAt = Date.now();
+      return null;
+    })
+    .finally(() => {
+      fx.__usdInrLookup = undefined;
+    });
+  const r = await fx.__usdInrLookup;
+  return r ? { rate: r, at: (await settings.get('usd_inr_at')) || new Date().toISOString() } : saved;
 }
 
 // POST { action: 'set_balance', balance, threshold? } after a top-up (also lifts the pause),
