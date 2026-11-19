@@ -3,6 +3,7 @@
 import { useRole } from '@/hooks/use-role';
 
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { fmtIst } from '@/lib/time';
 import { AiCreditsCard } from '@/components/shared/ai-credits-card';
 import { BlogRulesCard } from '@/components/shared/blog-rules-card';
 import {
@@ -1008,7 +1009,7 @@ export default function SettingsTab() {
                 {crawls.map((c) => (
                   <Fragment key={c.id}>
                     <TableRow>
-                      <TableCell className="text-muted-foreground">{new Date(c.created_at).toLocaleString()}</TableCell>
+                      <TableCell className="text-muted-foreground">{fmtIst(c.created_at)}</TableCell>
                       <TableCell>{c.filename}</TableCell>
                       <TableCell className="text-right tabular-nums">{c.total_urls}</TableCell>
                       <TableCell className="text-muted-foreground text-right tabular-nums">{c.broken_count}</TableCell>

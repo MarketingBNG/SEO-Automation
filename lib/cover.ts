@@ -38,7 +38,9 @@ async function fontText(markup: string, font: string, family: string, width: num
   return sharp({ text: { text: markup, font: family, fontfile: font, width, rgba: true, dpi, wrap: 'word' } }).png().toBuffer();
 }
 
-export async function composeCover(photo: Buffer, title: string, opts: { png?: boolean; gold?: string } = {}): Promise<Buffer> {
+// byline: "By <author>" under the title (makeCover). The title is made smaller until title, gold line
+// and byline all fit, so a long title never runs into the byline.
+export async function composeCover(photo: Buffer, title: string, opts: { png?: boolean; gold?: string; byline?: string | null } = {}): Promise<Buffer> {
   const base = await sharp(photo).resize(W, H, { fit: 'cover', position: 'attention' }).modulate({ saturation: 1.05 }).toBuffer();
   const shade = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
@@ -62,16 +64,27 @@ export async function composeCover(photo: Buffer, title: string, opts: { png?: b
     </svg>`
   );
   const { white, gold } = splitTitle(title, opts.gold);
-  const size = title.length > 70 ? 230 : title.length > 45 ? 270 : 320;
-  const head = await fontText(`<span foreground="#FFFFFF">${esc(white)}</span>${gold ? `\n<span foreground="${GOLD}">${esc(gold)}</span>` : ''}`, BOLD, 'Schibsted Grotesk Ultra-Bold', 640, size);
-  const headMeta = await sharp(head).metadata();
-  const top = Math.max(150, Math.round((H - (headMeta.height || 300)) / 2) + 10);
+  const by = opts.byline ? await fontText(`<span foreground="#C9D1E8">By ${esc(opts.byline)}</span>`, REGULAR, 'Schibsted Grotesk', 700, 110) : null;
+  const byH = by ? (await sharp(by).metadata()).height || 30 : 0;
+  let size = title.length > 70 ? 230 : title.length > 45 ? 270 : 320;
+  let head: Buffer, headH: number, top: number, ruleTop: number, byTop: number;
+  for (;;) {
+    head = await fontText(`<span foreground="#FFFFFF">${esc(white)}</span>${gold ? `\n<span foreground="${GOLD}">${esc(gold)}</span>` : ''}`, BOLD, 'Schibsted Grotesk Ultra-Bold', 640, size);
+    headH = (await sharp(head).metadata()).height || 300;
+    top = Math.max(150, Math.round((H - headH) / 2) + 10);
+    ruleTop = Math.min(H - 40, top + headH + 22);
+    // The byline sits at the bottom as before, or just under the gold line when the title reaches lower.
+    byTop = Math.max(H - 70, top + headH + 22 + 5 + 16);
+    if (!by || byTop + byH <= H - 12 || size <= 120) break;
+    size = Math.max(120, Math.round(size * 0.9));
+  }
   const layers: OverlayOptions[] = [
     { input: shade, left: 0, top: 0 },
     { input: grid, left: 0, top: 0 },
     { input: head, left: 64, top },
-    { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="88" height="5"><rect width="88" height="5" rx="2" fill="${GOLD}"/></svg>`), left: 66, top: Math.min(H - 40, top + (headMeta.height || 300) + 22) },
+    { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="88" height="5"><rect width="88" height="5" rx="2" fill="${GOLD}"/></svg>`), left: 66, top: ruleTop },
   ];
+  if (by) layers.push({ input: by, left: 66, top: Math.min(byTop, H - byH) });
   try {
     layers.push({ input: await sharp(LOGO_WHITE).resize({ height: 84, fit: 'inside' }).png().toBuffer(), left: 58, top: 34 });
   } catch {}
@@ -117,10 +130,7 @@ export async function makeCover(title: string, author?: string | null, variant =
   // The words a person chose to make bold (the start of the title): the rest of the title goes gold.
   const m = String(main || '').trim();
   const gold = m && m.length < title.length && title.toLowerCase().startsWith(m.toLowerCase()) ? title.slice(m.length).replace(/^[\s:,\u2013-]+/, '') : undefined;
-  const cover = await composeCover(base, title, { png: true, gold });
-  if (!author) return cover;
-  const by = await fontText(`<span foreground="#C9D1E8">By ${esc(author)}</span>`, REGULAR, 'Schibsted Grotesk', 700, 110);
-  return sharp(cover).composite([{ input: by, left: 66, top: H - 70 }]).png().toBuffer();
+  return composeCover(base, title, { png: true, gold, byline: author || null });
 }
 
 // The cover's alt text: what the person wrote, else the title (never empty, so Google always has

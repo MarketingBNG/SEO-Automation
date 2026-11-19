@@ -19,7 +19,8 @@ export async function GET() {
 }
 
 // { email, name?, role?, blocked? }
-//  - add a person or change a role: admin only (the owner always stays admin)
+//  - add a person or change a role: admin only (the owner always stays admin); giving or removing
+//    the admin role needs an admin even when team.roles was granted to someone else
 //  - block or unblock: admin (anyone but the owner/admins) or manager (users and analysts)
 export async function POST(req: NextRequest) {
   const me = await getMe();
@@ -38,7 +39,11 @@ export async function POST(req: NextRequest) {
   if (body.role !== undefined || !existing) {
     if (!(await canDo(me, 'team.roles'))) return NextResponse.json({ error: 'Only an admin can add people or change roles.' }, { status: 403 });
     const role = body.role ?? 'user';
-    if (!isRole(role)) return NextResponse.json({ error: 'Role must be admin, manager, analyst or user.' }, { status: 400 });
+    if (!isRole(role)) return NextResponse.json({ error: 'Role must be admin, manager, analyst, user or tester.' }, { status: 400 });
+    // Giving or taking away the admin role stays with an admin, even for someone granted team.roles.
+    if ((role === 'admin' || target === 'admin') && role !== target && me.role !== 'admin') {
+      return NextResponse.json({ error: 'Only an admin can give or remove the admin role.' }, { status: 403 });
+    }
     if (email === OWNER_EMAIL && role !== 'admin') return NextResponse.json({ error: 'The owner always stays admin.' }, { status: 400 });
     data.role = role;
     // Tester lasts 48 hours from now (giving it again renews it); other roles do not expire.

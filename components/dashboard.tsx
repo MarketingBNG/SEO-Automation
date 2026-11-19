@@ -112,11 +112,13 @@ export default function Dashboard() {
   const [socialLink, setSocialLink] = useState<{ social: string | null; socialLabel: string } | null>(null);
   useEffect(() => { fetch('/api/links').then((r) => r.json()).then(setSocialLink).catch(() => {}); }, []);
 
-  // Links such as /?tab=drafts from inside a page switch the open page too.
+  // Links such as /?tab=drafts from inside a page switch the open page too, and so does Back/Forward
+  // (a URL with no tab is Home).
   const paramTab = params.get('tab');
   useEffect(() => {
+    const want: TabKey = isTab(paramTab) ? paramTab : 'home';
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (isTab(paramTab) && paramTab !== tab) setTabState(paramTab);
+    if (want !== tab) setTabState(want);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramTab]);
   useEffect(() => {
@@ -127,8 +129,9 @@ export default function Dashboard() {
   function setTab(next: string) {
     if (!isTab(next)) return;
     setTabState(next);
-    // A plain history update: no server round trip for a sidebar click (useSearchParams stays in sync).
-    window.history.replaceState(null, '', `/?tab=${next}`);
+    // A plain history entry: no server round trip for a sidebar click (useSearchParams stays in sync),
+    // and Back returns to the previous page.
+    if (params.get('tab') !== next) window.history.pushState(null, '', `/?tab=${next}`);
   }
 
   function askAssistant(e: FormEvent) {

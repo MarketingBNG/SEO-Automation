@@ -138,11 +138,15 @@ export function actionFor(method: string, path: string): Action | null {
     // The Meeting insights page checks its Fireflies connection (shows the connected name).
     if (/^\/api\/fireflies\/test(\/|$)/.test(p)) return 'reports.view';
     if (/^\/api\/performance\/download|^\/api\/audit\/[^/]+\/download/.test(p)) return 'reports.download';
+    // Keyword research (Write a blog) is a paid SE Ranking lookup: content work, like the tab it serves.
+    if (/^\/api\/seranking\/research$/.test(p)) return 'content.work';
     if (/^\/api\/(performance|ga4|gsc|seranking|clarity|blog-analytics|zoho\/leads|zoho\/pipeline|zoho\/business)/.test(p)) return 'reports.view';
     if (/^\/api\/(ai-credits|agent)/.test(p)) return 'credits.view';
     if (/^\/api\/team/.test(p)) return 'team.view';
     // Client meeting notes (Meeting insights page).
     if (/^\/api\/client-insights/.test(p)) return 'reports.view';
+    // The Learning page shows the team's blog edits, lessons and requests.
+    if (/^\/api\/learning$/.test(p)) return 'content.work';
     // Connecting an account (OAuth), raw Fireflies transcripts and paid live lookups from Settings.
     if (/^\/api\/(gbp|zoho)\/(auth-url|oauth-callback)|^\/api\/fireflies\/transcripts|^\/api\/(serphouse|pagespeed)\/check/.test(p)) return 'settings.change';
     return null;
@@ -156,6 +160,9 @@ export function actionFor(method: string, path: string): Action | null {
   // Replacing a live post with an audit's rewrite (Check a blog / Refresh a live blog) changes the
   // website at once: the same permission as publishing a calendar blog straight away.
   if (/^\/api\/audit\/[^/]+\/publish$/.test(p)) return 'blog.publish_now';
+  // Publishing a Drafts & Review blog (or updating its live post) changes the website: the same
+  // permission as the assistant's draft_publish tool (which also needs content.work).
+  if (/^\/api\/drafts\/[^/]+\/publish$/.test(p)) return 'website.change';
   // Website Content: saving or deleting a page or post changes the live website.
   if (/^\/api\/site-content$/.test(p)) return 'website.change';
   // Approving the assistant's cards: each tool checks its own permission for the person who approves
@@ -174,6 +181,17 @@ export function actionFor(method: string, path: string): Action | null {
   if (/^\/api\/team/.test(p)) return 'team.view'; // finer checks (roles, who can be blocked) in the route
   if (/^\/api\/(settings|gsc|ga4|gbp|zoho|site\/test|fireflies|bing|surfer\/test|serphouse\/test|seranking\/test)/.test(p)) return 'settings.change';
   return 'content.work';
+}
+
+// GET requests that spend on a paid lookup (SE Ranking, a fresh AI explanation). proxy.ts treats
+// them as actions, so a blocked person cannot run them (reads otherwise stay open to the blocked).
+export function isPaidRead(method: string, path: string, search: URLSearchParams | string = ''): boolean {
+  const m = method.toUpperCase();
+  if (m !== 'GET' && m !== 'HEAD') return false;
+  const p = path.replace(/\/+$/, '');
+  if (/^\/api\/seranking\/(ai-visibility|research)$/.test(p)) return true;
+  const sp = typeof search === 'string' ? new URLSearchParams(search) : search;
+  return /^\/api\/performance\/explain$/.test(p) && sp.get('fresh') === '1';
 }
 
 export function deniedMessage(action: Action): string {

@@ -2,6 +2,7 @@
 
 import { onScreen } from '@/components/shared/on-screen';
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+import { fmtIst } from '@/lib/time';
 import { Download, FileSearch, Loader2, Wand2, X } from 'lucide-react';
 import { useRole } from '@/hooks/use-role';
 import { useSiteStatus } from '@/hooks/use-site-status';
@@ -530,7 +531,7 @@ export default function AuditTab() {
                       {a.rewrite_status === 'generating' && <span className="ml-1 text-xs text-muted-foreground">rewriting…</span>}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{a.issues.length}</TableCell>
-                    <TableCell className="text-muted-foreground">{a.created_at}</TableCell>
+                    <TableCell className="text-muted-foreground">{fmtIst(a.created_at)}</TableCell>
                     <TableCell className="text-right">
                       <Button variant="outline" size="sm" onClick={() => setOpenId(a.id)}>Open</Button>
                     </TableCell>

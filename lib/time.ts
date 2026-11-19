@@ -27,3 +27,12 @@ export function sqlNowOffset(modifier: string): string {
 export function sqlToday(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+// A stored UTC timestamp ('YYYY-MM-DD HH:MM:SS', or ISO with Z) shown in India time, for the
+// dashboard (the same format as the Drafts & Review list). Empty for no value.
+export function fmtIst(s?: string | null): string {
+  if (!s) return '';
+  const d = new Date(String(s).replace(' ', 'T') + (/Z$|[+-]\d\d:?\d\d$/.test(String(s)) ? '' : 'Z'));
+  if (isNaN(d.getTime())) return String(s);
+  return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
+}

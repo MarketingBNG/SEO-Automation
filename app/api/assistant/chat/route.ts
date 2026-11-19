@@ -16,12 +16,17 @@ export async function POST(req: NextRequest) {
   if (!message?.trim() && !(imageIds && imageIds.length)) {
     return NextResponse.json({ error: 'message or an image is required' }, { status: 400 });
   }
+  // A chat id is a whole number (a bad one would fail the database lookup with a 500).
+  const cid = Number(conversationId);
+  if (conversationId && !(Number.isInteger(cid) && cid > 0 && cid <= 2147483647)) {
+    return NextResponse.json({ error: 'conversationId must be a chat id (a whole number).' }, { status: 400 });
+  }
   const ids = (imageIds || []).map(Number).filter(Number.isInteger);
   const actor = await getActor();
   const me = await getMe();
   // Only the owner (or an admin) may continue a chat.
   if (conversationId) {
-    const row = await prisma.assistant_conversations.findUnique({ where: { id: Number(conversationId) }, select: { created_by: true } });
+    const row = await prisma.assistant_conversations.findUnique({ where: { id: cid }, select: { created_by: true } });
     if (row && me && me.role !== 'admin' && !isOwner(me, row.created_by)) return NextResponse.json({ error: 'This chat belongs to someone else.' }, { status: 403 });
   }
   // Only images the person attached themselves: an id from someone else's private chat is refused.
@@ -29,7 +34,7 @@ export async function POST(req: NextRequest) {
   await activity.log('assistant.asked', { details: String(message || '(image)').replace(/<attached_document[\s\S]*$/, '').trim().slice(0, 160) || 'Sent a file', source: 'assistant' }).catch(() => {});
 
   return streamNdjson(req, (emit, signal) =>
-    sendMessage({ conversationId: conversationId ? Number(conversationId) : null, text: message || '', imageIds: ids, actor: ownerStamp(me, actor), me }, emit, signal)
+    sendMessage({ conversationId: conversationId ? cid : null, text: message || '', imageIds: ids, actor: ownerStamp(me, actor), me }, emit, signal)
   );
 }
 
