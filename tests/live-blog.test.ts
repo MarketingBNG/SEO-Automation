@@ -224,3 +224,27 @@ test('Drafts & Review: "Change author on the live post" needs blog.publish_now a
   assert.equal(res.status, 403);
   void prisma;
 });
+
+test('undo restores an empty author exactly, and live edits keep heading numbers as they are', { skip: !db, timeout: 60000 }, async () => {
+  const prisma: any = (await import('../lib/prisma')).default;
+  const { getTool, undoChange } = await tools();
+  const slug = `no-author-${Date.now()}`;
+  const postId = addPost(slug);
+  const numbered = CONTENT.replace('<h2>How to apply</h2>', '<h2>2. How to apply</h2>');
+  site.set(slug, { ...site.get(slug), author: null, content: numbered });
+  try {
+    const out = await getTool('live_blog_set_author').run({ post_id: postId, author: 'Akshay Nahar' }, { me: MANAGER });
+    assert.equal(site.get(slug).author, 'akshay-nahar');
+    assert.match(site.get(slug).content, /<h2>2\. How to apply<\/h2>/, 'heading numbers are not removed by an author change');
+    await undoChange(out.change.undo);
+    assert.equal(site.get(slug).author, null, 'the empty author comes back');
+    assert.equal(site.get(slug).content, numbered, 'undo is exact');
+    const e = await getTool('live_blog_edit').run({ post_id: postId, edits: [{ find: 'Q and A.', replace: 'Questions and answers.' }] }, { me: MANAGER });
+    assert.equal(site.get(slug).content, numbered.replace('Q and A.', 'Questions and answers.'), 'only the asked change');
+    await undoChange(e.change.undo);
+    assert.equal(site.get(slug).content, numbered);
+  } finally {
+    await prisma.content_changes.deleteMany({ where: { entity_type: 'post', entity_id: postId } });
+    site.delete(slug);
+  }
+});

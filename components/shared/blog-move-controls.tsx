@@ -59,7 +59,7 @@ export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (m
           </Button>
         )}
         {!failed && me.can('blog.publish_now') && row.draft_id && (
-          <ChecklistButton draftId={row.draft_id} label="Publish now" disabled={busy} onConfirm={(checklist) => act({ action: 'publish_now', checklist }, `Published "${row.title}" on the website.`)}>
+          <ChecklistButton draftId={row.draft_id} label="Publish now" disabled={busy} onConfirm={() => act({ action: 'publish_now' }, `Published "${row.title}" on the website.`)}>
             <Send /> Publish now
           </ChecklistButton>
         )}

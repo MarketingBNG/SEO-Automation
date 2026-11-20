@@ -66,7 +66,7 @@ const toPost = (p: SitePost & Record<string, any>): Post => ({
 });
 
 // The fields an update can set, as the post holds them now (for undo: what a fix wrote).
-const FIELD_OF: Record<string, (p: Post) => unknown> = { contentHtml: (p) => p.content, seoTitle: (p) => p.seoTitle, metaDescription: (p) => p.seoDescription, title: (p) => p.title, excerpt: (p) => p.excerpt, authorName: (p) => p.author };
+const FIELD_OF: Record<string, (p: Post) => unknown> = { contentHtml: (p) => p.content, seoTitle: (p) => p.seoTitle, metaDescription: (p) => p.seoDescription, title: (p) => p.title, excerpt: (p) => p.excerpt, authorName: (p) => p.author, authorSlugRaw: (p) => p.author };
 export function postFieldsHash(post: Post, keys: string[]): string {
   const vals = [...keys].sort().map((k) => [k, FIELD_OF[k] ? FIELD_OF[k](post) ?? null : null]);
   return crypto.createHash('sha1').update(JSON.stringify(vals)).digest('hex');
@@ -147,6 +147,11 @@ export type PostFields = {
   focusKeyphrase?: string | null;
   authorName?: string | null;
   category?: string;
+  // Updates only: the site's author field exactly as given (a slug, or null to clear it), for undo.
+  authorSlugRaw?: string | null;
+  // Updates only: send the article exactly as given (live edits and their undo), without removing
+  // heading numbers (stripHeadingNumbers), so only the asked change reaches the page.
+  keepContent?: boolean;
 };
 
 export async function publishPost({ title = '', contentHtml = '', excerpt, featuredImageUrl, featuredImageAlt, status = 'publish', slug, seoTitle, metaDescription, focusKeyphrase, authorName, category }: PostFields): Promise<Post> {
@@ -172,7 +177,8 @@ export async function publishPost({ title = '', contentHtml = '', excerpt, featu
 }
 
 // Updates an EXISTING post in place. Its address never changes (that would lose its rankings).
-export async function updatePost(postId: number | string, { title, contentHtml, excerpt, featuredImageUrl, featuredImageAlt, status, seoTitle, metaDescription, focusKeyphrase, authorName, category }: PostFields): Promise<Post> {
+export async function updatePost(postId: number | string, fields: PostFields): Promise<Post> {
+  const { title, contentHtml, excerpt, featuredImageUrl, featuredImageAlt, status, seoTitle, metaDescription, focusKeyphrase, authorName, category, keepContent } = fields;
   need();
   const at = await slugForId(postId);
   const cur: any = await sitePost(at);
@@ -183,11 +189,11 @@ export async function updatePost(postId: number | string, { title, contentHtml, 
   await connectorCall('post.update', {
     slug: at,
     title: title || cur.title,
-    content: contentHtml ? stripHeadingNumbers(contentHtml) : cur.content,
+    content: contentHtml ? (keepContent ? contentHtml : stripHeadingNumbers(contentHtml)) : cur.content,
     excerpt: excerpt ?? cur.excerpt ?? '',
     status: next,
     category: category || cur.category || pickCategory(`${focusKeyphrase || ''} ${title || cur.title}`),
-    ...(authorSlug(authorName) ? { author: authorSlug(authorName) } : cur.author ? { author: cur.author } : {}),
+    ...('authorSlugRaw' in fields ? { author: fields.authorSlugRaw ?? null } : authorSlug(authorName) ? { author: authorSlug(authorName) } : cur.author ? { author: cur.author } : {}),
     seo_title: seoTitle || cur.seo_title || title || cur.title,
     seo_description: metaDescription ?? cur.seo_description ?? null,
     focus_keyphrase: focusKeyphrase ?? cur.focus_keyphrase ?? null,

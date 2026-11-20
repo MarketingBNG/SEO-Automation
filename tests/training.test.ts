@@ -356,6 +356,14 @@ test('scores move the level up and down with history; surprise test, games and t
     // A game round on a lesson: marked on the server, the best round kept, points added once.
     const { buildGames } = await content();
     const g = buildGames({ id: lessons[0], extras: LESSON_EXTRAS });
+    // A lesson that is not the person's own lesson of today is practice: no points kept.
+    const practice = await playGame(email, lessons[0], { match: g.match!.answer });
+    assert.equal(practice.awarded, false);
+    assert.equal(await prisma.training_games.count({ where: { email } }), 0);
+    // Made the person's own lesson of today: points count.
+    const { istDay } = await import('../lib/topics');
+    await prisma.training_lessons.update({ where: { id: lessons[0] }, data: { day: istDay() } });
+    await prisma.training_profiles.update({ where: { email }, data: { lesson_ids: JSON.stringify({ technical: lessons[0] }) } });
     const first = await playGame(email, lessons[0], { match: g.match!.answer });
     assert.equal(first.points, 4 * 10);
     const again = await playGame(email, lessons[0], { match: g.match!.answer, order: g.order!.answer });

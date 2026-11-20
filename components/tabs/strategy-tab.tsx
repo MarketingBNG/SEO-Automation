@@ -1,6 +1,6 @@
 'use client';
 
-import { ALL_TICKED, ChecklistButton } from '@/components/shared/publish-checklist';
+import { ChecklistButton } from '@/components/shared/publish-checklist';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -751,9 +751,9 @@ export function MonthRunning({ standalone = false }: { standalone?: boolean } = 
     load();
   }, [load]);
 
-  async function decide(id: number, action: 'approve' | 'reject', checklist?: typeof ALL_TICKED) {
+  async function decide(id: number, action: 'approve' | 'reject') {
     setBusy(id);
-    const res = await fetch(`/api/strategy/schedule/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback, reviewer: reviewer[id] || '', checklist }) });
+    const res = await fetch(`/api/strategy/schedule/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback, reviewer: reviewer[id] || '' }) });
     const json = await res.json().catch(() => ({}));
     setBusy(null);
     if (!res.ok) return setMsg(json.error || 'Could not save.');
@@ -839,7 +839,7 @@ export function MonthRunning({ standalone = false }: { standalone?: boolean } = 
                       </select>
                     )}
                     {r.needs_expert && !(data.reviewers || []).length && <span className="text-xs text-muted-foreground">Type the reviewer as &quot;Name, CA&quot;.</span>}
-                    <ChecklistButton draftId={r.draft_id} label="Approve blog" disabled={busy === r.id || (r.needs_expert && !reviewer[r.id])} onConfirm={(c) => decide(r.id, 'approve', c)}>Approve blog</ChecklistButton>
+                    <ChecklistButton draftId={r.draft_id} label="Approve blog" disabled={busy === r.id || (r.needs_expert && !reviewer[r.id])} onConfirm={() => decide(r.id, 'approve')}>Approve blog</ChecklistButton>
                     <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => setRejecting(rejecting === r.id ? null : r.id)}>Reject</Button>
                   </div>
                 )}

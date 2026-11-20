@@ -66,11 +66,30 @@ const lessonKey = (day: string, level: number, track: Track, audience: Audience)
 
 // Makes (once) the lesson for a day, level, track and audience. null when a Know UIC lesson has no
 // service page it can read today (skipped, and not asked again that day).
-export async function makeLesson(day: string, level: number, track: Track = 'technical', audience: Audience = 'associate', ask = callClaude) {
+// One lesson per key is made at a time on this server: a first visit and the 09:00 run (or two people
+// at the same level) asking at once share the one AI call.
+const making: Map<string, Promise<any>> = ((globalThis as any).__trainingMaking ||= new Map());
+export const MAX_LESSON_FAILURES = 2;
+
+export function makeLesson(day: string, level: number, track: Track = 'technical', audience: Audience = 'associate', ask = callClaude) {
+  const key = `${day}:${level}:${track}:${audience}`;
+  const running = making.get(key);
+  if (running) return running;
+  const job = makeLessonOnce(day, level, track, audience, ask).finally(() => making.delete(key));
+  making.set(key, job);
+  return job;
+}
+
+async function makeLessonOnce(day: string, level: number, track: Track, audience: Audience, ask: typeof callClaude) {
   const have = await prisma.training_lessons.findUnique({ where: lessonKey(day, level, track, audience) });
   if (have) return have;
   const skipKey = `training_skip:${day}:${level}:${track}:${audience}`;
   if (await settings.get(skipKey)) return null;
+  // A lesson that failed (not because AI work waits) is tried at most twice a day in total for its
+  // level, track and audience, whoever asks: after that the day goes without it (nobody is locked).
+  const failKey = `training_fail:${day}:${level}:${track}:${audience}`;
+  const failures = Number((await settings.get(failKey)) || 0);
+  if (failures >= MAX_LESSON_FAILURES) return null;
   let meetings = '';
   if (track === 'technical') {
     try {
@@ -112,7 +131,10 @@ export async function makeLesson(day: string, level: number, track: Track = 'tec
     await settings.set(skipKey, String(j.reason || 'no service page could be read').slice(0, 300));
     return null;
   }
-  if (!j) throw lastErr || new Error('Could not make the lesson');
+  if (!j) {
+    if (!waitsForAi(lastErr)) await settings.set(failKey, String(failures + 1));
+    throw lastErr || new Error('Could not make the lesson');
+  }
   const sources = (Array.isArray(j.sources) ? j.sources : []).filter((s: any) => s && /^https?:\/\//.test(String(s.url || ''))).slice(0, 8).map((s: any) => ({ title: String(s.title || s.url).slice(0, 200), url: String(s.url) }));
   const topic = String(j.topic || (track === 'uic' ? service?.name : topicFor(track, day, level)) || j.title || '').slice(0, 160);
   const questions = cleanQuestions(j.questions, `${day}-L${level}-${track}-${audience}`, questionsFor(track, level), track, topic);
@@ -151,8 +173,10 @@ const seededPick = <T,>(arr: T[], n: number, seed: string): T[] =>
 export async function prepareDay(email: string, day: string, role?: string, ask = callClaude) {
   const p = await prisma.training_profiles.findUnique({ where: { email } });
   if (!p || !p.active) return;
-  const member = role ? { role } : await prisma.team_members.findUnique({ where: { email }, select: { role: true } });
-  const r = member?.role || 'user';
+  const member = await prisma.team_members.findUnique({ where: { email }, select: { role: true, blocked: true } });
+  // A blocked person gets no lessons (no AI spent) and is never locked.
+  if (member?.blocked) return;
+  const r = role || member?.role || 'user';
   if (!isTrainee(r)) return;
   const audience = audienceFor(r);
   // An earlier test left open counts as missed: its questions come back two days from now. So does one
@@ -180,7 +204,7 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
     const seen = new Set(fresh.map((q) => q.id));
     const questions = [...fresh, ...repeats.filter((q) => !seen.has(q.id))];
     if (questions.length) {
-      await prisma.training_tests.create({ data: { email, day, level: p.level, kind: 'daily', lesson_id: tested[0] || null, lesson_ids: tested.length ? `,${tested.join(',')},` : null, questions: JSON.stringify(questions), total: questions.length } }).catch(() => {});
+      await prisma.training_tests.create({ data: { email, day, level: p.level, kind: 'daily', lesson_id: tested[0] || null, lesson_ids: tested.length ? `,${tested.join(',')},` : ',', questions: JSON.stringify(questions), total: questions.length } }).catch(() => {});
     }
   }
   if (isSurpriseDay(email, day)) await prepareSurprise(email, day, p.level, audience);
@@ -338,13 +362,20 @@ export async function playGame(email: string, lessonId: number, answers: GameAns
   if (!lesson) throw Object.assign(new Error('Lesson not found'), { status: 404 });
   const games = buildGames({ id: lesson.id, extras: JSON.parse(lesson.extras || '{}'), questions: lesson.questions });
   const { points, max } = scoreGame(games, answers || {});
+  // Points only for the person's own lessons of the day: any other lesson can be played for practice.
+  const prof = await prisma.training_profiles.findUnique({ where: { email } });
+  const own = prof ? Object.values(lessonIdsOf(prof)).includes(lessonId) : false;
+  if (!own || lesson.day !== istDay()) {
+    const days = (await prisma.training_games.findMany({ where: { email }, select: { day: true } })).map((r: any) => r.day);
+    return { points, max, best: points, totalPoints: prof?.points || 0, streak: gameStreak(days, istDay()), awarded: false, note: 'Practice round: points count only for your own lessons of today.' };
+  }
   const before = await prisma.training_games.findUnique({ where: { email_lesson_id: { email, lesson_id: lessonId } } });
   const gain = Math.max(0, points - (before?.points || 0));
   if (!before) await prisma.training_games.create({ data: { email, day: istDay(), lesson_id: lessonId, points, max_points: max } });
   else if (points > before.points) await prisma.training_games.update({ where: { id: before.id }, data: { points } });
   const p = gain ? await prisma.training_profiles.update({ where: { email }, data: { points: { increment: gain } } }).catch(() => null) : await prisma.training_profiles.findUnique({ where: { email } });
   const days = (await prisma.training_games.findMany({ where: { email }, select: { day: true } })).map((r) => r.day);
-  return { points, max, best: Math.max(points, before?.points || 0), totalPoints: p?.points || 0, streak: gameStreak(days, istDay()) };
+  return { points, max, best: Math.max(points, before?.points || 0), totalPoints: p?.points || 0, streak: gameStreak(days, istDay()), awarded: true };
 }
 
 // Everyone on the team except the admin is in the training (a profile is made for them); blocked

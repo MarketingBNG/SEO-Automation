@@ -403,6 +403,14 @@ async function publishRowOnce(row, now, verify) {
   // article schema.
   let cover: { id: number; url: string } | null = null;
   if (!row.refresh_url) {
+    // The banner ticked at approval (publish checklist) is the one published; a blog approved with a
+    // banner tick never gets a different banner made at its slot.
+    if (!checked.featured_image_path && /"banner"/.test(checked.publish_checklist || '')) {
+      const why = 'The banner checked at approval is missing. Open the blog in Drafts & Review, check the banner in the publish checklist and approve again.';
+      await update(row.id, { status: 'held', hold_reasons: JSON.stringify([why]) });
+      await notify(`Blog held: ${row.title}`, why);
+      return 'held';
+    }
     let imageKey = checked.featured_image_path || (await import('../coverPhoto').then((m) => m.ensurePhotoCover(checked.id)).catch(() => null));
     if (!imageKey) {
       imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(row.main_keyword)}.png`, await makeCover(checked.title, authorName), 'image/png').catch(() => null);

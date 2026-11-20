@@ -45,11 +45,11 @@ test('ticks: all four needed; a change to the title, author, text or banner undo
     const log = await prisma.activity_log.findFirst({ where: { action: 'draft.checklist', entity_id: d.id }, orderBy: { id: 'desc' } });
     assert.equal(log.actor, 'Reviewer One');
 
-    // Title changed: only the title tick goes (the made banner shows the title, so it goes too).
+    // Title changed: only the title tick goes (the banner is the saved file, checked as it is).
     await prisma.drafts.update({ where: { id: d.id }, data: { title: 'Desk plants that need little care' } });
     st = await checklistState(await prisma.drafts.findUnique({ where: { id: d.id } }));
     const t = Object.fromEntries(st.items.map((i: any) => [i.key, i.ticked]));
-    assert.deepEqual(t, { author: true, title: false, content: true, banner: false });
+    assert.deepEqual(t, { author: true, title: false, content: true, banner: true });
     assert.ok(st.items.find((i: any) => i.key === "title")?.reset);
     assert.match((await checklistProblem(d.id, null, 'x'))!, /changed after it was ticked/);
 

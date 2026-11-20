@@ -7,7 +7,6 @@
 // allow only to a person who may publish straight away. The calendar autopilot does not use this.
 import prisma from '@/lib/prisma';
 import { stripActiveContent } from '@/lib/htmlSanitize';
-import { ensurePhotoCover } from '@/lib/coverPhoto';
 import { uploadImage, publishPost, updatePost, seoSlug, freeSlug, getPost, postStatus, postBySlug, siteConfigured, draftsRefused, SITE_NOT_SET_UP } from '@/lib/site';
 import { slugFromUrl } from '@/lib/siteConnector';
 import * as activity from '@/lib/activity';
@@ -19,12 +18,11 @@ import { CREDENTIAL, expertReviewers, requireExpert } from '@/lib/reviewers';
 import { withByline, expertSchema } from '@/lib/byline';
 import { authorNames, pickAuthor } from '@/lib/authors';
 import { publishDraftImages } from '@/lib/inlineMedia';
-import { makeCover, coverAlt } from '@/lib/cover';
-import { saveFile } from '@/lib/storage';
+import { coverAlt } from '@/lib/cover';
 import { ensureOriginality, originalityReason } from '@/lib/originality';
 import { claimPublish } from '@/lib/strategy/publishLock';
 import { wordsHash } from '@/lib/factCheckMark';
-import { checklistProblem } from '@/lib/publishChecklist';
+import { checklistProblem, settleBanner } from '@/lib/publishChecklist';
 import type { Role } from '@/lib/permissions';
 
 // 'publish' or 'draft', or null only when the website says the post is not there (404). Any other
@@ -208,16 +206,21 @@ export async function publishDraft(nid: number, opts: PublishOptions = {}): Prom
       }
       const keyword = kw;
       // A refresh keeps the live page's author: no partner is picked for it (as the calendar does).
-      const author = refreshUrl ? draft.author || null : draft.author || pickAuthor(await authorNames());
+      // Otherwise the author that was checked: the draft's, else its calendar row's (a new pick only
+      // when neither has one, which the checklist does not allow for a blog going live).
+      const rowAuthor = (await prisma.blog_schedule.findFirst({ where: { draft_id: nid }, orderBy: { id: 'desc' }, select: { author: true } }))?.author || null;
+      const author = refreshUrl ? draft.author || null : draft.author || rowAuthor || pickAuthor(await authorNames());
       if (!draft.author && author) await prisma.drafts.update({ where: { id: nid }, data: { author } });
 
-      // The cover: the uploaded one, or the branded cover made from the title and author (the same
-      // one the preview and the Word file show).
-      let imageKey = refreshUrl ? null : draft.featured_image_path || (await ensurePhotoCover(nid).catch(() => null));
+      // The cover: the banner that was checked (settled on the draft when the checklist was opened or
+      // ticked). Nothing makes a different banner after the tick: a missing one is refused.
+      const saved = (await prisma.drafts.findUnique({ where: { id: nid }, select: { featured_image_path: true } }))?.featured_image_path || null;
+      let imageKey = refreshUrl ? null : saved;
       if (!imageKey && !refreshUrl) {
-        imageKey = await saveFile(`covers/${Date.now()}-${seoSlug(keyword || draft.title)}.png`, await makeCover(draft.title, author), 'image/png').catch(() => null);
-        if (imageKey) await prisma.drafts.update({ where: { id: nid }, data: { featured_image_path: imageKey } });
+        if (wpStatus === 'publish') throw Object.assign(new Error('The banner that was checked is missing. Open the publish checklist again, check the banner and tick it, then publish.'), { status: 409 });
+        imageKey = await settleBanner(nid);
       }
+      draft.featured_image_path = imageKey || draft.featured_image_path;
       // It goes to the website with its alt text (what the picture shows), so Google reads it.
       const cover = imageKey ? await uploadImage(imageKey, { altText: coverAlt(draft) }) : null;
 
@@ -290,7 +293,7 @@ export async function publishDraft(nid: number, opts: PublishOptions = {}): Prom
         details: `"${draft.title}": ${err.message}`,
         actor: await actorOf(opts),
       });
-      return reply({ error: err.message }, 500);
+      return reply({ error: err.message }, err.status === 409 ? 409 : 500);
     }
   } finally {
     release();

@@ -69,7 +69,7 @@ export async function setLiveAuthor(ref: PostRef, author: string, actor: string)
   const plan = await authorPlan(ref, author);
   const { post, name, html, draft } = plan;
   if (plan.same) throw Object.assign(new Error(`"${post.title}" is already published under ${name}.`), { status: 409 });
-  const updated = await updatePost(post.id!, { contentHtml: html, authorName: name });
+  const updated = await updatePost(post.id!, { contentHtml: html, authorName: name, keepContent: true });
   if (draft) await prisma.drafts.update({ where: { id: draft.id }, data: { author: name, updated_at: sqlNow() } });
   await recordChange({ entityType: draft ? 'draft' : 'post', entityId: draft ? draft.id : post.id!, kind: 'author', actor, title: post.title, before: { title: post.title, html: post.content }, after: { title: post.title, html: updated.content } }).catch(() => null);
   await activity.log('site.author_changed', { entityType: draft ? 'draft' : 'site_post', entityId: draft ? draft.id : post.id, details: `"${post.title}" (${post.link}): author ${post.author || 'none'} to ${name}`, actor });
@@ -79,7 +79,7 @@ export async function setLiveAuthor(ref: PostRef, author: string, actor: string)
       summary: `Changed the author of the live post "${post.title}" to ${name}`,
       targetType: 'site_post',
       targetId: String(post.id),
-      undo: { kind: 'restore_live_post', id: post.id, fields: { contentHtml: post.content, authorName: post.author }, expectHash: postFieldsHash(updated, ['contentHtml', 'authorName']), draftId: draft?.id ?? null, draftAuthor: draft?.author ?? null, title: post.title },
+      undo: { kind: 'restore_live_post', id: post.id, fields: { contentHtml: post.content, authorSlugRaw: post.author ?? null }, expectHash: postFieldsHash(updated, ['contentHtml', 'authorSlugRaw']), draftId: draft?.id ?? null, draftAuthor: draft?.author ?? null, title: post.title },
     },
   };
 }
@@ -170,7 +170,7 @@ export async function editLive(ref: PostRef, e: LiveEdit, actor: string): Promis
     }
   }
   if (!Object.keys(fields).length) throw Object.assign(new Error('The post already says that; nothing was changed.'), { status: 409 });
-  const updated = await updatePost(post.id!, fields);
+  const updated = await updatePost(post.id!, { ...fields, keepContent: true });
   // The dashboard copy keeps the same title and meta description (its article text is the draft's own).
   if (draft && (fields.title || fields.metaDescription)) {
     await prisma.drafts.update({ where: { id: draft.id }, data: { ...(fields.title ? { title } : {}), ...(fields.metaDescription ? { meta_description: meta } : {}), updated_at: sqlNow() } });
@@ -203,10 +203,10 @@ export async function undoLiveChange(undo: any, { force = false, actor = 'someon
     err.code = 'CHANGED_SINCE';
     throw err;
   }
-  const restored = await updatePost(undo.id, undo.fields || {});
+  const restored = await updatePost(undo.id, { ...(undo.fields || {}), keepContent: true });
   if (undo.draftId) {
     const data: any = {};
-    if ('authorName' in (undo.fields || {}) && undo.draftAuthor !== undefined) data.author = undo.draftAuthor;
+    if (('authorSlugRaw' in (undo.fields || {}) || 'authorName' in (undo.fields || {})) && undo.draftAuthor !== undefined) data.author = undo.draftAuthor;
     if (undo.draftFields) {
       if (undo.fields.title !== undefined && undo.draftFields.title !== null) data.title = undo.draftFields.title;
       if (undo.fields.metaDescription !== undefined && undo.draftFields.meta_description !== null) data.meta_description = undo.draftFields.meta_description;

@@ -34,18 +34,39 @@ export async function trainingGate(email: string, role: string, day = istDay()):
   return value;
 }
 
+// Lessons and tests made at or after this hour (IST) on their day, because AI work was paused, in
+// Testing mode or failed earlier, do not lock that day: the person is told, and the gate starts the
+// next day. Lessons and tests from before the training's second version (no lesson extras, a test
+// with no lesson list) never lock, so the day this version goes live nobody is locked mid-work.
+export const GATE_CUTOFF_HOUR_IST = 13;
+export function madeLate(createdAt: string | null | undefined, day: string): boolean {
+  const ms = Date.parse(String(createdAt || '').replace(' ', 'T') + (/[zZ]$/.test(String(createdAt || '')) ? '' : 'Z'));
+  if (!Number.isFinite(ms)) return false;
+  const ist = new Date(ms + 5.5 * 3600000);
+  const d = ist.toISOString().slice(0, 10);
+  return d > day || (d === day && ist.getUTCHours() >= GATE_CUTOFF_HOUR_IST);
+}
+
 async function computeGate(email: string, day: string): Promise<Gate> {
   const p = await prisma.training_profiles.findUnique({ where: { email } });
   if (!p || !p.active) return OPEN;
+  // A blocked person cannot submit anything, so they are never locked.
+  const member = await prisma.team_members.findUnique({ where: { email }, select: { blocked: true } });
+  if (member?.blocked) return OPEN;
   const ids = Object.values(lessonIdsOf(p)).filter((x): x is number => Boolean(x));
-  const todays = ids.length ? await prisma.training_lessons.findMany({ where: { id: { in: ids }, day }, select: { id: true, title: true, track: true } }) : [];
-  const read = new Set((await prisma.training_reads.findMany({ where: { email, lesson_id: { in: todays.map((l) => l.id) } }, select: { lesson_id: true } })).map((r) => r.lesson_id));
-  const unread = todays.filter((l) => !read.has(l.id)).map((l) => ({ id: l.id, title: l.title, track: TRACK_LABEL[l.track as Track] || l.track }));
-  const openTests = (await prisma.training_tests.findMany({ where: { email, day, status: 'open' }, select: { id: true, kind: true } })).map((t) => ({ id: t.id, kind: t.kind }));
-  if (!todays.length && !openTests.length) {
-    return { ...OPEN, notice: "Today's training is not ready yet (lessons are made after 09:00 IST, and wait while AI work is paused or in Testing mode). The dashboard stays open meanwhile." };
+  const all = ids.length ? await prisma.training_lessons.findMany({ where: { id: { in: ids }, day, extras: { not: null } }, select: { id: true, title: true, track: true, created_at: true } }) : [];
+  const tests = await prisma.training_tests.findMany({ where: { email, day, status: 'open', lesson_ids: { not: null } }, select: { id: true, kind: true, created_at: true } });
+  const todays = all.filter((l: any) => !madeLate(l.created_at, day));
+  const late = all.length - todays.length + tests.filter((t: any) => madeLate(t.created_at, day)).length;
+  const read = new Set((await prisma.training_reads.findMany({ where: { email, lesson_id: { in: todays.map((l: any) => l.id) } }, select: { lesson_id: true } })).map((r: any) => r.lesson_id));
+  const unread = todays.filter((l: any) => !read.has(l.id)).map((l: any) => ({ id: l.id, title: l.title, track: TRACK_LABEL[l.track as Track] || l.track }));
+  const openTests = tests.filter((t: any) => !madeLate(t.created_at, day)).map((t: any) => ({ id: t.id, kind: t.kind }));
+  const locked = unread.length > 0 || openTests.length > 0;
+  if (!locked) {
+    if (late) return { ...OPEN, notice: `Today's training was ready late (after ${GATE_CUTOFF_HOUR_IST}:00 IST), so it does not lock the dashboard today. Please do it today; from tomorrow the dashboard waits for it again.` };
+    if (!all.length && !tests.length) return { ...OPEN, notice: "Today's training is not ready yet (lessons are made after 09:00 IST, and wait while AI work is paused or in Testing mode). The dashboard stays open meanwhile." };
   }
-  return { locked: unread.length > 0 || openTests.length > 0, unread, openTests, notice: null };
+  return { locked, unread, openTests, notice: null };
 }
 
 // API paths a locked person may still write to: the training itself (sign-in and sign-out are public).

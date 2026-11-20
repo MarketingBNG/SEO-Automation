@@ -195,7 +195,7 @@ async function library(audience: string | null) {
   });
 }
 
-export async function trainingView(me: { email: string; name: string; role: string }, { testId = 0, person = '' }: { testId?: number; person?: string } = {}): Promise<{ status: number; body: any }> {
+export async function trainingView(me: { email: string; name: string; role: string; blocked?: boolean }, { testId = 0, person = '' }: { testId?: number; person?: string } = {}): Promise<{ status: number; body: any }> {
   const viewer = isViewer(me.role);
   if (testId) {
     const t = await prisma.training_tests.findUnique({ where: { id: testId } });
@@ -211,7 +211,8 @@ export async function trainingView(me: { email: string; name: string; role: stri
 
   let mine: Awaited<ReturnType<typeof personView>> = null;
   if (trainee) {
-    if (!(await prisma.training_profiles.findUnique({ where: { email: me.email } }))) {
+    // A blocked person gets no profile and no lessons (no AI spent for someone who cannot take part).
+    if (!me.blocked && !(await prisma.training_profiles.findUnique({ where: { email: me.email } }))) {
       await prisma.training_profiles.create({ data: { email: me.email, name: me.name } }).catch(() => {});
       // First visit: make today's lessons now, in the background.
       const { prepareDay } = await import('@/lib/associateTraining');

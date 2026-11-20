@@ -174,7 +174,9 @@ export function actionFor(method: string, path: string): Action | null {
   // approve, say, a manual task they are allowed to do, and nothing their role cannot do.
   if (/^\/api\/assistant\/(chat|upload|decide)/.test(p)) return 'assistant.ask';
   if (/^\/api\/assistant\/undo/.test(p)) return 'website.change';
-  if (/^\/api\/associate-training/.test(p)) return 'manual.do'; // admin-only actions are checked in the route
+  // Everyone takes the training, whatever their role's actions; the admin-only actions are checked in
+  // the route. (manual.do here locked out a role without it, with no way to finish the training.)
+  if (/^\/api\/associate-training/.test(p)) return null;
   if (/^\/api\/strategy\/manual|^\/api\/strategy\/backlinks\//.test(p)) return 'manual.do';
   // Everyone on the team (managers and associates too) can approve, reject, pause and reschedule calendar blogs.
   if (/^\/api\/strategy\/schedule\/[^/]+$/.test(p)) return 'manual.do';

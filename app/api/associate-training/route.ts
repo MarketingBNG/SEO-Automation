@@ -17,7 +17,12 @@ export const runtime = 'nodejs';
 export async function GET(req: NextRequest) {
   const me = await getMe();
   if (!me) return NextResponse.json({ error: 'Sign in first' }, { status: 401 });
-  if (req.nextUrl.searchParams.get('gate')) return NextResponse.json(await trainingGate(me.email, me.role));
+  if (req.nextUrl.searchParams.get('gate')) {
+    // The live role and block (as proxy.ts uses), not the session copy.
+    const live = await import('@/lib/access').then((a) => a.liveAccessFor(me.email)).catch(() => null);
+    if (live && (!live.member || live.blocked)) return NextResponse.json({ locked: false, unread: [], openTests: [], notice: null });
+    return NextResponse.json(await trainingGate(me.email, live?.role || me.role));
+  }
   if (req.nextUrl.searchParams.get('report') === 'csv') {
     if (!isViewer(me.role)) return NextResponse.json({ error: 'Only the admin or a manager can download the report.' }, { status: 403 });
     return new NextResponse(reportCsv(await teamReport()), { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="training-report-${new Date().toISOString().slice(0, 10)}.csv"` } });

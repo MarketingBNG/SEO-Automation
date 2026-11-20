@@ -230,7 +230,9 @@ export default function Dashboard() {
   const locked = Boolean(gate?.locked);
   // Read once when the page loads (the clock is not read during render).
   // Before the session loads, the role's default pages (lib/permissions.ts, the one list).
-  const visible = (key: string) => (who.loaded ? who.sees(key) : defaultAccess(who.role).pages.includes(key));
+  // While the training gate is on, Associate Training opens even for a role whose page access leaves it
+  // out: it is the only way to unlock the dashboard.
+  const visible = (key: string) => (locked && key === 'associates') || (who.loaded ? who.sees(key) : defaultAccess(who.role).pages.includes(key));
   // A page the role cannot see (for example from an old link) falls back to Home.
   const shown: TabKey = locked ? 'associates' : who.loaded && !visible(tab) ? 'home' : tab;
   const current = TABS.find((t) => t.key === shown)!;
