@@ -76,7 +76,7 @@ export const PAGES: { key: string; label: string }[] = [
   { key: 'keywords', label: 'Write a blog' }, { key: 'drafts', label: 'Drafts & Review' }, { key: 'audit', label: 'Check a blog' }, { key: 'renewal', label: 'Refresh a live blog' }, { key: 'training', label: 'Writing rules' },
   { key: 'sitecontent', label: 'Website Content' },
   { key: 'overall', label: 'Overall Report' }, { key: 'seo', label: 'SEO' }, { key: 'aeo', label: 'AEO' }, { key: 'geo', label: 'GEO' }, { key: 'meetings', label: 'Meeting insights' },
-  { key: 'associates', label: 'Associate Training' }, { key: 'team', label: 'Team & Roles' }, { key: 'activity', label: 'Activity Log' }, { key: 'learning', label: 'Learning' },
+  { key: 'associates', label: 'Team Training' }, { key: 'team', label: 'Team & Roles' }, { key: 'activity', label: 'Activity Log' }, { key: 'learning', label: 'Learning' },
   { key: 'guide', label: 'Guide & map' },
   { key: 'settings', label: 'Settings' },
 ];
