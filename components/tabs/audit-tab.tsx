@@ -1,7 +1,7 @@
 'use client';
 
 import { onScreen } from '@/components/shared/on-screen';
-import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { fmtIst } from '@/lib/time';
 import { Download, FileSearch, Loader2, Wand2, X } from 'lucide-react';
 import { useRole } from '@/hooks/use-role';
@@ -400,6 +400,15 @@ export default function AuditTab() {
   }
 
   const open = audits.find((a) => a.id === openId);
+  // Pressing Open (or a new audit opening) brings the audit into view, without scrolling by hand.
+  const openRef = useRef<HTMLDivElement>(null);
+  const scrolledFor = useRef<any>(null);
+  const isOpen = Boolean(open);
+  useEffect(() => {
+    if (!isOpen || scrolledFor.current === openId) return;
+    scrolledFor.current = openId;
+    requestAnimationFrame(() => openRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+  }, [isOpen, openId]);
   const openBusy = open ? busyAudits[open.id] : null;
   const canRun = mode === 'url' ? sourceUrl.trim() : contentHtml.trim();
 
@@ -548,12 +557,20 @@ export default function AuditTab() {
         </CardContent>
       </Card>
 
+      <div ref={openRef} className="scroll-mt-16" />
       {open && (
         <Card>
           <CardHeader>
             <CardTitle className="break-words">{decodeEntities(open.title) || open.source_url}</CardTitle>
             <CardAction>
-              <Button variant="ghost" size="sm" onClick={() => setOpenId(null)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setOpenId(null);
+                  scrolledFor.current = null;
+                }}
+              >
                 <X /> Close
               </Button>
             </CardAction>

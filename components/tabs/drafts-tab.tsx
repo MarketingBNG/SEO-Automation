@@ -246,9 +246,17 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
     // eslint-disable-next-line react-hooks/set-state-in-effect -- same effect as the old app
     setMessage('');
     loadDraft();
-    // Opened from a link on another page: bring the editor into view.
-    topRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }, [loadDraft]);
+
+  // Opened (Open in the list, or a link from another page): bring the editor into view once it has
+  // loaded. It used to scroll at once, while only the "Loading" line was there, so nothing moved.
+  const scrolledFor = useRef<any>(null);
+  const loadedId = draft?.id;
+  useEffect(() => {
+    if (!loadedId || scrolledFor.current === draftId) return;
+    scrolledFor.current = draftId;
+    requestAnimationFrame(() => topRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+  }, [loadedId, draftId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the draft again after a list-row fix

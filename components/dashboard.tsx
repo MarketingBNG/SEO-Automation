@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import {
@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader,
-  SidebarInput, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
+  SidebarInput, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger, useSidebar,
 } from '@/components/ui/sidebar';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -96,6 +96,73 @@ const GROUP_LABEL: Record<(typeof GROUPS)[number], string> = {
 const PERFORMANCE_VIEWS: string[] = ['overall', 'seo', 'aeo', 'geo'];
 const isTab = (v: string | null): v is TabKey => !!v && TABS.some((t) => t.key === v);
 
+// Where the sidebar list was scrolled to. Kept outside the component, so it survives anything that
+// mounts the list again (the phone sidebar is a sheet that is made afresh every time it opens, and
+// the list is rebuilt while the session loads), which used to put it back at the top.
+let sidebarScroll = 0;
+
+// Keeps the sidebar's scroll position across page switches and keeps the open page's item in view.
+function useSidebarScroll(shown: string) {
+  const el = useRef<HTMLDivElement | null>(null);
+  const restore = useCallback(() => {
+    const box = el.current;
+    if (!box) return;
+    if (Math.abs(box.scrollTop - sidebarScroll) > 1) box.scrollTop = sidebarScroll;
+    const active = box.querySelector<HTMLElement>('[data-active]');
+    if (active) {
+      const a = active.getBoundingClientRect();
+      const b = box.getBoundingClientRect();
+      // Only when the item is out of view, and only as far as needed (like normal tabs).
+      if (a.top < b.top || a.bottom > b.bottom) active.scrollIntoView({ block: 'nearest' });
+    }
+  }, []);
+  const attach = useCallback(
+    (node: HTMLDivElement | null) => {
+      el.current = node;
+      if (node) requestAnimationFrame(restore);
+    },
+    [restore],
+  );
+  useEffect(() => {
+    const id = requestAnimationFrame(restore);
+    return () => cancelAnimationFrame(id);
+  }, [shown, restore]);
+  const onScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    sidebarScroll = e.currentTarget.scrollTop;
+  }, []);
+  return [attach, onScroll] as const;
+}
+
+// On a phone the sidebar is a sheet over the page: it closes when a page is picked.
+function useCloseOnPick() {
+  const { isMobile, setOpenMobile } = useSidebar();
+  return useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+  }, [isMobile, setOpenMobile]);
+}
+
+function SidebarPages({ children, shown }: { children: React.ReactNode; shown: string }) {
+  const [attach, onScroll] = useSidebarScroll(shown);
+  return (
+    <SidebarContent ref={attach} onScroll={onScroll}>
+      {children}
+    </SidebarContent>
+  );
+}
+
+function PageButton({ onPick, ...props }: React.ComponentProps<typeof SidebarMenuButton> & { onPick: () => void }) {
+  const close = useCloseOnPick();
+  return (
+    <SidebarMenuButton
+      {...props}
+      onClick={() => {
+        onPick();
+        close();
+      }}
+    />
+  );
+}
+
 export default function Dashboard() {
   const params = useSearchParams();
   const { data: session } = useSession();
@@ -121,10 +188,7 @@ export default function Dashboard() {
     if (want !== tab) setTabState(want);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramTab]);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab)));
-  }, [tab]);
+
 
   function setTab(next: string) {
     if (!isTab(next)) return;
@@ -144,12 +208,37 @@ export default function Dashboard() {
   }
 
   const who = useRole();
+  // The daily training gate (lib/trainingGate.ts): until today's lessons are read and today's tests
+  // submitted, only Associate Training (and sign out) opens. Fails open: no answer means not locked.
+  const [gate, setGate] = useState<{ locked: boolean; unread: any[]; openTests: any[]; notice: string | null } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const check = () =>
+      fetch('/api/associate-training?gate=1')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((g) => alive && setGate(g))
+        .catch(() => {});
+    check();
+    const t = setInterval(check, 60000);
+    window.addEventListener('training-updated', check);
+    return () => {
+      alive = false;
+      clearInterval(t);
+      window.removeEventListener('training-updated', check);
+    };
+  }, []);
+  const locked = Boolean(gate?.locked);
   // Read once when the page loads (the clock is not read during render).
   // Before the session loads, the role's default pages (lib/permissions.ts, the one list).
   const visible = (key: string) => (who.loaded ? who.sees(key) : defaultAccess(who.role).pages.includes(key));
   // A page the role cannot see (for example from an old link) falls back to Home.
-  const shown: TabKey = who.loaded && !visible(tab) ? 'home' : tab;
+  const shown: TabKey = locked ? 'associates' : who.loaded && !visible(tab) ? 'home' : tab;
   const current = TABS.find((t) => t.key === shown)!;
+  // The page shown (also when the training gate forces Associate Training) mounts on first visit.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVisited((v) => (v.has(shown) ? v : new Set(v).add(shown)));
+  }, [shown]);
 
   return (
     <SidebarProvider>
@@ -164,7 +253,7 @@ export default function Dashboard() {
             </div>
           </div>
         </SidebarHeader>
-        <SidebarContent>
+        <SidebarPages shown={shown}>
           <div className="px-2 pt-1 group-data-[collapsible=icon]:hidden">
             <SidebarInput placeholder="Find a page…" value={find} onChange={(e) => setFind(e.target.value)} aria-label="Find a page" />
           </div>
@@ -179,10 +268,17 @@ export default function Dashboard() {
                   <SidebarMenu>
                     {items.map((t) => (
                       <SidebarMenuItem key={t.key}>
-                        <SidebarMenuButton isActive={shown === t.key} tooltip={`${t.label}: ${t.hint}`} title={t.hint} onClick={() => setTab(t.key)}>
+                        <PageButton
+                          isActive={shown === t.key}
+                          tooltip={`${t.label}: ${t.hint}`}
+                          title={locked && t.key !== 'associates' ? "Finish today's training to open the dashboard" : t.hint}
+                          aria-disabled={locked && t.key !== 'associates'}
+                          className={locked && t.key !== 'associates' ? 'opacity-50' : undefined}
+                          onPick={() => setTab(t.key)}
+                        >
                           <t.icon />
                           <span>{t.label}</span>
-                        </SidebarMenuButton>
+                        </PageButton>
                       </SidebarMenuItem>
                     ))}
                   </SidebarMenu>
@@ -190,7 +286,7 @@ export default function Dashboard() {
               </SidebarGroup>
             );
           })}
-        </SidebarContent>
+        </SidebarPages>
         <SidebarFooter>
           {socialLink?.social && (
             <a
@@ -262,7 +358,15 @@ export default function Dashboard() {
               Your account is blocked from taking actions. You can still look around. Ask an admin or your manager to unblock you.
             </div>
           )}
-          {shown !== tab && (
+          {locked && (
+            <div className="mb-4 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
+              <div className="font-semibold">Finish today&apos;s training to open the dashboard</div>
+              <div className="text-muted-foreground">
+                {[gate?.unread?.length ? `Read ${gate.unread.length} lesson(s): ${gate.unread.map((l: any) => l.track).join(', ')}` : '', gate?.openTests?.length ? `submit ${gate.openTests.length} test(s)` : ''].filter(Boolean).join(', then ')}. The other pages open as soon as you are done. You can still sign out.
+              </div>
+            </div>
+          )}
+          {!locked && shown !== tab && (
             <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
               {TABS.find((t) => t.key === tab)?.label || 'That page'} is not open to your role, so Home is shown instead. Ask an admin if you need it.
             </div>
