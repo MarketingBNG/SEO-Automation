@@ -15,6 +15,12 @@ export const ROLES = ['admin', 'manager', 'analyst', 'user', 'tester'] as const;
 export const TESTER_HOURS = 48;
 export type Role = (typeof ROLES)[number];
 
+// Teams group the training report: a manager sees only their own team; the admin sees everyone.
+// A person with no team set is seen by the admin only. These match the two Zoho projects.
+export const TEAMS = ['marketing', 'automation'] as const;
+export type Team = (typeof TEAMS)[number];
+export const isTeam = (t: unknown): t is Team => TEAMS.includes(t as Team);
+
 // The owner always stays admin. OWNER_EMAIL or ADMIN_EMAIL (either name) sets it; a test or dev server
 // should set one, or the production owner is the owner there too.
 export const OWNER_EMAIL = (process.env.OWNER_EMAIL || process.env.ADMIN_EMAIL || 'abhuday@usaindiacfo.com').trim().toLowerCase();

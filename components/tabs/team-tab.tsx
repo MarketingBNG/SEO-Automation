@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable, TD, TD_MUTED } from '@/components/shared/content-ui';
 import { useRole } from '@/hooks/use-role';
-import { canBlock, ROLES, type Role } from '@/lib/permissions';
+import { canBlock, ROLES, TEAMS, type Role } from '@/lib/permissions';
 import { AccessAdmin } from '@/components/shared/access-admin';
 
 const ROLE_TEXT: Record<Role, string> = {
@@ -72,7 +72,7 @@ export default function TeamTab() {
             ))}
           </ul>
           {error && <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-2 text-sm">{error}</div>}
-          <DataTable head={['Person', 'Role', 'Status', '']}>
+          <DataTable head={['Person', 'Role', 'Team', 'Status', '']}>
             {rows.map((r) => {
               const blockable = canBlock(me.role, r.role, r.email) && !me.blocked;
               return (
@@ -98,6 +98,16 @@ export default function TeamTab() {
                           </button>
                         )}
                       </div>
+                    )}
+                  </td>
+                  <td className={TD}>
+                    {isAdmin && !r.owner ? (
+                      <select className="h-8 rounded-md border bg-background px-2 capitalize" value={r.team || ''} disabled={!!busy} onChange={(e) => save({ email: r.email, team: e.target.value }, `team-${r.email}`)}>
+                        <option value="">No team</option>
+                        {TEAMS.map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    ) : (
+                      <span className="capitalize text-muted-foreground">{r.team || '—'}</span>
                     )}
                   </td>
                   <td className={TD_MUTED}>{r.blocked ? <span className="font-medium text-red-600 dark:text-red-400">Blocked</span> : 'Active'}</td>

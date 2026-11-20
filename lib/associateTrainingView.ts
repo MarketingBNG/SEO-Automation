@@ -28,6 +28,16 @@ const json = (s: string | null | undefined, fallback: any) => {
 // The admin and managers see the team report. Only the admin does not take the training.
 export const isViewer = (role: string) => role === 'admin' || role === 'manager';
 
+// The trainees a viewer may see in the report. The admin sees everyone (null = no limit); a manager
+// sees only their own team. A manager with no team set, or whose team no one shares, sees no one.
+export async function visibleEmails(me: { email: string; role: string }): Promise<Set<string> | null> {
+  if (me.role === 'admin') return null;
+  const self = await prisma.team_members.findUnique({ where: { email: me.email }, select: { team: true } });
+  if (!self?.team) return new Set<string>();
+  const rows = await prisma.team_members.findMany({ where: { team: self.team }, select: { email: true } });
+  return new Set<string>(rows.map((r: any) => r.email.toLowerCase()));
+}
+
 function lessonOut(l: any, read?: string | null) {
   const extras = json(l.extras, {});
   return {
@@ -130,10 +140,11 @@ export function topicStats(tests: { questions: string; answers: string | null; s
   };
 }
 
-export async function teamReport(): Promise<ReportRow[]> {
+// only: the emails a viewer may see (from visibleEmails). null = everyone (the admin).
+export async function teamReport(only?: Set<string> | null): Promise<ReportRow[]> {
   const team = await prisma.team_members.findMany({ select: { email: true, role: true } });
   const roleOf = new Map<string, string>(team.map((t: any) => [t.email.toLowerCase(), t.role]));
-  const people = (await prisma.training_profiles.findMany({ orderBy: { email: 'asc' } })).filter((p) => isTrainee(roleOf.get(p.email) || 'user'));
+  const people = (await prisma.training_profiles.findMany({ orderBy: { email: 'asc' } })).filter((p) => isTrainee(roleOf.get(p.email) || 'user') && (!only || only.has(p.email.toLowerCase())));
   const out: ReportRow[] = [];
   for (const p of people) {
     const tests = await prisma.training_tests.findMany({ where: { email: p.email, status: { notIn: ['open', 'marking'] } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 60 });
@@ -197,9 +208,12 @@ async function library(audience: string | null) {
 
 export async function trainingView(me: { email: string; name: string; role: string; blocked?: boolean }, { testId = 0, person = '' }: { testId?: number; person?: string } = {}): Promise<{ status: number; body: any }> {
   const viewer = isViewer(me.role);
+  // A manager is limited to their own team; the admin sees everyone (only = null).
+  const only = viewer ? await visibleEmails(me) : new Set<string>();
   if (testId) {
     const t = await prisma.training_tests.findUnique({ where: { id: testId } });
-    if (!t || (t.email !== me.email && !viewer)) return { status: 404, body: { error: 'Test not found' } };
+    const canSee = t && (t.email === me.email || (viewer && (!only || only.has(String(t.email).toLowerCase()))));
+    if (!canSee) return { status: 404, body: { error: 'Test not found' } };
     // 'marking' is unfinished too (it can go back to 'open', or stay there after a restart until the
     // next day): its answer key is not shown yet.
     if (t.status === 'open' || t.status === 'marking') return { status: 409, body: { error: 'Finish the test first' } };
@@ -223,7 +237,7 @@ export async function trainingView(me: { email: string; name: string; role: stri
   const lib = await library(me.role === 'admin' ? null : audienceFor(me.role));
   if (!viewer) return { status: 200, body: { ...base, me: mine, library: lib } };
 
-  const report = await teamReport();
+  const report = await teamReport(only);
   const roleOf = new Map<string, string>(report.map((r) => [r.email, r.role]));
   const todayLessons = await prisma.training_lessons.findMany({ where: { day: istDay() }, orderBy: [{ audience: 'asc' }, { level: 'asc' }, { track: 'asc' }] });
   let lastRun: any = null;

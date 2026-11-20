@@ -516,6 +516,7 @@ model team_members {
   role       String  @default("user")
   role_expires_at String? // the tester role ends at this UTC time and the person becomes a user again
   blocked    Boolean @default(false)
+  team       String? // marketing | automation: a manager sees the training report of their own team only
   updated_by String?
   created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
   updated_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))

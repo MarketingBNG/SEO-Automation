@@ -4,7 +4,7 @@ import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getMe } from '@/lib/auth';
 import { sqlNow } from '@/lib/time';
-import { OWNER_EMAIL, TESTER_HOURS, can, canBlock, isRole, type Role } from '@/lib/permissions';
+import { OWNER_EMAIL, TESTER_HOURS, can, canBlock, isRole, isTeam, type Role } from '@/lib/permissions';
 import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
@@ -51,6 +51,13 @@ export async function POST(req: NextRequest) {
     notes.push(role === 'tester' ? `role tester until ${data.role_expires_at} UTC` : `role ${role}`);
   }
   if (body.name !== undefined && (await canDo(me, 'team.roles'))) data.name = String(body.name).slice(0, 100) || null;
+  if (body.team !== undefined) {
+    if (!(await canDo(me, 'team.roles'))) return NextResponse.json({ error: 'Only an admin can change a person’s team.' }, { status: 403 });
+    const team = String(body.team || '').trim().toLowerCase();
+    if (team && !isTeam(team)) return NextResponse.json({ error: 'Team must be marketing or automation.' }, { status: 400 });
+    data.team = team || null;
+    notes.push(team ? `team ${team}` : 'team cleared');
+  }
   if (body.blocked !== undefined) {
     if (!canBlock(me.role, target, email)) return NextResponse.json({ error: me.role === 'manager' ? 'Managers can block only users and analysts.' : 'This person cannot be blocked.' }, { status: 403 });
     data.blocked = Boolean(body.blocked);
@@ -61,7 +68,7 @@ export async function POST(req: NextRequest) {
   // was a unique-key 500. It is refused instead, since its role checks were made for a new person.
   const row = existing
     ? await prisma.team_members.update({ where: { email }, data })
-    : await prisma.team_members.create({ data: { email, role: data.role || 'user', role_expires_at: data.role_expires_at || null, name: data.name || null, blocked: Boolean(data.blocked), updated_by: me.name } }).catch((e: any) => {
+    : await prisma.team_members.create({ data: { email, role: data.role || 'user', role_expires_at: data.role_expires_at || null, name: data.name || null, blocked: Boolean(data.blocked), team: data.team ?? null, updated_by: me.name } }).catch((e: any) => {
         if (e?.code === 'P2002') return null;
         throw e;
       });

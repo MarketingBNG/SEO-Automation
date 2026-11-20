@@ -3,7 +3,7 @@ import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getMe } from '@/lib/auth';
 import { isTrainee, markRead, playGame, runTrainingDay, setLevel, submitTest } from '@/lib/associateTraining';
-import { isViewer, reportCsv, teamReport, trainingView } from '@/lib/associateTrainingView';
+import { isViewer, reportCsv, teamReport, trainingView, visibleEmails } from '@/lib/associateTrainingView';
 import { trainingGate } from '@/lib/trainingGate';
 import { getCatalogue } from '@/lib/uicCatalogue';
 import { methodNotAllowed } from '../_lib/http';
@@ -25,7 +25,8 @@ export async function GET(req: NextRequest) {
   }
   if (req.nextUrl.searchParams.get('report') === 'csv') {
     if (!isViewer(me.role)) return NextResponse.json({ error: 'Only the admin or a manager can download the report.' }, { status: 403 });
-    return new NextResponse(reportCsv(await teamReport()), { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="training-report-${new Date().toISOString().slice(0, 10)}.csv"` } });
+    const only = await visibleEmails(me);
+    return new NextResponse(reportCsv(await teamReport(only)), { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="training-report-${new Date().toISOString().slice(0, 10)}.csv"` } });
   }
   const r = await trainingView(me, { testId: Number(req.nextUrl.searchParams.get('test')), person: String(req.nextUrl.searchParams.get('person') || '').toLowerCase() });
   return NextResponse.json(r.body, { status: r.status });
