@@ -3,7 +3,7 @@ import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getMe } from '@/lib/auth';
 import { isTrainee, markLessonOpen, markRead, playGame, runTrainingDay, setLevel, startTest, submitTest } from '@/lib/associateTraining';
-import { isViewer, reportCsv, teamReport, trainingView, visibleEmails } from '@/lib/associateTrainingView';
+import { addRemark, isViewer, reportCsv, teamReport, trainingView, visibleEmails } from '@/lib/associateTrainingView';
 import { trainingGate } from '@/lib/trainingGate';
 import { getCatalogue } from '@/lib/uicCatalogue';
 import { methodNotAllowed } from '../_lib/http';
@@ -47,6 +47,8 @@ export async function POST(req: NextRequest) {
     if (body.action === 'open') return NextResponse.json(await markLessonOpen(me.email, Number(body.lessonId)));
     if (body.action === 'start') return NextResponse.json(await startTest(me.email, Number(body.testId)));
     if (body.action === 'game') return NextResponse.json(await playGame(me.email, Number(body.lessonId), body.answers || {}));
+    // Remarks: the admin on anyone, a manager on their own team (addRemark checks and scopes this).
+    if (body.action === 'remark') return NextResponse.json(await addRemark(me, String(body.email || ''), String(body.text || '')));
     if (me.role !== 'admin') return NextResponse.json({ error: 'Only the admin can do this.' }, { status: 403 });
     if (body.action === 'catalogue') return NextResponse.json(await getCatalogue({ refresh: true }));
     if (body.action === 'run') {

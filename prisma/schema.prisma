@@ -647,6 +647,24 @@ model training_games {
   @@unique([email, lesson_id])
 }
 
+// A remark on a person's training, written by the admin or by their team's manager (weekend review:
+// did they move up, what is their recent average, and a note). The person does not see these; the
+// admin sees everyone's, a manager sees their own team's.
+model training_remarks {
+  id          Int     @id @default(autoincrement())
+  email       String // the person the remark is about
+  author      String // who wrote it (admin or manager email)
+  author_name String?
+  week        String? // Monday (YYYY-MM-DD) of the week it was written, for grouping weekend remarks
+  level       Int? // snapshot: their level when the remark was written
+  percent     Int? // snapshot: recent average %
+  level_up    Boolean @default(false) // did their level rise in the 7 days before the remark
+  text        String
+  created_at  String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([email])
+}
+
 // A question answered wrong (or not answered): asked again two days later until it is right.
 model training_misses {
   id         Int     @id @default(autoincrement())

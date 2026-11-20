@@ -6,7 +6,7 @@
 import prismaClient from '@/lib/prisma';
 import * as settings from '@/lib/settings';
 import { istDay } from '@/lib/topics';
-import { DOWN_AVG, LEVELS, PASS_PERCENT, UP_AVG, WINDOW, gameStreak, isTrainee, lessonIdsOf, testQuestions, type Question } from '@/lib/associateTraining';
+import { DOWN_AVG, LEVELS, PASS_PERCENT, UP_AVG, WINDOW, gameStreak, isTrainee, lessonIdsOf, testQuestions, weekStart, type Question } from '@/lib/associateTraining';
 import { TRACKS, TRACK_LABEL, audienceFor, badgeFor, buildGames, buildSlides, type Track } from '@/lib/trainingContent';
 import { trainingGate } from '@/lib/trainingGate';
 
@@ -101,8 +101,38 @@ async function personView(email: string, role: string, forViewer = false) {
     pastLessons: past.map((l) => ({ id: l.id, day: l.day, level: l.level, track: l.track, trackLabel: TRACK_LABEL[l.track as Track] || l.track, title: l.title, content_html: l.content_html, sources: json(l.sources, []) })),
     dueAgain: await prisma.training_misses.count({ where: { email, cleared: false } }),
     levelHistory: await prisma.training_level_history.findMany({ where: { email }, orderBy: { id: 'desc' }, take: 20 }),
+    remarks: forViewer ? await getRemarks(email) : [],
     gate: await trainingGate(email, role),
   };
+}
+
+// ---------- Remarks ----------
+
+// The remarks on one person (newest first). Shown to viewers only (in personView).
+async function getRemarks(email: string) {
+  const rows = await prisma.training_remarks.findMany({ where: { email }, orderBy: { id: 'desc' }, take: 50 });
+  return rows.map((r: any) => ({ id: r.id, author: r.author, authorName: r.author_name, week: r.week, level: r.level, percent: r.percent, levelUp: r.level_up, text: r.text, at: r.created_at }));
+}
+
+// Add a remark on a person's training. The admin may remark on anyone; a manager only on their own
+// team. The person's current level, recent average and whether they moved up this week are snapshotted
+// so the remark stays a record of that moment.
+export async function addRemark(me: { email: string; role: string; name?: string }, email: string, text: string) {
+  const who = String(email || '').toLowerCase();
+  const body = String(text || '').trim().slice(0, 2000);
+  if (!isViewer(me.role)) throw Object.assign(new Error('Only the admin or a manager can add a remark.'), { status: 403 });
+  if (!body) throw Object.assign(new Error('Write the remark first.'), { status: 400 });
+  const only = await visibleEmails(me);
+  if (only && !only.has(who)) throw Object.assign(new Error('That person is not on your team.'), { status: 403 });
+  const profile = await prisma.training_profiles.findUnique({ where: { email: who } });
+  if (!profile) throw Object.assign(new Error('Person not found.'), { status: 404 });
+  const tests = await prisma.training_tests.findMany({ where: { email: who, status: { notIn: ['open', 'marking'] } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 5, select: { score: true, total: true } });
+  const percent = tests.length ? Math.round(tests.reduce((a: number, t: any) => a + ((t.score || 0) / Math.max(1, t.total)) * 100, 0) / tests.length) : null;
+  const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  const hist = await prisma.training_level_history.findMany({ where: { email: who }, orderBy: { id: 'desc' }, take: 10, select: { from_level: true, to_level: true, created_at: true } });
+  const levelUp = hist.some((h: any) => h.to_level > h.from_level && String(h.created_at) >= since);
+  const row = await prisma.training_remarks.create({ data: { email: who, author: me.email, author_name: me.name || null, week: weekStart(istDay()), level: profile.level, percent, level_up: levelUp, text: body } });
+  return { ok: true, remark: { id: row.id, author: row.author, authorName: row.author_name, week: row.week, level: row.level, percent: row.percent, levelUp: row.level_up, text: row.text, at: row.created_at } };
 }
 
 // ---------- Team report ----------

@@ -521,6 +521,61 @@ function TestPreview({ test }: { test: any }) {
   );
 }
 
+// The admin's or manager's remarks on a person (weekend review). The person does not see these.
+function Remarks({ email, remarks, onSaved }: { email: string; remarks: any[]; onSaved: () => void }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function add() {
+    if (!text.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await post({ action: 'remark', email, text });
+      setText('');
+      onSaved();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Remarks</CardTitle>
+        <CardDescription>Weekend review. Their level, recent average and whether they moved up this week are saved with each note automatically. The person does not see these; the admin and their manager do.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-2">
+          <textarea className="w-full rounded border bg-background px-2 py-1 text-sm" rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Strong week on Know UIC, needs work on marketing compliance." />
+          {err && <div className="text-sm text-red-600">{err}</div>}
+          <Button size="sm" onClick={add} disabled={busy || !text.trim()}>
+            {busy && <Loader2 className="size-4 animate-spin" />} Add remark
+          </Button>
+        </div>
+        {remarks?.length ? (
+          <ul className="space-y-2">
+            {remarks.map((r) => (
+              <li key={r.id} className="rounded-lg border p-2 text-sm">
+                <div className="text-xs text-muted-foreground">{r.authorName || r.author} · {r.at} UTC{r.week ? ` · week of ${fmtDay(r.week)}` : ''}</div>
+                <div className="mt-0.5 text-xs">
+                  {r.level != null && <span>Level {r.level}</span>}
+                  {r.percent != null && <span> · {r.percent}% recent average</span>}
+                  {r.levelUp && <span className="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 font-medium text-emerald-700 dark:text-emerald-400">moved up this week</span>}
+                </div>
+                <div className="mt-1 whitespace-pre-wrap">{r.text}</div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-sm text-muted-foreground">No remarks yet.</div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // One person's training page. readOnly: the admin or a manager looking at someone's page.
 function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: any; readOnly: boolean; onDone: () => void; openReview: (id: number) => void }) {
   const lvl = data.levels[p.profile.level];
@@ -589,6 +644,8 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
           )}
         </CardContent>
       </Card>
+
+      {readOnly && <Remarks email={p.email} remarks={p.remarks || []} onSaved={onDone} />}
 
       {p.results.length > 0 && (
         <Card>
