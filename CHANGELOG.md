@@ -4,6 +4,9 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-20
+- (seo) Directory listings and other manual tasks stay on the dashboard after they are ticked: a Done list shows who marked each one and when, the listing's address and notes (never a password), with Mark not done for a wrong tick.
+
 ## 2026-11-19
 - (ops) Faster under load (local stress test, 1,500 drafts, 800 calendar blogs, 100 people at once): Drafts & Review list, Blog Calendar, Home and the status light are 2 to 4 times faster (India-time dates were formatted the slow way hundreds of times per call). Home sends only what its buttons need. New database indexes keep the progress bar, Learning page and Drafts list fast as the activity log grows. At most two blog covers are drawn at a time, so a page full of covers no longer slows the rest of the dashboard; the same cover asked for many times at once is drawn once. AI credits no longer looks up the dollar-rupee rate on every open page (one lookup at a time, and a 15-minute wait after a failed one).
 - (publisher) Two people (or a double press) acting on the same blog at the same moment: Approve is saved and logged once; Approve and Reject on a calendar blog no longer both land (the second gets "Someone else changed this blog at the same moment"); Pause, Resume, Reschedule and Already done get the same protection. A Facts Register mark pressed twice is saved once. Two "New photo cover" presses that both fail no longer lose the existing cover. Adding the same person to the Team twice at once gives a clear message instead of a server error.
