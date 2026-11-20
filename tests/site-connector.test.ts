@@ -284,7 +284,7 @@ test('Drafts & Review: an approved blog is published to the website through the 
   site.clear();
   calls.length = 0;
   try {
-    const res: any = await withEnv(ON, () => POST(new Request(`http://x/api/drafts/${draft.id}/publish`, { method: 'POST', body: JSON.stringify({ wpStatus: 'publish' }) }) as any, { params: Promise.resolve({ id: String(draft.id) }) }));
+    const res: any = await withEnv(ON, () => POST(new Request(`http://x/api/drafts/${draft.id}/publish`, { method: 'POST', body: JSON.stringify({ wpStatus: 'publish', checklist: { author: true, title: true, content: true, banner: true } }) }) as any, { params: Promise.resolve({ id: String(draft.id) }) }));
     const j = await res.json();
     assert.equal(res.status, 200, JSON.stringify(j));
     assert.equal(j.check.live, true);
@@ -315,7 +315,7 @@ test('Drafts & Review: a blog published before the move is updated on the websit
   const draft = await prisma.drafts.create({ data: { keyword_id: kw.id, title: 'Older guide', meta_description: 'Updated meta.', content_html: '<h2>New</h2><p>New text.</p>', status: 'published', wp_post_id: 42, wp_post_url: 'https://site.test/insights/older-guide/', author: 'Amit Agarwal' } });
   calls.length = 0;
   try {
-    const res: any = await withEnv(ON, () => POST(new Request(`http://x/api/drafts/${draft.id}/publish`, { method: 'POST', body: JSON.stringify({ wpStatus: 'publish' }) }) as any, { params: Promise.resolve({ id: String(draft.id) }) }));
+    const res: any = await withEnv(ON, () => POST(new Request(`http://x/api/drafts/${draft.id}/publish`, { method: 'POST', body: JSON.stringify({ wpStatus: 'publish', checklist: { author: true, title: true, content: true, banner: true } }) }) as any, { params: Promise.resolve({ id: String(draft.id) }) }));
     const j = await res.json();
     assert.equal(res.status, 200, JSON.stringify(j));
     assert.equal(calls.filter((c) => c.action === 'post.create').length, 0, 'no copy made');
@@ -354,7 +354,7 @@ test('Drafts & Review: a live blog whose post cannot be found or read is never p
   const kw = await prisma.keywords.create({ data: { keyword: `missing guide ${stamp}`, status: 'done' } });
   const missing = await prisma.drafts.create({ data: { keyword_id: kw.id, title: 'Missing guide', meta_description: 'Meta.', content_html: '<p>Text.</p>', status: 'published', wp_post_id: 1_000_000_999, wp_post_url: 'https://site.test/insights/moved-guide/', author: 'Amit Agarwal' } });
   const kept = await prisma.drafts.create({ data: { keyword_id: kw.id, title: 'Kept guide', meta_description: 'Meta.', content_html: '<p>New.</p>', status: 'published', wp_post_id: 1_000_000_050, wp_post_url: 'https://site.test/insights/kept-guide/', author: 'Amit Agarwal' } });
-  const send = (id: number) => withEnv(ON, () => POST(new Request(`http://x/api/drafts/${id}/publish`, { method: 'POST', body: JSON.stringify({ wpStatus: 'publish' }) }) as any, { params: Promise.resolve({ id: String(id) }) }));
+  const send = (id: number) => withEnv(ON, () => POST(new Request(`http://x/api/drafts/${id}/publish`, { method: 'POST', body: JSON.stringify({ wpStatus: 'publish', checklist: { author: true, title: true, content: true, banner: true } }) }) as any, { params: Promise.resolve({ id: String(id) }) }));
   calls.length = 0;
   try {
     const gone: any = await send(missing.id);

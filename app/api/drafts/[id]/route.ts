@@ -1,3 +1,4 @@
+import { checklistState } from '@/lib/publishChecklist';
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { wordsHash } from '@/lib/factCheckMark';
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     : null;
   const site = publicSite();
   const planned_url = found.wp_post_url || `${site}/${seoSlug(sched?.main_keyword || row.keyword || found.title || '')}/`;
-  return NextResponse.json({ ...row, text_hash: wordsHash(found), facts, schedule, planned_url, cover_alt_shown: coverAlt(found), author_options: await authorNames() }, { status: 200 });
+  return NextResponse.json({ ...row, text_hash: wordsHash(found), facts, schedule, planned_url, cover_alt_shown: coverAlt(found), author_options: await authorNames(), checklist: await checklistState(found) }, { status: 200 });
 }
 
 export async function PATCH(req: NextRequest, { params }: Ctx) {

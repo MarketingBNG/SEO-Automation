@@ -163,6 +163,10 @@ export function actionFor(method: string, path: string): Action | null {
   // Publishing a Drafts & Review blog (or updating its live post) changes the website: the same
   // permission as the assistant's draft_publish tool (which also needs content.work).
   if (/^\/api\/drafts\/[^/]+\/publish$/.test(p)) return 'website.change';
+  // The publish checklist: ticked by whoever approves or publishes (calendar approvals are manual.do).
+  if (/^\/api\/drafts\/[^/]+\/checklist$/.test(p)) return 'manual.do';
+  // Changing the author on a live post changes the website at once: as publishing straight away.
+  if (/^\/api\/drafts\/[^/]+\/live-author$/.test(p)) return 'blog.publish_now';
   // Website Content: saving or deleting a page or post changes the live website.
   if (/^\/api\/site-content$/.test(p)) return 'website.change';
   // Approving the assistant's cards: each tool checks its own permission for the person who approves

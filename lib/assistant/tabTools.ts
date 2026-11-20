@@ -95,6 +95,27 @@ async function draftRow(id: number) {
   if (!d) throw new Error(`Draft ${id} not found. Find it with list_drafts.`);
   return d;
 }
+// The publish checklist on a card: the four things the person checks, as the blog holds them now,
+// and whether the ticks are in. Set checklist (all four true) only after the user confirmed each.
+const CHECKLIST = {
+  type: 'object',
+  description: 'The publish checklist. Set author, title, content and banner to true only after the user has checked each one (shown on the card) and said so.',
+  properties: { author: { type: 'boolean' }, title: { type: 'boolean' }, content: { type: 'boolean' }, banner: { type: 'boolean' } },
+  additionalProperties: false,
+};
+async function checklistCard(draftId: number | null | undefined, sent: any) {
+  if (!draftId) return { checklist: null, checklistProblem: null };
+  const d = await prisma.drafts.findUnique({ where: { id: draftId } });
+  if (!d) return { checklist: null, checklistProblem: null };
+  const { checklistState, allTicked } = await import('@/lib/publishChecklist');
+  const st = await checklistState(d);
+  const ok = allTicked(sent) || st.complete;
+  return {
+    checklist: { Author: st.values.author || '(none chosen yet)', Title: st.values.title, 'Blog text': `${st.values.words} words`, Banner: st.values.banner, ticked: ok },
+    checklistProblem: ok ? null : 'The publish checklist is not ticked. Show the user the author, title, blog text and banner and ask them to check each; call again with checklist set to all true once they confirm.',
+  };
+}
+
 async function latestStrategyId(): Promise<number> {
   const s =
     (await prisma.seo_strategies.findFirst({ where: { status: 'approved', plan_json: { not: null } }, orderBy: { id: 'desc' }, select: { id: true } })) ||
@@ -146,23 +167,25 @@ tool({
   riskFor: (i) => (i.action === 'reject' ? 'medium' : 'low'),
   description:
     'Decide on a calendar blog, as the Blog Calendar buttons do: "approve" (it publishes at its slot; tax, legal and compliance blogs need reviewer as "Name, credential", e.g. "Akshay Nahar, CA"), "reject" with feedback (at least a sentence; the blog is rewritten with it, which uses AI credits, and comes back for review), "pause", "resume" (needs a new time if its slot has passed), or "reschedule" with publish_at (UTC "YYYY-MM-DD HH:MM:SS" or ISO, at least 30 minutes ahead). Publishing straight away is calendar_publish_now.',
-  input_schema: obj({ id: int, action: { type: 'string', enum: ['approve', 'reject', 'pause', 'resume', 'reschedule'] }, reviewer: str, feedback: str, publish_at: str }, ['id', 'action']),
+  input_schema: obj({ id: int, action: { type: 'string', enum: ['approve', 'reject', 'pause', 'resume', 'reschedule'] }, reviewer: str, feedback: str, publish_at: str, checklist: CHECKLIST }, ['id', 'action']),
   summarize: (i) => `${{ approve: 'Approve', reject: 'Reject', pause: 'Pause', resume: 'Resume', reschedule: 'Reschedule' }[i.action] || i.action} calendar blog #${i.id}${i.action === 'reschedule' && i.publish_at ? ` to ${i.publish_at} UTC` : ''}`,
   preview: async (i) => {
     const row = await scheduleRow(i.id);
+    const card = i.action === 'approve' ? await checklistCard(row.draft_id, i.checklist) : { checklist: null, checklistProblem: null };
     return {
       target: `Calendar blog #${row.id}: ${row.title} (${row.status}, publishes ${row.publish_at} UTC)`,
+      checklist: card.checklist,
       action: i.action,
       reviewer: i.reviewer || null,
       feedback: i.feedback || null,
       new_time: i.publish_at || null,
       warning: i.action === 'reject' ? await costNote('The rewrite with this feedback uses AI credits.') : i.action === 'approve' ? 'The blog then publishes at its slot on the website.' : null,
-      problem: i.action === 'reject' && String(i.feedback || '').trim().length < 10 ? 'Give the feedback (at least a sentence).' : i.action === 'reschedule' && !i.publish_at ? 'Give publish_at.' : null,
+      problem: i.action === 'reject' && String(i.feedback || '').trim().length < 10 ? 'Give the feedback (at least a sentence).' : i.action === 'reschedule' && !i.publish_at ? 'Give publish_at.' : card.checklistProblem,
     };
   },
   run: async (i, ctx) => {
     const { decideSchedule } = await import('@/lib/strategy/scheduleActions');
-    const body = ok(await decideSchedule(i.id, { action: i.action, reviewer: i.reviewer, feedback: i.feedback, publishAt: i.publish_at }, { me: ctx?.me || null, actor: actorOf(ctx) }));
+    const body = ok(await decideSchedule(i.id, { action: i.action, reviewer: i.reviewer, feedback: i.feedback, publishAt: i.publish_at, checklist: i.checklist }, { me: ctx?.me || null, actor: actorOf(ctx) }));
     return { result: { id: i.id, status: body.status, publish_at: body.publish_at, note: body.note || null } };
   },
 });
@@ -174,22 +197,24 @@ tool({
   risk: 'high',
   description:
     'Put a calendar blog live on the website straight away, skipping its slot ("publish_now", the same publish step and checks as the Publish now button), or mark it as already published outside the dashboard ("mark_done", with the live url if there is one), so nothing tries it again. Admin or manager (blog.publish_now).',
-  input_schema: obj({ id: int, action: { type: 'string', enum: ['publish_now', 'mark_done'] }, url: str }, ['id', 'action']),
+  input_schema: obj({ id: int, action: { type: 'string', enum: ['publish_now', 'mark_done'] }, url: str, checklist: CHECKLIST }, ['id', 'action']),
   summarize: (i) => (i.action === 'mark_done' ? `Mark calendar blog #${i.id} as already published` : `Publish calendar blog #${i.id} on the website now`),
   preview: async (i) => {
     const row = await scheduleRow(i.id);
+    const card = i.action === 'publish_now' ? await checklistCard(row.draft_id, i.checklist) : { checklist: null, checklistProblem: null };
     return {
       target: `Calendar blog #${row.id}: ${row.title} (${row.status}, slot ${row.publish_at} UTC)`,
+      checklist: card.checklist,
       warning: i.action === 'publish_now' ? 'This goes live on the website now (the checks before publishing still run, and may hold it).' : 'The blog is marked published; the dashboard will not publish it.',
       url: i.url || null,
-      problem: i.action === 'publish_now' && !row.draft_id ? 'This blog has no draft yet.' : null,
+      problem: i.action === 'publish_now' && !row.draft_id ? 'This blog has no draft yet.' : card.checklistProblem,
     };
   },
   run: async (i, ctx) => {
     ctx?.emit?.({ type: 'tool_progress', text: i.action === 'publish_now' ? 'Publishing (checks first, a minute or two)…' : 'Marking as done…' });
     const { decideSchedule } = await import('@/lib/strategy/scheduleActions');
     const go = async () => {
-      const body = ok(await decideSchedule(i.id, { action: i.action, url: i.url }, { me: ctx?.me || null, actor: actorOf(ctx) }));
+      const body = ok(await decideSchedule(i.id, { action: i.action, url: i.url, checklist: i.checklist }, { me: ctx?.me || null, actor: actorOf(ctx) }));
       return { result: { id: i.id, result: body.result || body.status, url: body.url || body.wp_post_url || null } };
     };
     // Publishing runs the fact check first (AI); marking done does not.
@@ -504,15 +529,16 @@ tool({
   needs: 'content.work',
   description:
     'Approve, reject or send back to review a Drafts & Review blog (status approved, rejected or pending_review), as its buttons do. Approving a calendar blog also approves it for its slot (a tax, legal or compliance blog still needs its CA/CPA reviewer on the calendar: calendar_decide). A published blog keeps its status. Publishing is draft_publish.',
-  input_schema: obj({ id: int, status: { type: 'string', enum: ['approved', 'rejected', 'pending_review'] } }, ['id', 'status']),
+  input_schema: obj({ id: int, status: { type: 'string', enum: ['approved', 'rejected', 'pending_review'] }, checklist: CHECKLIST }, ['id', 'status']),
   summarize: (i) => `Set draft #${i.id} to ${i.status.replace('_', ' ')}`,
   preview: async (i) => {
     const d = await draftRow(i.id);
-    return { target: `Draft #${d.id}: ${d.title || '(untitled)'}`, changes: [{ field: 'status', before: d.status, after: i.status }], problem: d.status === 'published' ? 'This blog is already published; its review status cannot change.' : null };
+    const card = i.status === 'approved' && d.kind !== 'article' ? await checklistCard(d.id, i.checklist) : { checklist: null, checklistProblem: null };
+    return { target: `Draft #${d.id}: ${d.title || '(untitled)'}`, checklist: card.checklist, changes: [{ field: 'status', before: d.status, after: i.status }], problem: d.status === 'published' ? 'This blog is already published; its review status cannot change.' : card.checklistProblem };
   },
   run: async (i, ctx) => {
     const { patchDraft } = await import('@/lib/draftActions');
-    const body = ok(await patchDraft(i.id, { status: i.status }, { actor: actorOf(ctx) }));
+    const body = ok(await patchDraft(i.id, { status: i.status, checklist: i.checklist }, { actor: actorOf(ctx) }));
     return { result: { id: i.id, status: body.status, calendar: body.calendar || null } };
   },
 });
@@ -736,7 +762,7 @@ tool({
   risk: 'high',
   description:
     'Publish an approved Drafts & Review blog on the website (Publish), or update the live post of a blog already published ("Update the live post"). wp_status "draft" sends it as a hidden website draft where the website allows that. A tax, legal or compliance blog needs reviewer ("Name, credential"). A calendar blog not yet published goes live here only for an admin or a manager. skip_checks (admin or manager) skips the CA/CPA reviewer and the paid originality check; the free checks that protect the live page always run. For the user\'s own new blog use post_my_blog.',
-  input_schema: obj({ id: int, wp_status: { type: 'string', enum: ['publish', 'draft'] }, reviewer: str, skip_checks: { type: 'boolean' } }, ['id']),
+  input_schema: obj({ id: int, wp_status: { type: 'string', enum: ['publish', 'draft'] }, reviewer: str, skip_checks: { type: 'boolean' }, checklist: CHECKLIST }, ['id']),
   summarize: (i) => `${i.wp_status === 'draft' ? 'Send to the website as a hidden draft' : 'Publish on the website'}: draft #${i.id}${i.skip_checks ? ' (skipping the reviewer and originality checks)' : ''}`,
   preview: async (i, ctx) => {
     const d = await draftRow(i.id);
@@ -746,8 +772,11 @@ tool({
       liveTextProblem(d) || '',
       i.skip_checks && !(await canPublishNow(ctx?.me || null)) ? 'Only an admin or a manager can skip the checks.' : '',
     ].filter(Boolean);
+    const card = i.wp_status !== 'draft' ? await checklistCard(d.id, i.checklist) : { checklist: null, checklistProblem: null };
+    if (card.checklistProblem) problems.push(card.checklistProblem);
     return {
       target: `Draft #${d.id}: ${d.title || '(untitled)'} (${d.status})`,
+      checklist: card.checklist,
       warning: d.wp_post_url ? `This updates the live post at ${d.wp_post_url}.` : 'This puts the blog live on the website.',
       reviewer: i.reviewer || null,
       problem: problems.length ? problems.join(' ') : null,
@@ -758,7 +787,7 @@ tool({
     const { publishDraft, canPublishNow } = await import('@/lib/publishDraft');
     const me = ctx?.me || null;
     if (i.skip_checks && !(await canPublishNow(me))) throw new Error('Only an admin or a manager can publish without the CA/CPA reviewer and originality checks.');
-    const body = ok(await publishDraft(i.id, { wpStatus: i.wp_status, reviewer: i.reviewer, skipExpert: !!i.skip_checks, skipOriginality: !!i.skip_checks, me, actor: actorOf(ctx) }));
+    const body = ok(await publishDraft(i.id, { wpStatus: i.wp_status, reviewer: i.reviewer, skipExpert: !!i.skip_checks, skipOriginality: !!i.skip_checks, checklist: i.checklist, me, actor: actorOf(ctx) }));
     return { result: body };
   },
 });

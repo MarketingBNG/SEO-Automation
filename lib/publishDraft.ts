@@ -24,6 +24,7 @@ import { saveFile } from '@/lib/storage';
 import { ensureOriginality, originalityReason } from '@/lib/originality';
 import { claimPublish } from '@/lib/strategy/publishLock';
 import { wordsHash } from '@/lib/factCheckMark';
+import { checklistProblem } from '@/lib/publishChecklist';
 import type { Role } from '@/lib/permissions';
 
 // 'publish' or 'draft', or null only when the website says the post is not there (404). Any other
@@ -60,6 +61,7 @@ export type PublishOptions = {
   skipExpert?: boolean; // no CA/CPA reviewer name needed
   skipOriginality?: boolean; // no paid plagiarism check
   requireReviewer?: boolean; // the person asked for the reviewer name on any topic
+  checklist?: any; // the publish checklist ticks sent with the request (lib/publishChecklist.ts)
   me?: PublishMe; // the person publishing; undefined: the signed-in person of this request
   actor?: string | null; // name for the activity log; undefined: the signed-in person
 };
@@ -110,6 +112,12 @@ export async function publishDraft(nid: number, opts: PublishOptions = {}): Prom
     return reply({ error: 'wpStatus must be "publish" or "draft".' }, 400);
   }
   const wpStatus = wpLive === 'publish' ? 'publish' : asked; // 'publish' (live) or 'draft'
+  // Going live needs the publish checklist (Author, Title, Blog text, Banner) ticked for what the
+  // blog holds now. Ticks sent with this request are saved under the person's name first.
+  if (wpStatus === 'publish') {
+    const missing = await checklistProblem(nid, opts.checklist, await actorOf(opts));
+    if (missing) return reply({ error: missing, checklist: true }, 400);
+  }
   const reviewer = String(opts.reviewer || '').trim();
   const kw = (await prisma.keywords.findUnique({ where: { id: draft.keyword_id }, select: { keyword: true } }))?.keyword;
   // A calendar blog not yet published: going live here skips its slot, which needs blog.publish_now

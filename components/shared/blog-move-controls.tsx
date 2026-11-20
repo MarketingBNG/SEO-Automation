@@ -2,6 +2,7 @@
 
 // Pause, Resume, Reschedule and Already done for one calendar blog, with suggested new times. Used on Home and
 // in Monthly Strategy.
+import { ChecklistButton } from '@/components/shared/publish-checklist';
 import { useState } from 'react';
 import { CalendarClock, CheckCheck, Loader2, Pause, Play, Send } from 'lucide-react';
 import { useRole } from '@/hooks/use-role';
@@ -58,14 +59,9 @@ export default function BlogMoveControls({ row, onDone }: { row: any; onDone: (m
           </Button>
         )}
         {!failed && me.can('blog.publish_now') && row.draft_id && (
-          <Button
-            size="sm"
-            disabled={busy}
-            title="Publish it on the website now, instead of at its slot. It must be approved first."
-            onClick={() => window.confirm(`Publish "${row.title}" on the website now?`) && act({ action: 'publish_now' }, `Published "${row.title}" on the website.`)}
-          >
+          <ChecklistButton draftId={row.draft_id} label="Publish now" disabled={busy} onConfirm={(checklist) => act({ action: 'publish_now', checklist }, `Published "${row.title}" on the website.`)}>
             <Send /> Publish now
-          </Button>
+          </ChecklistButton>
         )}
         {me.can('blog.publish_now') && (
           <Button

@@ -11,6 +11,7 @@
 //   { action: 'reschedule', publishAt }   moves it to a new time (UTC 'YYYY-MM-DD HH:MM:SS' or ISO);
 //                                         a paused blog is resumed at the same time
 // Doing nothing for 48 hours approves it automatically.
+import { checklistProblem } from '@/lib/publishChecklist';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { canDo } from '@/lib/access';
@@ -38,7 +39,7 @@ const CHANGED = () => res({ error: 'Someone else changed this blog at the same m
 export const SCHEDULE_ACTIONS = ['approve', 'reject', 'pause', 'resume', 'publish_now', 'mark_done', 'reschedule'] as const;
 
 export async function decideSchedule(id: number, input: any, { me, actor }: { me: ScheduleMe; actor: string }): Promise<ScheduleResult> {
-  const { action, feedback, reviewer, publishAt, url: postUrl }: any = input || {};
+  const { action, feedback, reviewer, publishAt, url: postUrl, checklist }: any = input || {};
   const row = await prisma.blog_schedule.findUnique({ where: { id } });
   if (!row) return res({ error: 'Not found' }, 404);
   if (row.status === 'published') return res({ error: 'Already published' }, 409);
@@ -48,6 +49,9 @@ export async function decideSchedule(id: number, input: any, { me, actor }: { me
     const draft = await prisma.drafts.findUnique({ where: { id: row.draft_id } });
     const leftovers = aiLeftovers(draft?.title, draft?.meta_description, draft?.content_html);
     if (leftovers.length) return res({ error: `This draft cannot be approved yet. ${leftovers.join(' ')} Edit it in Drafts & Review first.` }, 409);
+    // The publish checklist (Author, Title, Blog text, Banner); the slot then publishes on this approval.
+    const missing = await checklistProblem(row.draft_id, checklist, actor);
+    if (missing) return res({ error: missing, checklist: true }, 400);
     const expert = String(reviewer || '').trim();
     if ((await requireExpert()) && needsExpertReview(row.main_keyword, row.title)) {
       const known = await expertReviewers();
@@ -113,6 +117,10 @@ export async function decideSchedule(id: number, input: any, { me, actor }: { me
   if (action === 'publish_now') {
     // Publishing at once is the admin's or a manager's call (or anyone given "Publish now" access).
     if (!me || !(await canDo(me, 'blog.publish_now'))) return res({ error: deniedMessage('blog.publish_now') }, 403);
+    if (row.draft_id) {
+      const missing = await checklistProblem(row.draft_id, checklist, actor);
+      if (missing) return res({ error: missing, checklist: true }, 400);
+    }
     try {
       const { publishScheduleNow } = await import('@/lib/strategy/autopilot');
       const r = await publishScheduleNow(id, actor);

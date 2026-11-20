@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import path from 'node:path';
 
+const CHECK = { author: true, title: true, content: true, banner: true };
 const db = Boolean(process.env.DATABASE_URL);
 const CONNECTOR = 'https://site.test/_bridge/dashboard-connector.php';
 const SECRET = 'connector-test-secret';
@@ -108,7 +109,7 @@ test('Post now with no checks puts the blog live as it is, through the connector
   calls.length = 0;
   let id: number | null = null;
   try {
-    const r = await withEnv(ON, () => postMyBlog({ title, html: article(), keyword: 'office plants', author: 'Naman Gangwal', mode: 'post' }, { me: ADMIN, actor: 'Test owner' }));
+    const r = await withEnv(ON, () => postMyBlog({ title, html: article(), keyword: 'office plants', author: 'Naman Gangwal', mode: 'post', checklist: CHECK }, { me: ADMIN, actor: 'Test owner' }));
     id = r.body.draftId;
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.posted, true);
@@ -135,10 +136,10 @@ test('reviewer placeholders and AI notes still stop a post, naming the text, and
   const { postMyBlog } = await import('../lib/myBlog');
   calls.length = 0;
   const title = `Placeholder blog ${stamp()}`;
-  const r = await withEnv(ON, () => postMyBlog({ title, html: article('<p>The fee is [VERIFY: current fee] this year.</p>'), mode: 'post' }, { me: ADMIN }));
+  const r = await withEnv(ON, () => postMyBlog({ title, html: article('<p>The fee is [VERIFY: current fee] this year.</p>'), mode: 'post', author: 'Naman Gangwal', checklist: CHECK }, { me: ADMIN }));
   assert.equal(r.status, 400);
   assert.match(r.body.error, /\[VERIFY: current fee\]/);
-  const r2 = await withEnv(ON, () => postMyBlog({ title, html: article('<p>I hope this helps with your plants.</p>'), mode: 'post' }, { me: ADMIN }));
+  const r2 = await withEnv(ON, () => postMyBlog({ title, html: article('<p>I hope this helps with your plants.</p>'), mode: 'post', author: 'Naman Gangwal', checklist: CHECK }, { me: ADMIN }));
   assert.equal(r2.status, 400);
   assert.match(r2.body.error, /Remove the AI notes first.*I hope this helps/);
   assert.equal(await prisma.drafts.count({ where: { title } }), 0, 'nothing saved');
@@ -176,7 +177,7 @@ test('fact check ticked and a wrong claim: not posted, saved to Drafts with the 
   let id: number | null = null;
   try {
     const usageBefore = await prisma.ai_usage.count().catch(() => 0);
-    const r = await withEnv(ON, () => postMyBlog({ title: `Watering office plants ${stamp()}`, html: article(), mode: 'post', fact_check: true }, { me: ADMIN }));
+    const r = await withEnv(ON, () => postMyBlog({ title: `Watering office plants ${stamp()}`, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK, fact_check: true }, { me: ADMIN }));
     id = r.body.draftId;
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.posted, false);
@@ -205,10 +206,10 @@ test('a role without blog.publish_now cannot post now, but can save to Drafts', 
   const title = `Analyst blog ${stamp()}`;
   let id: number | null = null;
   try {
-    const refused = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post' }, { me: ANALYST }));
+    const refused = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK }, { me: ANALYST }));
     assert.equal(refused.status, 403);
     assert.match(refused.body.error, /Save to Drafts/);
-    const signedOut = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post' }, { me: null }));
+    const signedOut = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK }, { me: null }));
     assert.equal(signedOut.status, 403);
     assert.equal(await prisma.drafts.count({ where: { title } }), 0);
 
@@ -232,7 +233,7 @@ test('without the website connection a post keeps the draft and says so', { skip
   const { postMyBlog } = await import('../lib/myBlog');
   let id: number | null = null;
   try {
-    const r = await withEnv({}, () => postMyBlog({ title: `No website ${stamp()}`, html: article(), mode: 'post' }, { me: ADMIN }));
+    const r = await withEnv({}, () => postMyBlog({ title: `No website ${stamp()}`, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK }, { me: ADMIN }));
     id = r.body.draftId;
     assert.equal(r.status, 503);
     assert.match(r.body.error, /website connection is not set up.*saved in Drafts & Review/);
@@ -257,10 +258,10 @@ test('Drafts & Review: Skip checks needs blog.publish_now; publishing skips the 
   const draft = await prisma.drafts.create({ data: { keyword_id: kw.id, title: 'Plants for desks', meta_description: 'Meta.', content_html: article(), status: 'approved', author: 'Naman Gangwal' } });
   try {
     // Asking for the reviewer and not naming one stops it; skipping the checks lets it through.
-    const asked = await withEnv(ON, () => publishDraft(draft.id, { wpStatus: 'publish', requireReviewer: true, me: ADMIN }));
+    const asked = await withEnv(ON, () => publishDraft(draft.id, { wpStatus: 'publish', requireReviewer: true, checklist: CHECK, me: ADMIN }));
     assert.equal(asked.status, 400);
     assert.match(asked.body.error, /Name the CA\/CPA/);
-    const done = await withEnv(ON, () => publishDraft(draft.id, { wpStatus: 'publish', requireReviewer: true, skipExpert: true, skipOriginality: true, me: ADMIN }));
+    const done = await withEnv(ON, () => publishDraft(draft.id, { wpStatus: 'publish', requireReviewer: true, skipExpert: true, skipOriginality: true, checklist: CHECK, me: ADMIN }));
     assert.equal(done.status, 200, JSON.stringify(done.body));
     const after = (await prisma.drafts.findUnique({ where: { id: draft.id } }))!;
     assert.equal(after.status, 'published');
@@ -325,7 +326,7 @@ test('the chosen banner is the one the post carries; no automatic banner replace
     assert.equal(chosen.source, 'social');
     assert.equal(bannerAsks.at(-1).variant, 2);
     const asksBefore = bannerAsks.length;
-    const r = await withEnv({ ...ON, SOCIAL_SKILLS_SECRET: SOCIAL_SECRET, SOCIAL_DASHBOARD_URL: SOCIAL }, () => postMyBlog({ title: `Desk plants ${stamp()}`, html: article(), mode: 'post', cover_key: chosen.key }, { me: ADMIN }));
+    const r = await withEnv({ ...ON, SOCIAL_SKILLS_SECRET: SOCIAL_SECRET, SOCIAL_DASHBOARD_URL: SOCIAL }, () => postMyBlog({ title: `Desk plants ${stamp()}`, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK, cover_key: chosen.key }, { me: ADMIN }));
     id = r.body.draftId;
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(bannerAsks.length, asksBefore, 'no new banner was made at publish');
@@ -350,7 +351,7 @@ test('the assistant tool post_my_blog is a write tool (approved first), open to 
   assert.equal(typeof t.preview, 'function');
   assert.match(t.summarize({ title: 'My blog', mode: 'post' }), /Post live on the website: "My blog" \(checks: none\)/);
   assert.match(t.summarize({ title: 'My blog', mode: 'save', fact_check: true }), /Save to Drafts & Review.*fact check/);
-  const p = await t.preview({ title: 'My blog', content_html: article('<p>[AUTHOR NAME]</p>'), mode: 'post' }, { me: ADMIN });
+  const p = await t.preview({ title: 'My blog', content_html: article('<p>[AUTHOR NAME]</p>'), mode: 'post', author: 'Naman Gangwal', checklist: CHECK }, { me: ADMIN });
   assert.match(p.problem, /\[AUTHOR NAME\]/);
 });
 
@@ -448,7 +449,7 @@ test('fact check that fails (checker answers unreadable): not posted, saved to D
   calls.length = 0;
   let id: number | null = null;
   try {
-    const r = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post', fact_check: true }, { me: ADMIN }));
+    const r = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK, fact_check: true }, { me: ADMIN }));
     id = r.body.draftId;
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.posted, false);
@@ -474,12 +475,12 @@ test('the same submission sent again returns its draft and never posts twice', {
   calls.length = 0;
   let id: number | null = null;
   try {
-    const [a, b] = await withEnv(ON, () => Promise.all([postMyBlog({ title, html: article(), mode: 'post', request_key }, { me: ADMIN }), postMyBlog({ title, html: article(), mode: 'post', request_key }, { me: ADMIN })]));
+    const [a, b] = await withEnv(ON, () => Promise.all([postMyBlog({ title, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK, request_key }, { me: ADMIN }), postMyBlog({ title, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK, request_key }, { me: ADMIN })]));
     id = a.body.draftId;
     assert.equal(a.status, 200, JSON.stringify(a.body));
     assert.equal(a.body.posted, true);
     assert.equal(b.status, 409, 'a second press while the first runs waits');
-    const again = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post', request_key }, { me: ADMIN }));
+    const again = await withEnv(ON, () => postMyBlog({ title, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK, request_key }, { me: ADMIN }));
     assert.equal(again.status, 200);
     assert.equal(again.body.duplicate, true);
     assert.equal(again.body.draftId, id);
@@ -490,7 +491,7 @@ test('the same submission sent again returns its draft and never posts twice', {
     // A saved (not posted) one: a retry with Post now does not post it either.
     const key2 = crypto.randomUUID();
     const saved = await withEnv(ON, () => postMyBlog({ title: `${title} saved`, html: article(), mode: 'save', request_key: key2 }, { me: ADMIN }));
-    const retry = await withEnv(ON, () => postMyBlog({ title: `${title} saved`, html: article(), mode: 'post', request_key: key2 }, { me: ADMIN }));
+    const retry = await withEnv(ON, () => postMyBlog({ title: `${title} saved`, html: article(), mode: 'post', author: 'Naman Gangwal', checklist: CHECK, request_key: key2 }, { me: ADMIN }));
     assert.equal(retry.body.draftId, saved.body.draftId);
     assert.equal(retry.body.posted, false);
     assert.match(retry.body.message, /Already saved as draft/);

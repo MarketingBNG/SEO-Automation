@@ -53,6 +53,7 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
   const [busy, setBusy] = useState<'' | 'post' | 'save' | 'file'>('');
   const [result, setResult] = useState<Result | null>(null);
   const [requestKey, setRequestKey] = useState(newKey);
+  const [checks, setChecks] = useState<Record<string, string>>({});
   // Set once the server answered with a draft: the form then offers that draft, never a second post.
   const [doneDraftId, setDoneDraftId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -99,7 +100,7 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
       const res = await fetch('/api/my-blog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, html, meta_description: meta, keyword, author, reviewer, mode, ...opts, cover_key: coverKey, cover_data: coverKey ? null : coverData, request_key: requestKey }),
+        body: JSON.stringify({ title, html, meta_description: meta, keyword, author, reviewer, mode, ...opts, cover_key: coverKey, cover_data: coverKey ? null : coverData, request_key: requestKey, ...(mode === 'post' ? { checklist: { author: true, title: true, content: true, banner: true } } : {}) }),
       });
       const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}). Press the button again: the same blog is never saved or posted twice.` }));
       if (j.draftId) {
@@ -135,6 +136,11 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
   if (!canSave) return null;
   const ready = title.trim() && html.trim() && !busy;
   const currentBanner = coverKey ? `/api/uploads/${coverKey}` : coverData;
+  // The publish checklist: each tick remembers what it checked, so changing that item undoes it.
+  const words = html.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+  const sig: Record<string, string> = { author, title, content: `${html.length}:${html.slice(0, 200)}:${html.slice(-200)}`, banner: `${coverKey || ''}|${coverData ? coverData.length : 0}|${title}|${author}` };
+  const isTicked = (k: string) => checks[k] !== undefined && checks[k] === sig[k];
+  const allChecked = ['author', 'title', 'content', 'banner'].every(isTicked);
   return (
     <Card>
       <CardHeader>
@@ -255,8 +261,29 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
               </Button>
             </div>
           ) : (
+          <div className="space-y-2">
+          {canPost && !opts.optimise && (
+            <div className="space-y-1.5 rounded-lg border p-3 text-sm" data-testid="publish-checklist">
+              <div className="font-semibold">Before it goes live, check each one</div>
+              {[
+                { k: 'author', label: 'Author checked', value: author || 'pick the author above first' },
+                { k: 'title', label: 'Title checked', value: title || '(no title)' },
+                { k: 'content', label: 'Blog text checked', value: `${words} words` },
+                { k: 'banner', label: 'Banner checked', value: currentBanner ? 'the banner shown above' : 'the branded cover made from the title and author' },
+              ].map((i) => (
+                <label key={i.k} className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-1" checked={isTicked(i.k)} disabled={i.k === 'author' && !author} onChange={(e) => setChecks((c) => (e.target.checked ? { ...c, [i.k]: sig[i.k] } : Object.fromEntries(Object.entries(c).filter(([x]) => x !== i.k))))} />
+                  <span>
+                    <span className="font-medium">{i.label}: </span>
+                    {i.value}
+                    {checks[i.k] !== undefined && !isTicked(i.k) && <span className="block text-xs text-amber-700 dark:text-amber-400">Changed since it was ticked: check it again.</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => send('post')} disabled={!ready || !canPost || opts.optimise} title={!canPost ? 'Only an admin or a manager can post live straight away' : opts.optimise ? 'Optimise saves to Drafts for review first' : ''}>
+            <Button onClick={() => send('post')} disabled={!ready || !canPost || opts.optimise || !allChecked} title={!canPost ? 'Only an admin or a manager can post live straight away' : opts.optimise ? 'Optimise saves to Drafts for review first' : !allChecked ? 'Tick the publish checklist first' : ''}>
               {busy === 'post' ? <Loader2 className="animate-spin" /> : <Send />}
               Post now
             </Button>
@@ -266,6 +293,7 @@ export function PostMyBlog({ onSaved }: { onSaved: () => void }) {
             </Button>
             {!canPost && <span className="text-sm text-muted-foreground">Only an admin or a manager can post live; you can save it to Drafts.</span>}
             {busy === 'post' && opts.fact_check && <span className="text-sm text-muted-foreground">Fact checking, then posting (a few minutes)…</span>}
+          </div>
           </div>
           )}
 

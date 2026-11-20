@@ -1,6 +1,7 @@
 // Drafts & Review: saving a draft's words, approving or rejecting it, setting its author or cover alt
 // text, and deleting it. Shared by PATCH and DELETE /api/drafts/[id] and the assistant's draft tools,
 // so every path runs the same checks. Each returns { status, body } exactly as the route answers.
+import { checklistProblem } from './publishChecklist';
 import prisma from '@/lib/prisma';
 import { markEditedAsChecked, wordsHash } from '@/lib/factCheckMark';
 import * as activity from '@/lib/activity';
@@ -20,7 +21,7 @@ type Result = { status: number; body: any };
 // viaToken: the request came with the Claude Code edit token (scripts/draft.ts), which changes words
 // only; actor is then DRAFT_TOKEN_ACTOR.
 export async function patchDraft(nid: number, input: any, { actor, viaToken = false }: { actor: string; viaToken?: boolean }): Promise<Result> {
-  const { title, meta_description, content_html, status, cover_alt, author, if_updated_at, if_text_hash, change_source }: any = input || {};
+  const { title, meta_description, content_html, status, cover_alt, author, if_updated_at, if_text_hash, change_source, checklist }: any = input || {};
   const existing = await prisma.drafts.findUnique({ where: { id: nid } });
   if (!existing) return { status: 404, body: { error: 'Not found' } };
   // Claude Code edits words only; approving, rejecting and publishing stay with a signed-in person.
@@ -32,6 +33,15 @@ export async function patchDraft(nid: number, input: any, { actor, viaToken = fa
   }
   if (status != null && existing.status === 'published') {
     return { status: 409, body: { error: 'This blog is already published; its review status cannot change here.' } };
+  }
+  // Approving for publishing needs the publish checklist ticked for what the blog holds now.
+  if (status === 'approved' && existing.status !== 'approved' && existing.kind !== 'article') {
+    // The ticks were made on the saved words: new words in the same request are saved first.
+    if ((title != null && title !== existing.title) || (content_html != null && content_html !== existing.content_html)) {
+      return { status: 400, body: { error: 'Save your changes first, then tick the publish checklist and approve.', checklist: true } };
+    }
+    const missing = await checklistProblem(nid, checklist, actor);
+    if (missing) return { status: 400, body: { error: missing, checklist: true } };
   }
   // Sent by scripts/draft.ts: refuse when someone saved the draft after it was read.
   const changedMeanwhile = { error: `The draft was changed at ${existing.updated_at} (after it was read). Read it again and redo the edit.` };

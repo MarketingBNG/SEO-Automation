@@ -344,6 +344,12 @@ defineTool({
       originality: { type: 'boolean' },
       optimise: { type: 'boolean' },
       ask_reviewer: { type: 'boolean' },
+      checklist: {
+        type: 'object',
+        description: 'Mode "post": the publish checklist. Set author, title, content and banner to true only after the user has checked each one (shown on the card) and said so.',
+        properties: { author: { type: 'boolean' }, title: { type: 'boolean' }, content: { type: 'boolean' }, banner: { type: 'boolean' } },
+        additionalProperties: false,
+      },
     },
     required: ['title', 'content_html', 'mode'],
     additionalProperties: false,
@@ -361,12 +367,15 @@ defineTool({
       post && !(await canPublishNow(ctx?.me || null)) ? 'Your role cannot post live straight away; ask for mode "save" (Save to Drafts) instead.' : '',
       post ? liveTextProblem({ title: i.title, meta_description: i.meta_description, content_html: html }) || '' : '',
       wordCount(html) < 50 ? 'The blog has under 50 words.' : '',
+      post && !i.author ? 'Posting live needs the author (one of the blog authors), so the user can check it.' : '',
+      post && !['author', 'title', 'content', 'banner'].every((k) => i.checklist?.[k] === true) ? 'The publish checklist is not ticked: ask the user to check the author, title, text and banner shown here, then call again with checklist all true.' : '',
     ].filter(Boolean);
     return {
       target: `${post ? 'Live on the website' : 'Drafts & Review'}: ${i.title}`,
       words: wordCount(html),
       keyword: i.keyword || i.title,
       author: i.author || '(one of the blog authors)',
+      checklist: i.mode === 'post' && !i.optimise ? { Author: i.author || '(none chosen)', Title: i.title, 'Blog text': `${wordCount(html)} words`, Banner: 'the branded cover made from the title and author', ticked: ['author', 'title', 'content', 'banner'].every((k) => i.checklist?.[k] === true) } : null,
       checks: ['fact_check', 'originality', 'optimise', 'ask_reviewer'].filter((k) => i[k]).join(', ') || 'none',
       warning: i.fact_check || i.originality || i.optimise ? 'The ticked checks use AI credits or paid lookups.' : null,
       problem: problems.length ? problems.join(' ') : null,
@@ -386,7 +395,7 @@ defineTool({
 
 async function postMyBlogResult(i, ctx, postMyBlog) {
   const r = await postMyBlog(
-    { title: i.title, html: i.content_html, meta_description: i.meta_description, keyword: i.keyword, author: i.author, reviewer: i.reviewer, mode: i.mode, fact_check: i.fact_check, originality: i.originality, optimise: i.optimise, ask_reviewer: i.ask_reviewer },
+    { title: i.title, html: i.content_html, meta_description: i.meta_description, keyword: i.keyword, author: i.author, reviewer: i.reviewer, mode: i.mode, fact_check: i.fact_check, originality: i.originality, optimise: i.optimise, ask_reviewer: i.ask_reviewer, checklist: i.checklist },
     { me: ctx?.me || null, actor: ctx?.me?.name ? `${ctx.me.name} (assistant)` : 'Assistant' },
   );
   if (r.status !== 200 && !r.body?.draftId) throw new Error(r.body?.error || 'The blog could not be posted.');

@@ -57,6 +57,7 @@ model drafts {
   originality         String? // plagiarism check result (JSON) for the text at `stamp`
   kind                String  @default("blog") // blog | article (LinkedIn)
   length_target       String? // JSON { min, max, median, basedOn } from the pages ranking now
+  publish_checklist   String? // JSON {author,title,content,banner: {fp,by,at}}: ticks before publishing (lib/publishChecklist.ts)
   keyword             keywords       @relation(fields: [keyword_id], references: [id])
   facts               facts[]
   draft_images        draft_images[]

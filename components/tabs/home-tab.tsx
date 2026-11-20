@@ -2,6 +2,7 @@
 
 // Home: what waits for a decision, what publishes next, what needs attention and what went live.
 // Every item links straight to the place where it is handled.
+import { ALL_TICKED, ChecklistButton } from '@/components/shared/publish-checklist';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, CalendarClock, CheckCircle2, Download, FileText, KeyRound, Lightbulb, Loader2, Settings, Target, ThumbsDown, ThumbsUp } from 'lucide-react';
@@ -28,11 +29,11 @@ function ApprovalCard({ row, reviewers, canReview, onDone }: { row: any; reviewe
   const [reviewer, setReviewer] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  async function decide(action: 'approve' | 'reject') {
+  async function decide(action: 'approve' | 'reject', checklist?: typeof ALL_TICKED) {
     setBusy(true);
     setErr(null);
     try {
-      const res = await fetch(`/api/strategy/schedule/${row.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback, reviewer }) });
+      const res = await fetch(`/api/strategy/schedule/${row.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, feedback, reviewer, checklist }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       onDone(action === 'approve' ? `Approved "${row.title}". It publishes at its slot.` : `Rejected "${row.title}". It is rewritten with your feedback and comes back for review.`);
@@ -80,10 +81,10 @@ function ApprovalCard({ row, reviewers, canReview, onDone }: { row: any; reviewe
           )}
           {canReview && (
             <>
-              <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-600/90" disabled={busy || (row.needs_expert && !reviewer)} onClick={() => decide('approve')}>
+              <ChecklistButton draftId={row.draft_id} label="Approve" className="bg-emerald-600 text-white hover:bg-emerald-600/90" disabled={busy || (row.needs_expert && !reviewer)} onConfirm={(c) => decide('approve', c)}>
                 {busy ? <Loader2 className="animate-spin" /> : <ThumbsUp />}
                 Approve
-              </Button>
+              </ChecklistButton>
               <Button size="sm" variant="outline" disabled={busy} onClick={() => setRejecting((v) => !v)}>
                 <ThumbsDown />
                 Reject

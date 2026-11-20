@@ -11,6 +11,7 @@
 // connection), and the post goes through the same publish code as Drafts & Review (lib/publishDraft.ts).
 // Only a person who may publish straight away (blog.publish_now) can post now; others save to Drafts.
 // Used by /api/my-blog and the assistant's post_my_blog tool.
+import { allTicked } from './publishChecklist';
 import sharp from 'sharp';
 import prisma from './prisma';
 import * as activity from './activity';
@@ -41,6 +42,7 @@ export type MyBlogInput = {
   cover_key?: string | null; // a banner chosen in the preview (covers/candidate-...)
   cover_data?: string | null; // an uploaded banner, or the picture above the title in the Word file (data: URI)
   request_key?: string | null; // one per submission from the form: a retry returns the same draft, never a second post
+  checklist?: any; // posting live: the publish checklist {author, title, content, banner} ticked on the form
 };
 
 // check: the fact check, injectable; the default is the dashboard's own (lib/anthropic.ts factCheckDraft).
@@ -148,6 +150,9 @@ async function postOnce(input: MyBlogInput, deps: MyBlogDeps, requestKey: string
     return fail(403, 'Only an admin or a manager can post a blog live straight away. Press "Save to Drafts" instead; an admin or manager can publish it from Drafts & Review.');
   }
   if (post) {
+    // The publish checklist, ticked on the form against the author, title, text and banner shown.
+    if (!author) return fail(400, 'Pick the author before posting live, so it can be checked. Nothing was posted or saved.');
+    if (!allTicked(input.checklist)) return fail(400, 'Tick the publish checklist first (Author, Title, Blog text, Banner). Nothing was posted or saved.');
     // The free checks first, before anything is saved or any credit spent: the text is still in the form.
     const blocked = liveTextProblem({ title, meta_description: meta, content_html: html });
     if (blocked) return fail(400, `${blocked} Nothing was posted or saved.`);
@@ -266,6 +271,7 @@ async function postOnce(input: MyBlogInput, deps: MyBlogDeps, requestKey: string
     skipExpert: !input.ask_reviewer,
     requireReviewer: Boolean(input.ask_reviewer),
     skipOriginality: !input.originality,
+    checklist: input.checklist,
     me: deps.me,
     actor: actor || undefined,
   });

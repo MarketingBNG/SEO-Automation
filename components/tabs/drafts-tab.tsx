@@ -1,5 +1,6 @@
 'use client';
 
+import { PublishChecklist } from '@/components/shared/publish-checklist';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -209,6 +210,8 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
   // A hidden website draft only while the website keeps drafts hidden (SITE_CONNECTOR_DRAFTS=on).
   const { draftsAllowed } = useSiteStatus();
   const wpStatus = draftsAllowed ? chosenWpStatus : 'publish';
+  // The publish checklist (Author, Title, Blog text, Banner): Approve and Publish wait for it.
+  const [checkReady, setCheckReady] = useState(false);
   const topRef = useRef<HTMLDivElement>(null);
 
   // resetFields=false refreshes the draft's status, facts and image but keeps whatever is typed in
@@ -609,6 +612,9 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
           </div>
         </div>
 
+        {draft.kind !== 'article' && (
+          <PublishChecklist draftId={draft.id} version={`${draft.updated_at}|${draft.text_hash}|${draft.author || ''}|${draft.featured_image_path || ''}|${draft.cover_alt || ''}`} onReady={setCheckReady} />
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => save(null)} disabled={saving}>
             <Save />
@@ -617,7 +623,12 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
           {dirty && <span className="text-sm text-amber-600 dark:text-amber-400">Unsaved changes</span>}
           {draft.status !== 'approved' && draft.status !== 'published' && (
             <>
-              <Button className="bg-emerald-600 text-white hover:bg-emerald-600/90" onClick={() => save('approved')} disabled={saving}>
+              <Button
+                className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+                onClick={() => save('approved')}
+                disabled={saving || (draft.kind !== 'article' && (!checkReady || dirty))}
+                title={draft.kind !== 'article' && dirty ? 'Save your changes first, then tick the checklist' : draft.kind !== 'article' && !checkReady ? 'Tick the publish checklist first' : undefined}
+              >
                 <ThumbsUp />
                 Approve
               </Button>
@@ -745,7 +756,7 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
               <option value="draft">Send to the website as a hidden draft (NOT live)</option>
             </NativeSelect>
           )}
-          <Button onClick={publish} disabled={saving || !(draft.status === 'approved' || (draft.status === 'published' && draft.wp_post_id)) || dirty || (scheduledEarly && !canPublishNow)}>
+          <Button onClick={publish} disabled={saving || !(draft.status === 'approved' || (draft.status === 'published' && draft.wp_post_id)) || dirty || (scheduledEarly && !canPublishNow) || (wpStatus === 'publish' && !checkReady)} title={wpStatus === 'publish' && !checkReady ? 'Tick the publish checklist first' : undefined}>
             <Send />
             {draft.wp_post_id ? 'Update the live post' : draft.schedule ? 'Publish now (skips the scheduled slot)' : 'Publish to the website'}
           </Button>

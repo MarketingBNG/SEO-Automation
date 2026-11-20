@@ -249,7 +249,10 @@ test('calendar_decide: pause, resume, reschedule, reject needs feedback, approve
     assert.match(short.problem, /feedback/);
     await assert.rejects(decideTool.run({ id: f.row.id, action: 'reject', feedback: 'no' }, ctx), /at least a sentence/);
 
-    await decideTool.run({ id: f.row.id, action: 'approve' }, ctx);
+    // Approving needs the publish checklist (the card shows it until the user confirms).
+    assert.match((await decideTool.preview({ id: f.row.id, action: 'approve' }, ctx)).problem, /publish checklist is not ticked/);
+    await assert.rejects(decideTool.run({ id: f.row.id, action: 'approve' }, ctx), /Tick the publish checklist first/);
+    await decideTool.run({ id: f.row.id, action: 'approve', checklist: { author: true, title: true, content: true, banner: true } }, ctx);
     row = await prisma.blog_schedule.findUnique({ where: { id: f.row.id } });
     assert.ok(row!.reviewed_at, 'approved for its slot');
     assert.equal((await prisma.drafts.findUnique({ where: { id: f.draft.id } }))!.status, 'approved');
@@ -302,7 +305,10 @@ test('draft_set_status: approving a calendar draft approves its slot; a publishe
     const ctx = { me: ANALYST };
     const p = await t.preview({ id: f.draft.id, status: 'approved' }, ctx);
     assert.deepEqual(p.changes[0], { field: 'status', before: 'pending_review', after: 'approved' });
-    const r: any = await t.run({ id: f.draft.id, status: 'approved' }, ctx);
+    assert.match(p.problem, /publish checklist/);
+    assert.ok(p.checklist && 'Author' in p.checklist && 'Banner' in p.checklist);
+    await assert.rejects(t.run({ id: f.draft.id, status: 'approved' }, ctx), /Tick the publish checklist first/);
+    const r: any = await t.run({ id: f.draft.id, status: 'approved', checklist: { author: true, title: true, content: true, banner: true } }, ctx);
     assert.equal(r.result.status, 'approved');
     assert.match(r.result.calendar || '', /Approved for the monthly calendar too/);
     const row = await prisma.blog_schedule.findUnique({ where: { id: f.row.id } });
