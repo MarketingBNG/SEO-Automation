@@ -74,7 +74,7 @@ const TABS = [
   { key: 'geo', label: 'GEO', icon: Globe, group: 'Reports', hint: 'AI search visibility' },
   { key: 'meetings', label: 'Meeting insights', icon: Users, group: 'Reports', hint: 'What clients said in meetings' },
 
-  { key: 'associates', label: 'Associate Training', icon: GraduationCap, group: 'Team', hint: 'Daily lesson, next-day test, levels' },
+  { key: 'associates', label: 'Team Training', icon: GraduationCap, group: 'Team', hint: 'Daily lesson, next-day test, levels' },
   { key: 'team', label: 'Team & Roles', icon: ShieldCheck, group: 'Team', hint: 'Who can sign in and what they can do' },
   { key: 'activity', label: 'Activity Log', icon: Activity, group: 'Team', hint: 'Everything the dashboard did, with errors' },
   { key: 'learning', label: 'Learning', icon: Brain, group: 'Team', hint: 'What the team changed in blogs, what the writer learned, what people ask for' },
@@ -209,7 +209,7 @@ export default function Dashboard() {
 
   const who = useRole();
   // The daily training gate (lib/trainingGate.ts): until today's lessons are read and today's tests
-  // submitted, only Associate Training (and sign out) opens. Fails open: no answer means not locked.
+  // submitted, only Team Training (and sign out) opens. Fails open: no answer means not locked.
   const [gate, setGate] = useState<{ locked: boolean; unread: any[]; openTests: any[]; notice: string | null } | null>(null);
   useEffect(() => {
     let alive = true;
@@ -230,13 +230,13 @@ export default function Dashboard() {
   const locked = Boolean(gate?.locked);
   // Read once when the page loads (the clock is not read during render).
   // Before the session loads, the role's default pages (lib/permissions.ts, the one list).
-  // While the training gate is on, Associate Training opens even for a role whose page access leaves it
+  // While the training gate is on, Team Training opens even for a role whose page access leaves it
   // out: it is the only way to unlock the dashboard.
   const visible = (key: string) => (locked && key === 'associates') || (who.loaded ? who.sees(key) : defaultAccess(who.role).pages.includes(key));
   // A page the role cannot see (for example from an old link) falls back to Home.
   const shown: TabKey = locked ? 'associates' : who.loaded && !visible(tab) ? 'home' : tab;
   const current = TABS.find((t) => t.key === shown)!;
-  // The page shown (also when the training gate forces Associate Training) mounts on first visit.
+  // The page shown (also when the training gate forces Team Training) mounts on first visit.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setVisited((v) => (v.has(shown) ? v : new Set(v).add(shown)));

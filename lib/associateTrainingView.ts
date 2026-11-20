@@ -1,4 +1,4 @@
-// Associate Training as its page shows it. Everyone but the admin gets their own training (three
+// Team Training as its page shows it. Everyone but the admin gets their own training (three
 // lessons a day, tests, games, the Watch area). The admin and managers also get the team report:
 // per person marks, trend, level history, strengths and weak topics per track, streaks, surprise
 // tests (sortable on the page, downloadable as CSV). Shared by GET /api/associate-training and the

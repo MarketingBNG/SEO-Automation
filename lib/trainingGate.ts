@@ -1,6 +1,6 @@
 // The daily training gate: for a person in the training (everyone but the admin, with an active
 // profile), while today's training is not finished (a lesson of today not marked read, or a test of
-// today not submitted), every dashboard page except Associate Training is locked and their API
+// today not submitted), every dashboard page except Team Training is locked and their API
 // writes outside the training are refused (proxy.ts). It fails open: with no lesson and no test for
 // today (lessons not made yet, Testing mode, AI paused, an error), nobody is locked out; a notice says
 // so instead. The admin's "In training" switch (active) removes the gate for a person.
@@ -78,5 +78,5 @@ export async function gateRefusal(method: string, path: string, email: string | 
   const write = method.toUpperCase() !== 'GET' && method.toUpperCase() !== 'HEAD';
   if (!write || !email || !isTrainee(role) || allowedWhileLocked(path)) return null;
   const gate = await trainingGate(email, role, day);
-  return gate.locked ? { status: 403, body: { error: `${GATE_MESSAGE}: ${[gate.unread.length ? `read ${gate.unread.length} lesson(s)` : '', gate.openTests.length ? `submit ${gate.openTests.length} test(s)` : ''].filter(Boolean).join(' and ')} on Associate Training.`, trainingGate: true } } : null;
+  return gate.locked ? { status: 403, body: { error: `${GATE_MESSAGE}: ${[gate.unread.length ? `read ${gate.unread.length} lesson(s)` : '', gate.openTests.length ? `submit ${gate.openTests.length} test(s)` : ''].filter(Boolean).join(' and ')} on Team Training.`, trainingGate: true } } : null;
 }

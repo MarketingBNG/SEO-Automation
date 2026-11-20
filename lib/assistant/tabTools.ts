@@ -1149,7 +1149,7 @@ tool({
 });
 
 // =============================================================================================
-// Associate Training
+// Team Training
 // =============================================================================================
 
 tool({
@@ -1157,7 +1157,7 @@ tool({
   kind: 'read',
   description: "Training as the page shows it to the person asking: everyone but the admin gets their own three lessons of today (Technical, Know UIC, Marketing), whether tests are open (never their questions), results, level history and game points; an admin or manager also gets the team report (marks, trend, strengths and weak topics per track, streaks, surprise tests) and today's lessons (person: one person's page by email). Taking a test stays on the page.",
   input_schema: obj({ person: str }),
-  summarize: (i) => `Read associate training${i.person ? ` for ${i.person}` : ''}`,
+  summarize: (i) => `Read team training${i.person ? ` for ${i.person}` : ''}`,
   run: async (i, ctx) => {
     if (!ctx?.me) throw new Error('Sign in first');
     const { trainingView } = await import('@/lib/associateTrainingView');
@@ -1166,7 +1166,7 @@ tool({
     const hideTest = (p: any) =>
       p && {
         ...p,
-        test: p.test ? { id: p.test.id, day: p.test.day, kind: p.test.kind, total: p.test.total, open: true, note: 'Open test: taken on the Associate Training page.' } : null,
+        test: p.test ? { id: p.test.id, day: p.test.day, kind: p.test.kind, total: p.test.total, open: true, note: 'Open test: taken on the Team Training page.' } : null,
         tests: (p.tests || []).map((t: any) => ({ id: t.id, day: t.day, kind: t.kind, total: t.total, open: true })),
         lessons: (p.lessons || []).map(({ games, slides, ...l }: any) => l),
       };
