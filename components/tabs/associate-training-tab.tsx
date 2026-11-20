@@ -12,6 +12,30 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { SafeHtml, safeHref } from '@/components/shared/article';
 
 const fmtDay = (d?: string | null) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { dateStyle: 'medium', timeZone: 'UTC' }) : '');
+const fmtDur = (ms?: number | null) => {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return null;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+};
+const parseUtcMs = (s?: string | null) => {
+  const ms = Date.parse(String(s || '').replace(' ', 'T') + 'Z');
+  return Number.isFinite(ms) ? ms : null;
+};
+const durStr = (a?: string | null, b?: string | null) => {
+  const x = parseUtcMs(a);
+  const y = parseUtcMs(b);
+  return x !== null && y !== null && y >= x ? fmtDur(y - x) : null;
+};
+const safeParse = (s: any) => {
+  try {
+    return s ? JSON.parse(s) : null;
+  } catch {
+    return null;
+  }
+};
+// AI-use signals worth a flag: any paste, 3 or more tab-switches, or a minute or more away.
+const flagged = (sig: any) => !!sig && (sig.pastes > 0 || sig.switches >= 3 || sig.awayMs >= 60000);
 const post = async (body: any) => {
   const res = await fetch('/api/associate-training', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
@@ -323,6 +347,13 @@ function Lesson({ l, open: startOpen, mine, testsOpen, onChange }: { l: any; ope
             </Button>
           )}
           {mine && l.readAt && <div className="text-xs text-emerald-700 dark:text-emerald-400">Marked read {l.readAt} UTC.</div>}
+          {!mine && (l.openedAt || l.readAt) && (
+            <div className="text-xs text-muted-foreground">
+              {l.openedAt ? `Opened ${l.openedAt} UTC` : 'Open time not recorded'}
+              {l.readAt ? ` · read ${l.readAt} UTC` : ' · not marked read yet'}
+              {l.readMs ? ` · took ${fmtDur(l.readMs)}` : ''}
+            </div>
+          )}
           {err && <div className="text-sm text-red-600">{err}</div>}
         </div>
       )}
@@ -330,12 +361,32 @@ function Lesson({ l, open: startOpen, mine, testsOpen, onChange }: { l: any; ope
   );
 }
 
-function Review({ test }: { test: any }) {
+// meta: the admin or a manager is reviewing, so show how long it took, the AI-use signals, and the
+// trail of what was picked and changed. A person reviewing their own test does not see these.
+function Review({ test, meta }: { test: any; meta?: boolean }) {
+  const sig = meta ? safeParse(test.signals) : null;
+  const isFlag = flagged(sig);
+  const trail: Record<number, { o: number; at: number }[]> = {};
+  if (meta) for (const e of safeParse(test.answer_log) || []) trail[e.q] = e.picks || [];
+  const time = meta ? durStr(test.opened_at, test.submitted_at) || (sig?.ms ? fmtDur(sig.ms) : null) : null;
   return (
     <div className="space-y-3">
+      {meta && (
+        <div className={`rounded-md border p-2 text-xs ${isFlag ? 'border-red-500/50 bg-red-500/10' : 'bg-muted'}`}>
+          <div>Time taken: {time || 'unknown'}</div>
+          {sig ? (
+            <div className={isFlag ? 'font-medium text-red-700 dark:text-red-400' : 'text-muted-foreground'}>
+              Pastes: {sig.pastes} · Left the tab: {sig.switches} time(s){sig.awayMs ? ` · away ${fmtDur(sig.awayMs)}` : ''}{isFlag ? ' · possible outside help, check the answers' : ''}
+            </div>
+          ) : (
+            <div className="text-muted-foreground">No AI-use signals recorded (older test, or taken before this was added).</div>
+          )}
+        </div>
+      )}
       {test.questions.map((q: any, i: number) => {
         const picked = test.answers?.[q.id];
         const right = picked !== undefined && Number(picked) === q.answer;
+        const picks = trail[i] || [];
         return (
           <div key={q.id} className="rounded-lg border p-3 text-sm">
             <div className="flex gap-2 font-medium">
@@ -343,8 +394,11 @@ function Review({ test }: { test: any }) {
               {i + 1}. {q.q}
             </div>
             <div className="mt-1 pl-6">
-              {!right && <div className="text-red-600">Your answer: {picked !== undefined ? q.options[picked] : 'not answered'}</div>}
+              {!right && <div className="text-red-600">{meta ? 'Their' : 'Your'} answer: {picked !== undefined ? q.options[picked] : 'not answered'}</div>}
               <div className="text-emerald-700 dark:text-emerald-400">Right answer: {q.options[q.answer]}</div>
+              {meta && picks.length > 1 && (
+                <div className="text-xs text-amber-700 dark:text-amber-400">Changed answer: {picks.map((p) => q.options[p.o] ?? '?').join(' → ')}</div>
+              )}
               {q.explain && <div className="text-muted-foreground">{q.explain}</div>}
               {q.source && (
                 <a href={safeHref(q.source)} target="_blank" rel="noreferrer" className="text-xs underline">
@@ -552,6 +606,8 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
                   <th>Test</th>
                   <th>Level</th>
                   <th>Score</th>
+                  {readOnly && <th>Time</th>}
+                  {readOnly && <th>Flag</th>}
                   <th />
                 </tr>
               </thead>
@@ -562,6 +618,8 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
                     <td>{r.kind === 'surprise' ? 'Surprise' : 'Daily'}</td>
                     <td>{r.level}</td>
                     <td>{r.status === 'missed' ? 'Not taken' : `${r.score}/${r.total} (${r.percent}%)`}</td>
+                    {readOnly && <td className="text-muted-foreground">{r.status === 'done' ? fmtDur(r.tookMs) ?? '—' : '—'}</td>}
+                    {readOnly && <td>{flagged(r.signals) ? <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:text-red-400">check</span> : ''}</td>}
                     <td className="text-right">
                       {r.status === 'done' && (
                         <Button variant="ghost" size="sm" onClick={() => openReview(r.id)}>
@@ -845,7 +903,7 @@ export default function AssociateTrainingTab() {
         </CardAction>
       </CardHeader>
       <CardContent>
-        <Review test={review} />
+        <Review test={review} meta={data.viewer} />
       </CardContent>
     </Card>
   );

@@ -38,7 +38,19 @@ export async function visibleEmails(me: { email: string; role: string }): Promis
   return new Set<string>(rows.map((r: any) => r.email.toLowerCase()));
 }
 
-function lessonOut(l: any, read?: string | null) {
+// UTC 'YYYY-MM-DD HH:MM:SS' to millis; null when empty or unparseable.
+const parseUtc = (s?: string | null) => {
+  const ms = Date.parse(String(s || '').replace(' ', 'T') + 'Z');
+  return Number.isFinite(ms) ? ms : null;
+};
+// How long between two stamps, in ms (null when either is missing or they are out of order).
+export const tookMs = (a?: string | null, b?: string | null) => {
+  const x = parseUtc(a);
+  const y = parseUtc(b);
+  return x !== null && y !== null && y >= x ? y - x : null;
+};
+
+function lessonOut(l: any, read?: string | null, openedAt?: string | null) {
   const extras = json(l.extras, {});
   return {
     id: l.id,
@@ -56,18 +68,23 @@ function lessonOut(l: any, read?: string | null) {
     service: extras.service || null,
     games: buildGames({ id: l.id, extras, questions: l.questions }),
     readAt: read ?? null,
+    // For a viewer (admin or manager) only: when they opened it and how long it took to read.
+    openedAt: openedAt ?? null,
+    readMs: openedAt && read ? tookMs(openedAt, read) : null,
   };
 }
 
-// One person's training as their page shows it.
-async function personView(email: string, role: string) {
+// One person's training as their page shows it. forViewer: the admin or a manager is looking, so the
+// timing, AI-use signals and open times are included (a person does not see these about themselves).
+async function personView(email: string, role: string, forViewer = false) {
   const profile = await prisma.training_profiles.findUnique({ where: { email } });
   if (!profile) return null;
   const ids = Object.values(lessonIdsOf(profile)).filter((x): x is number => Boolean(x));
   const lessons = ids.length ? await prisma.training_lessons.findMany({ where: { id: { in: ids } } }) : [];
   const reads = await prisma.training_reads.findMany({ where: { email, lesson_id: { in: ids } } });
+  const opens = forViewer && ids.length ? await prisma.training_lesson_opens.findMany({ where: { email, lesson_id: { in: ids } } }) : [];
   const open = await prisma.training_tests.findMany({ where: { email, status: 'open' }, orderBy: [{ day: 'desc' }, { kind: 'asc' }] });
-  const results = await prisma.training_tests.findMany({ where: { email, status: { notIn: ['open', 'marking'] } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 30, select: { id: true, day: true, level: true, score: true, total: true, status: true, kind: true } });
+  const results = await prisma.training_tests.findMany({ where: { email, status: { notIn: ['open', 'marking'] } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 30, select: { id: true, day: true, level: true, score: true, total: true, status: true, kind: true, opened_at: true, submitted_at: true, signals: true } });
   const past = await prisma.training_lessons.findMany({ where: { audience: audienceFor(role), level: { lte: profile.level }, id: { notIn: ids } }, orderBy: [{ day: 'desc' }, { level: 'desc' }], take: 15 });
   const games = await prisma.training_games.findMany({ where: { email }, select: { day: true, lesson_id: true, points: true, max_points: true } });
   const streak = gameStreak(games.map((x) => x.day), istDay());
@@ -75,12 +92,12 @@ async function personView(email: string, role: string) {
     email,
     name: profile.name,
     profile: { level: profile.level, streak: profile.streak, active: profile.active, points: profile.points, gameStreak: streak, badge: badgeFor(profile.points, streak), audience: audienceFor(role) },
-    lessons: TRACKS.map((t) => lessons.find((l) => l.track === t)).filter(Boolean).map((l) => ({ ...lessonOut(l, reads.find((r) => r.lesson_id === l!.id)?.read_at), played: games.find((x) => x.lesson_id === l!.id) || null })),
+    lessons: TRACKS.map((t) => lessons.find((l) => l.track === t)).filter(Boolean).map((l) => ({ ...lessonOut(l, reads.find((r) => r.lesson_id === l!.id)?.read_at, opens.find((o) => o.lesson_id === l!.id)?.opened_at), played: games.find((x) => x.lesson_id === l!.id) || null })),
     // The first lesson (technical) for older pages and the assistant.
     lesson: lessons.length ? lessonOut(lessons.find((l) => l.track === 'technical') || lessons[0]) : null,
     tests: open.map((t) => ({ id: t.id, day: t.day, kind: t.kind, total: t.total, questions: hidden(testQuestions(t)) })),
     test: open[0] ? { id: open[0].id, day: open[0].day, kind: open[0].kind, total: open[0].total, questions: hidden(testQuestions(open[0])) } : null,
-    results: results.map((r) => ({ ...r, percent: pct(r) })),
+    results: results.map((r) => ({ id: r.id, day: r.day, level: r.level, score: r.score, total: r.total, status: r.status, kind: r.kind, percent: pct(r), ...(forViewer ? { tookMs: tookMs(r.opened_at, r.submitted_at), signals: json(r.signals, null) } : {}) })),
     pastLessons: past.map((l) => ({ id: l.id, day: l.day, level: l.level, track: l.track, trackLabel: TRACK_LABEL[l.track as Track] || l.track, title: l.title, content_html: l.content_html, sources: json(l.sources, []) })),
     dueAgain: await prisma.training_misses.count({ where: { email, cleared: false } }),
     levelHistory: await prisma.training_level_history.findMany({ where: { email }, orderBy: { id: 'desc' }, take: 20 }),
@@ -217,7 +234,15 @@ export async function trainingView(me: { email: string; name: string; role: stri
     // 'marking' is unfinished too (it can go back to 'open', or stay there after a restart until the
     // next day): its answer key is not shown yet.
     if (t.status === 'open' || t.status === 'marking') return { status: 409, body: { error: 'Finish the test first' } };
-    return { status: 200, body: { test: { ...t, questions: testQuestions(t), answers: json(t.answers, {}), percent: pct(t) } } };
+    const body: any = { ...t, questions: testQuestions(t), answers: json(t.answers, {}), percent: pct(t) };
+    // The timing, answer trail and AI-use signals are for the admin or a manager, not the person
+    // looking at their own test.
+    if (!viewer) {
+      delete body.answer_log;
+      delete body.signals;
+      delete body.opened_at;
+    }
+    return { status: 200, body: { test: body } };
   }
   const trainee = isTrainee(me.role);
   const catalogue = json(await settings.get('uic_catalogue'), null);
@@ -254,7 +279,7 @@ export async function trainingView(me: { email: string; name: string; role: stri
       // Older page shape.
       everyone: report.map((r) => ({ email: r.email, name: r.name, level: r.level, active: r.active, streak: r.streak, tests: r.tests, average: r.average, last: r.last, dueAgain: r.dueAgain })),
       todayLessons: todayLessons.map((l) => lessonOut(l)),
-      person: person && roleOf.has(person) ? await personView(person, roleOf.get(person)!) : null,
+      person: person && roleOf.has(person) ? await personView(person, roleOf.get(person)!, true) : null,
       lastRun,
     },
   };
