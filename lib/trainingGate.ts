@@ -4,8 +4,12 @@
 // writes outside the training are refused (proxy.ts). It fails open: with no lesson and no test for
 // today (lessons not made yet, Testing mode, AI paused, an error), nobody is locked out; a notice says
 // so instead. The admin's "In training" switch (active) removes the gate for a person.
-import prisma from './prisma';
+import prismaClient from './prisma';
 import { TRACK_LABEL, isTrainee, lessonIdsOf, type Track } from './trainingContent';
+
+// Untyped on purpose: the Prisma query types of these many queries push the build's type check past
+// its memory limit (see lib/assistant/tabTools.ts). The tests cover the queries.
+const prisma: any = prismaClient;
 
 const istDay = (d = new Date()) => new Date(d.getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
 

@@ -6,7 +6,7 @@
 // content changes and the activity log, and can be undone while nobody has changed the post since.
 // Used by the assistant's live_blog_set_author / live_blog_edit tools and by Drafts & Review
 // ("Change author on the live post").
-import prisma from './prisma';
+import prismaClient from './prisma';
 import * as activity from './activity';
 import { getPost, findPostByUrl, updatePost, postFieldsHash, type Post } from './site';
 import { slugFromUrl, authorSlug } from './siteConnector';
@@ -16,6 +16,10 @@ import { liveTextProblem } from './publishDraft';
 import { diffContent } from './contentDiff';
 import { recordChange } from './contentChanges';
 import { sqlNow } from './time';
+
+// Untyped on purpose: the Prisma query types of these many queries push the build's type check past
+// its memory limit (see lib/assistant/tabTools.ts). The tests cover the queries.
+const prisma: any = prismaClient;
 
 export type PostRef = { post_id?: number; url?: string };
 export type LiveChange = { summary: string; targetType: string; targetId: string; undo: any };

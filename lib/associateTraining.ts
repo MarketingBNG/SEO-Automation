@@ -9,7 +9,7 @@
 // the same lesson. Admins only watch. Lessons are made once per day, track, level and audience and
 // shared by everyone there, so AI calls stay few.
 import crypto from 'crypto';
-import prisma from './prisma';
+import prismaClient from './prisma';
 import { goalBlock } from './goal';
 import * as settings from './settings';
 import * as activity from './activity';
@@ -22,6 +22,10 @@ import { onceADay, waitsForAi, AnotherRunGoing } from './onceADay';
 import { sqlNow } from './time';
 import { LEVELS, TRACKS, audienceFor, isTrainee, lessonIdsOf, buildGames, cleanVideos, lessonPrompt, questionsFor, scoreGame, systemPrompt, topicFor, type Audience, type GameAnswers, type Track } from './trainingContent';
 import { getCatalogue, serviceForDay } from './uicCatalogue';
+
+// Untyped on purpose: the Prisma query types of these many queries push the build's type check past
+// its memory limit (see lib/assistant/tabTools.ts). The tests cover the queries.
+const prisma: any = prismaClient;
 
 export { LEVELS, audienceFor, isTrainee, lessonIdsOf };
 export const TRAINING_HOUR_IST = 9;
@@ -363,7 +367,7 @@ export async function runTrainingDay(now = new Date()) {
     await ensureProfiles();
     await getCatalogue().catch(() => null); // refreshed once a week
     const team = await prisma.team_members.findMany({ select: { email: true, role: true, blocked: true } });
-    const roleOf = new Map(team.map((t) => [t.email.toLowerCase(), t]));
+    const roleOf = new Map<string, { email: string; role: string; blocked: boolean }>(team.map((t: any) => [t.email.toLowerCase(), t]));
     const people = (await prisma.training_profiles.findMany({ where: { active: true } })).filter((p) => {
       const m = roleOf.get(p.email);
       return m && !m.blocked && isTrainee(m.role);

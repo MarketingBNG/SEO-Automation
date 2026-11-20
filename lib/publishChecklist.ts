@@ -5,9 +5,13 @@
 // that tick by itself. The calendar's own publishing at the slot uses the approval already given
 // and does not ask again. Who ticked and when is saved and logged.
 import crypto from 'crypto';
-import prisma from './prisma';
+import prismaClient from './prisma';
 import * as activity from './activity';
 import { sqlNow } from './time';
+
+// Untyped on purpose: the Prisma query types of these many queries push the build's type check past
+// its memory limit (see lib/assistant/tabTools.ts). The tests cover the queries.
+const prisma: any = prismaClient;
 
 export const CHECK_ITEMS = ['author', 'title', 'content', 'banner'] as const;
 export type CheckItem = (typeof CHECK_ITEMS)[number];

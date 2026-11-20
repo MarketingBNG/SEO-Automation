@@ -3,12 +3,16 @@
 // per person marks, trend, level history, strengths and weak topics per track, streaks, surprise
 // tests (sortable on the page, downloadable as CSV). Shared by GET /api/associate-training and the
 // assistant's training_status. Taking a test stays on the page.
-import prisma from '@/lib/prisma';
+import prismaClient from '@/lib/prisma';
 import * as settings from '@/lib/settings';
 import { istDay } from '@/lib/topics';
 import { DOWN_AVG, LEVELS, PASS_PERCENT, UP_AVG, WINDOW, gameStreak, isTrainee, lessonIdsOf, testQuestions, type Question } from '@/lib/associateTraining';
 import { TRACKS, TRACK_LABEL, audienceFor, badgeFor, buildGames, buildSlides, type Track } from '@/lib/trainingContent';
 import { trainingGate } from '@/lib/trainingGate';
+
+// Untyped on purpose: the Prisma query types of these many queries push the build's type check past
+// its memory limit (see lib/assistant/tabTools.ts). The tests cover the queries.
+const prisma: any = prismaClient;
 
 export const pct = (t: { score: number | null; total: number }) => Math.round(((t.score || 0) / Math.max(1, t.total)) * 100);
 // Questions as the page may see them before the test is done: no answers, no explanations.
@@ -128,7 +132,7 @@ export function topicStats(tests: { questions: string; answers: string | null; s
 
 export async function teamReport(): Promise<ReportRow[]> {
   const team = await prisma.team_members.findMany({ select: { email: true, role: true } });
-  const roleOf = new Map(team.map((t) => [t.email.toLowerCase(), t.role]));
+  const roleOf = new Map<string, string>(team.map((t: any) => [t.email.toLowerCase(), t.role]));
   const people = (await prisma.training_profiles.findMany({ orderBy: { email: 'asc' } })).filter((p) => isTrainee(roleOf.get(p.email) || 'user'));
   const out: ReportRow[] = [];
   for (const p of people) {
@@ -219,7 +223,7 @@ export async function trainingView(me: { email: string; name: string; role: stri
   if (!viewer) return { status: 200, body: { ...base, me: mine, library: lib } };
 
   const report = await teamReport();
-  const roleOf = new Map(report.map((r) => [r.email, r.role]));
+  const roleOf = new Map<string, string>(report.map((r) => [r.email, r.role]));
   const todayLessons = await prisma.training_lessons.findMany({ where: { day: istDay() }, orderBy: [{ audience: 'asc' }, { level: 'asc' }, { track: 'asc' }] });
   let lastRun: any = null;
   try {
