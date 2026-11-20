@@ -70,7 +70,7 @@ async function computeGate(email: string, day: string): Promise<Gate> {
 }
 
 // API paths a locked person may still write to: the training itself (sign-in and sign-out are public).
-export const allowedWhileLocked = (path: string) => /^\/api\/associate-training(\/|$)/.test(path) || /^\/api\/auth(\/|$)/.test(path);
+export const allowedWhileLocked = (path: string) => /^\/api\/associate-training(\/|$)/.test(path) || /^\/api\/consent(\/|$)/.test(path) || /^\/api\/auth(\/|$)/.test(path);
 
 // proxy.ts: the refusal for an API write by a person whose training today is not finished, or null.
 // Reads stay open (the page shows the lock); the training's own routes stay open.

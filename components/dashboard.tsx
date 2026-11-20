@@ -24,6 +24,7 @@ import dynamic from 'next/dynamic';
 import { useRole } from '@/hooks/use-role';
 import { defaultAccess } from '@/lib/permissions';
 import { TabBoundary } from '@/components/shared/tab-boundary';
+import { ConsentGate } from '@/components/consent-gate';
 
 // Each page's code loads the first time the page is opened, not all at start-up, so the dashboard
 // starts fast on low-end devices. The pages work exactly as before once loaded.
@@ -244,6 +245,7 @@ export default function Dashboard() {
 
   return (
     <SidebarProvider>
+      <ConsentGate />
       <Sidebar collapsible="icon">
         <SidebarHeader>
           <div className="flex items-center gap-2 px-1 py-1.5">

@@ -522,6 +522,18 @@ model team_members {
   updated_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }
 
+// A person's acceptance of the monitoring terms (attendance, activity for the timesheet, training
+// review). Recorded once per version; a new version of the terms asks again. This is the consent
+// record for DPDP: who agreed, to which version, and when.
+model training_consents {
+  id          Int    @id @default(autoincrement())
+  email       String
+  version     String
+  accepted_at String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@unique([email, version])
+}
+
 // Daily topic research: what is worth writing about today (news, updates, the strategy's
 // keywords), with the keywords to use and where it came from.
 model topics {
