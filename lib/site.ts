@@ -66,7 +66,7 @@ const toPost = (p: SitePost & Record<string, any>): Post => ({
 });
 
 // The fields an update can set, as the post holds them now (for undo: what a fix wrote).
-const FIELD_OF: Record<string, (p: Post) => unknown> = { contentHtml: (p) => p.content, seoTitle: (p) => p.seoTitle, metaDescription: (p) => p.seoDescription, title: (p) => p.title, excerpt: (p) => p.excerpt };
+const FIELD_OF: Record<string, (p: Post) => unknown> = { contentHtml: (p) => p.content, seoTitle: (p) => p.seoTitle, metaDescription: (p) => p.seoDescription, title: (p) => p.title, excerpt: (p) => p.excerpt, authorName: (p) => p.author };
 export function postFieldsHash(post: Post, keys: string[]): string {
   const vals = [...keys].sort().map((k) => [k, FIELD_OF[k] ? FIELD_OF[k](post) ?? null : null]);
   return crypto.createHash('sha1').update(JSON.stringify(vals)).digest('hex');

@@ -411,6 +411,90 @@ async function postMyBlogResult(i, ctx, postMyBlog) {
   };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Live posts on the website (lib/liveBlog.ts): the author, and the words. High risk: they change the
+// live page at once. Undo puts the previous version back while nobody has changed the post since.
+// ---------------------------------------------------------------------------------------------
+
+const POST_REF = {
+  post_id: { type: 'integer', description: 'The live post id from website_search_posts or website_get_post.' },
+  url: { type: 'string', description: 'Or the live post address.' },
+};
+const refOf = (i: any) => ({ post_id: i.post_id, url: i.url });
+const actorFor = (ctx: any) => (ctx?.me?.name ? `${ctx.me.name} (assistant)` : 'Assistant');
+
+defineTool({
+  name: 'live_blog_set_author',
+  kind: 'write',
+  risk: 'high',
+  needs: 'blog.publish_now',
+  description:
+    'Change the author of a blog that is LIVE on the website to one of the blog authors (Akshay Nahar, Amit Agarwal, Naman Gangwal or Harsh Jain, unless the list in Settings differs). The website post gets the new author, the byline ("By ...") and the article schema name them, as publishing does, and the Drafts & Review copy (if the post came from one) gets the new author. The address, cover, words and reviewer stay. Find the post first with website_search_posts. Admin or manager.',
+  input_schema: { type: 'object', properties: { ...POST_REF, author: { type: 'string' } }, required: ['author'], additionalProperties: false },
+  summarize: (i) => `Change the author of live post ${i.post_id ? `#${i.post_id}` : i.url || ''} to ${i.author}`,
+  preview: async (i) => {
+    const { authorPlan } = await import('@/lib/liveBlog');
+    try {
+      const p = await authorPlan(refOf(i), i.author);
+      return {
+        target: `Live post: ${p.post.title} (${p.post.link})`,
+        changes: [{ field: 'author', before: p.post.author || '(none)', after: p.name }],
+        draft: p.draft ? `Drafts & Review #${p.draft.id} gets the new author too.` : 'No Drafts & Review copy.',
+        warning: 'This changes the live page at once. It can be undone while nobody changes the post meanwhile.',
+        problem: p.same ? `It is already published under ${p.name}.` : null,
+      };
+    } catch (e: any) {
+      return { problem: e.message };
+    }
+  },
+  run: async (i, ctx) => {
+    const { setLiveAuthor } = await import('@/lib/liveBlog');
+    return setLiveAuthor(refOf(i), i.author, actorFor(ctx));
+  },
+});
+
+defineTool({
+  name: 'live_blog_edit',
+  kind: 'write',
+  risk: 'high',
+  needs: 'blog.publish_now',
+  description:
+    'Change the words of a blog that is LIVE on the website: exact text replacements (edits: each "find" copied exactly from website_get_post content, tags included, matching once unless replace_all), a new title, a new meta description, and/or one whole section (section.heading: the words of an H2 to H4 heading in the post; section.html: the new section, starting with its heading, up to the next heading). The card shows each change before and after. The address, cover and author never change. Reviewer placeholders ([VERIFY], [AUTHOR NAME] and the like), AI notes and scripts are refused. New facts, figures or deadlines must be checked on an official source first. Admin or manager.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      ...POST_REF,
+      edits: { type: 'array', maxItems: 50, items: { type: 'object', properties: { find: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['find', 'replace'], additionalProperties: false } },
+      title: { type: 'string' },
+      meta_description: { type: 'string' },
+      section: { type: 'object', properties: { heading: { type: 'string' }, html: { type: 'string' } }, required: ['heading', 'html'], additionalProperties: false },
+    },
+    required: [],
+    additionalProperties: false,
+  },
+  summarize: (i) => `Edit live post ${i.post_id ? `#${i.post_id}` : i.url || ''}: ${[i.edits?.length ? `${i.edits.length} text change${i.edits.length > 1 ? 's' : ''}` : '', i.title !== undefined ? 'title' : '', i.meta_description !== undefined ? 'meta description' : '', i.section ? `section "${snippet(i.section.heading, 40)}"` : ''].filter(Boolean).join(', ') || 'nothing'}`,
+  preview: async (i) => {
+    const { editPlan } = await import('@/lib/liveBlog');
+    try {
+      const p = await editPlan(refOf(i), i);
+      return {
+        target: `Live post: ${p.post.title} (${p.post.link})`,
+        changes: p.changes,
+        diff: p.report.summary,
+        words: `${p.report.wordsBefore} → ${p.report.wordsAfter}`,
+        warning: `This changes the live page at once (address, cover and author stay). It can be undone while nobody changes the post meanwhile.${p.draft ? ` Drafts & Review #${p.draft.id} keeps its own article text.` : ''}`,
+        problem: p.problems.length ? `${p.problems.join(' ')} Nothing would be changed.` : null,
+      };
+    } catch (e: any) {
+      return { problem: e.message };
+    }
+  },
+  run: async (i, ctx) => {
+    const { editLive } = await import('@/lib/liveBlog');
+    return editLive(refOf(i), i, actorFor(ctx));
+  },
+});
+
 defineTool({
   name: 'list_audits',
   kind: 'read',
@@ -968,8 +1052,13 @@ defineTool({
 // Undo
 // ---------------------------------------------------------------------------------------------
 
-async function undoChange(undo, { force = false }: { force?: boolean } = {}) {
+async function undoChange(undo, { force = false, actor = 'someone' }: { force?: boolean; actor?: string } = {}) {
   switch (undo.kind) {
+    case 'restore_live_post': {
+      // A live post's author or words changed by live_blog_set_author / live_blog_edit.
+      const { undoLiveChange } = await import('@/lib/liveBlog');
+      return undoLiveChange(undo, { force, actor });
+    }
     case 'restore_site_post': {
       // A technical fix on a website post (lib/strategy/fixer.ts): the saved fields go back.
       const { updatePost, getPost, postFieldsHash } = await import('@/lib/site');

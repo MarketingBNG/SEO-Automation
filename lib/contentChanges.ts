@@ -5,8 +5,9 @@
 import prisma from './prisma';
 import { articleSimilarity, diffContent, normalize, type ChangeReport } from './contentDiff';
 
-export type ChangeKind = 'edit' | 'upload' | 'reupload' | 'optimise' | 'rewrite' | 'restore';
-export type EntityType = 'draft' | 'audit';
+export type ChangeKind = 'edit' | 'upload' | 'reupload' | 'optimise' | 'rewrite' | 'restore' | 'live_edit' | 'author';
+// post: a live website post with no dashboard draft (entity_id is its dashboard post id).
+export type EntityType = 'draft' | 'audit' | 'post';
 export type Version = { title?: string | null; meta?: string | null; html: string };
 export type Change = {
   id: number;

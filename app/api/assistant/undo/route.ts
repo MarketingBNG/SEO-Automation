@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   if (claim.count !== 1) return NextResponse.json({ error: 'This change was already undone' }, { status: 400 });
 
   try {
-    const message = await undoChange(JSON.parse(change.undo), { force: Boolean(force) });
+    const message = await undoChange(JSON.parse(change.undo), { force: Boolean(force), actor: await getActor() });
     await activity.log('assistant.site_change_undone', {
       entityType: change.target_type || 'site',
       entityId: Number(change.target_id) || null,

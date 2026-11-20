@@ -807,6 +807,76 @@ function DraftEditor({ draftId, onClose, onChange, reloadKey = 0 }: { draftId: a
   );
 }
 
+// A published blog: its author can be changed on the live post (byline and schema too) by an admin or
+// a manager, and the change undone while nobody has changed the post since.
+function LiveAuthor({ draft, current, names, onChanged }: { draft: any; current: string; names: string[]; onChanged: () => void }) {
+  const canChange = useRole().can('blog.publish_now');
+  const [pick, setPick] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [changeId, setChangeId] = useState<number | null>(null);
+  async function change() {
+    if (!pick || !window.confirm(`Change the author of the LIVE post to ${pick}? The byline and the article schema change on the website at once.`)) return;
+    setBusy(true);
+    setMsg('');
+    try {
+      const res = await fetch(`/api/drafts/${draft.id}/live-author`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ author: pick }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setChangeId(j.changeId);
+      setMsg(`Done: the live post is now by ${j.author}.`);
+      setPick('');
+      onChanged();
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function undo() {
+    setBusy(true);
+    try {
+      const res = await fetch('/api/assistant/undo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ changeId }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      setChangeId(null);
+      setMsg('Undone: the live post has its previous author again.');
+      onChanged();
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="space-y-1">
+      <div>
+        <span className="text-muted-foreground">Author: </span>
+        {current || "the website's default author"}
+      </div>
+      {canChange && (
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="rounded-md border bg-background px-2 py-1 text-sm" value={pick} disabled={busy} onChange={(e) => setPick(e.target.value)} aria-label="New author for the live post">
+            <option value="">New author…</option>
+            {names.filter((n) => n !== current).map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+          <Button variant="outline" size="sm" disabled={busy || !pick} onClick={change}>
+            Change author on the live post
+          </Button>
+          {changeId && (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={undo}>
+              Undo
+            </Button>
+          )}
+        </div>
+      )}
+      {msg && <div className="text-xs text-muted-foreground">{msg}</div>}
+    </div>
+  );
+}
+
 // The partner the blog is published under: picked at random when the draft is written, changeable
 // here (one of the names, or a new random pick) until the blog is on the website.
 function AuthorPicker({ draft, onChanged }: { draft: any; onChanged: () => void }) {
@@ -828,14 +898,7 @@ function AuthorPicker({ draft, onChanged }: { draft: any; onChanged: () => void 
       setBusy(false);
     }
   }
-  if (draft.wp_post_url) {
-    return (
-      <div>
-        <span className="text-muted-foreground">Author: </span>
-        {current || "the website's default author"}
-      </div>
-    );
-  }
+  if (draft.wp_post_url) return <LiveAuthor draft={draft} current={current} names={names} onChanged={onChanged} />;
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-muted-foreground">Author (published under): </span>
