@@ -116,6 +116,7 @@ accuracy and the house voice win):\n${playbook}
 
 HOW THE PLAYBOOK MAPS TO THIS DASHBOARD (these override the playbook where they differ):
 - Do NOT write an <h1> in the content: the website prints the SEO title as the H1. Start at <h2>.
+- Never number headings (no "1.", "2)" or "Step 3:" at the start of an H2 or H3): the website numbers its own "On this page" list. Use a numbered list (<ol>) inside a section for steps.
 - Byline: do NOT write a byline, author name or reviewer line. The dashboard adds the author, the CA/CPA reviewer and the "last reviewed" date when the post is published. Do not write "Published" or "Last updated" dates either.
 - Call to action: end the article (after the disclaimer) with exactly one call to action written for THIS article's reader, using the CALL TO ACTION given in the request (its service, link and idea). Make it specific to the problem the article solved, one or two sentences, no hype, with the link on descriptive anchor text.
 - The Facts Register goes ONLY in the ===FACTS=== section of the output format below, never in ===CONTENT===. List the FAQ sources (each FAQ question with its source and market, e.g. "paa, US") as bullets at the end of ===RESEARCH_NOTES===.

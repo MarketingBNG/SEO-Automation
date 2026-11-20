@@ -109,6 +109,12 @@ export function seoSlug(text: any) {
   return (kept.length >= 2 ? kept : words).slice(0, 7).join('-');
 }
 
+// The website numbers its own "On this page" list, so a heading that starts with "1." or "2)" would
+// show as "1. 1. ...". Those leading numbers are removed from H2 to H4 before a post is sent.
+export function stripHeadingNumbers(html: string) {
+  return String(html || '').replace(/(<h[2-4]\b[^>]*>)((?:\s|<[^>]+>)*)(?:step\s+)?\d{1,2}(?:\.\d{1,2})*\s*[.):-]\s+/gi, '$1$2');
+}
+
 // Uploads a stored image (storage key) to the website. id is a stable number for the image library.
 export async function uploadImage(key: string, { altText }: { altText?: string | null; title?: string } = {}) {
   need();
@@ -150,7 +156,7 @@ export async function publishPost({ title = '', contentHtml = '', excerpt, featu
   await connectorCall('post.create', {
     slug: finalSlug,
     title,
-    content: contentHtml,
+    content: stripHeadingNumbers(contentHtml),
     excerpt: excerpt || '',
     status: siteStatus(status),
     category: category || pickCategory(`${focusKeyphrase || ''} ${title}`),
@@ -177,7 +183,7 @@ export async function updatePost(postId: number | string, { title, contentHtml, 
   await connectorCall('post.update', {
     slug: at,
     title: title || cur.title,
-    content: contentHtml || cur.content,
+    content: contentHtml ? stripHeadingNumbers(contentHtml) : cur.content,
     excerpt: excerpt ?? cur.excerpt ?? '',
     status: next,
     category: category || cur.category || pickCategory(`${focusKeyphrase || ''} ${title || cur.title}`),

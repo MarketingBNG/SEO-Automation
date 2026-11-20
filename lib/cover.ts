@@ -1,4 +1,5 @@
-// Blog covers, 1200x630. Text is drawn with font files shipped in the repo (Montserrat), so it
+// Blog covers, 1200x630. Text is drawn with font files shipped in the repo (Schibsted Grotesk; Montserrat was turned
+// down by the team as looking machine-made, Nov 2026), so it
 // renders the same on any server. makeCover needs no photo and no API.
 import path from 'path';
 import sharp, { type OverlayOptions } from 'sharp';
@@ -9,8 +10,8 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // The house design (also used for photo covers, lib/coverPhoto.ts): the picture darkened on the
 // left, the logo top left, the title in bold white with its second part in gold, a short gold line.
-const BOLD = path.join(process.cwd(), 'assets/fonts/Montserrat-Bold.ttf');
-const REGULAR = path.join(process.cwd(), 'assets/fonts/Montserrat-Regular.ttf');
+const BOLD = path.join(process.cwd(), 'assets/fonts/Schibsted-800.ttf');
+const REGULAR = path.join(process.cwd(), 'assets/fonts/Schibsted-400.ttf');
 // The full logo with white lettering (made for dark backgrounds).
 const LOGO_WHITE = path.join(process.cwd(), 'public/logo-mark.png');
 const GOLD = '#E8B04B';
@@ -37,7 +38,9 @@ async function fontText(markup: string, font: string, family: string, width: num
   return sharp({ text: { text: markup, font: family, fontfile: font, width, rgba: true, dpi, wrap: 'word' } }).png().toBuffer();
 }
 
-export async function composeCover(photo: Buffer, title: string, opts: { png?: boolean; gold?: string } = {}): Promise<Buffer> {
+// byline: "By <author>" under the title (makeCover). The title is made smaller until title, gold line
+// and byline all fit, so a long title never runs into the byline.
+export async function composeCover(photo: Buffer, title: string, opts: { png?: boolean; gold?: string; byline?: string | null } = {}): Promise<Buffer> {
   const base = await sharp(photo).resize(W, H, { fit: 'cover', position: 'attention' }).modulate({ saturation: 1.05 }).toBuffer();
   const shade = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
@@ -61,16 +64,27 @@ export async function composeCover(photo: Buffer, title: string, opts: { png?: b
     </svg>`
   );
   const { white, gold } = splitTitle(title, opts.gold);
-  const size = title.length > 70 ? 230 : title.length > 45 ? 270 : 320;
-  const head = await fontText(`<span foreground="#FFFFFF">${esc(white)}</span>${gold ? `\n<span foreground="${GOLD}">${esc(gold)}</span>` : ''}`, BOLD, 'Montserrat Bold', 640, size);
-  const headMeta = await sharp(head).metadata();
-  const top = Math.max(150, Math.round((H - (headMeta.height || 300)) / 2) + 10);
+  const by = opts.byline ? await fontText(`<span foreground="#C9D1E8">By ${esc(opts.byline)}</span>`, REGULAR, 'Schibsted Grotesk', 700, 110) : null;
+  const byH = by ? (await sharp(by).metadata()).height || 30 : 0;
+  let size = title.length > 70 ? 230 : title.length > 45 ? 270 : 320;
+  let head: Buffer, headH: number, top: number, ruleTop: number, byTop: number;
+  for (;;) {
+    head = await fontText(`<span foreground="#FFFFFF">${esc(white)}</span>${gold ? `\n<span foreground="${GOLD}">${esc(gold)}</span>` : ''}`, BOLD, 'Schibsted Grotesk Ultra-Bold', 640, size);
+    headH = (await sharp(head).metadata()).height || 300;
+    top = Math.max(150, Math.round((H - headH) / 2) + 10);
+    ruleTop = Math.min(H - 40, top + headH + 22);
+    // The byline sits at the bottom as before, or just under the gold line when the title reaches lower.
+    byTop = Math.max(H - 70, top + headH + 22 + 5 + 16);
+    if (!by || byTop + byH <= H - 12 || size <= 120) break;
+    size = Math.max(120, Math.round(size * 0.9));
+  }
   const layers: OverlayOptions[] = [
     { input: shade, left: 0, top: 0 },
     { input: grid, left: 0, top: 0 },
     { input: head, left: 64, top },
-    { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="88" height="5"><rect width="88" height="5" rx="2" fill="${GOLD}"/></svg>`), left: 66, top: Math.min(H - 40, top + (headMeta.height || 300) + 22) },
+    { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="88" height="5"><rect width="88" height="5" rx="2" fill="${GOLD}"/></svg>`), left: 66, top: ruleTop },
   ];
+  if (by) layers.push({ input: by, left: 66, top: Math.min(byTop, H - byH) });
   try {
     layers.push({ input: await sharp(LOGO_WHITE).resize({ height: 84, fit: 'inside' }).png().toBuffer(), left: 58, top: 34 });
   } catch {}
@@ -116,10 +130,7 @@ export async function makeCover(title: string, author?: string | null, variant =
   // The words a person chose to make bold (the start of the title): the rest of the title goes gold.
   const m = String(main || '').trim();
   const gold = m && m.length < title.length && title.toLowerCase().startsWith(m.toLowerCase()) ? title.slice(m.length).replace(/^[\s:,\u2013-]+/, '') : undefined;
-  const cover = await composeCover(base, title, { png: true, gold });
-  if (!author) return cover;
-  const by = await fontText(`<span foreground="#C9D1E8">By ${esc(author)}</span>`, REGULAR, 'Montserrat', 700, 110);
-  return sharp(cover).composite([{ input: by, left: 66, top: H - 70 }]).png().toBuffer();
+  return composeCover(base, title, { png: true, gold, byline: author || null });
 }
 
 // The cover's alt text: what the person wrote, else the title (never empty, so Google always has

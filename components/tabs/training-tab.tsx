@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { fmtIst } from '@/lib/time';
 import { BookOpen, History, Loader2, RotateCw, Save, Sparkles } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from '@/components/ui/button';
@@ -373,7 +374,7 @@ export default function TrainingTab() {
                               {h.status}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{h.created_at}</TableCell>
+                          <TableCell className="text-muted-foreground">{fmtIst(h.created_at)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

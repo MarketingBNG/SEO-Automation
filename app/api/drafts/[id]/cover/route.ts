@@ -10,8 +10,28 @@ import { newPhotoCover } from '@/lib/draftActions';
 
 export const runtime = 'nodejs';
 
-const g = globalThis as unknown as { __coverCache?: Map<string, Buffer> };
+const g = globalThis as unknown as { __coverCache?: Map<string, Buffer>; __coverDrawing?: Map<string, Promise<Buffer>> };
 const covers = (g.__coverCache ||= new Map<string, Buffer>());
+// A cover being drawn right now is shared: a list that asks for the same cover many times at once
+// (or many people opening it) draws it once instead of once per request.
+const drawing = (g.__coverDrawing ||= new Map<string, Promise<Buffer>>());
+// At most two covers are drawn at a time. Each takes about half a second of CPU on every core
+// (fonts, crop, PNG); a list asking for dozens at once otherwise slowed every other page and API
+// call on the server by a factor of four while it lasted.
+const DRAW_AT_ONCE = 2;
+const gate = globalThis as unknown as { __coverSlots?: { busy: number; waiting: (() => void)[] } };
+const slots = (gate.__coverSlots ||= { busy: 0, waiting: [] });
+async function drawLimited(title: string, author: string | null): Promise<Buffer> {
+  if (slots.busy >= DRAW_AT_ONCE) await new Promise<void>((ok) => slots.waiting.push(ok));
+  else slots.busy++;
+  try {
+    return await makeCover(title, author);
+  } finally {
+    const next = slots.waiting.shift();
+    if (next) next();
+    else slots.busy--;
+  }
+}
 
 // GET /api/drafts/[id]/cover: the featured image the post will carry: the uploaded one, or the
 // branded cover the dashboard makes from the title and author.
@@ -30,9 +50,18 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const key = `${title}|${author || ''}`;
   let png = covers.get(key);
   if (!png) {
-    png = await makeCover(title, author);
-    covers.set(key, png);
-    if (covers.size > 100) covers.delete(covers.keys().next().value as string);
+    let job = drawing.get(key);
+    if (!job) {
+      job = drawLimited(title, author)
+        .then((buf) => {
+          covers.set(key, buf);
+          if (covers.size > 100) covers.delete(covers.keys().next().value as string);
+          return buf;
+        })
+        .finally(() => drawing.delete(key));
+      drawing.set(key, job);
+    }
+    png = await job;
   }
   return new Response(new Uint8Array(png), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=300' } });
 }

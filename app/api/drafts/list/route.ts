@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma';
 import { methodNotAllowed } from '../../_lib/http';
 import { getMe } from '@/lib/auth';
 import { publishPlan } from '@/lib/strategy/core';
+import { istText } from '@/lib/time';
 
 // Where a draft came from, from the batch its keyword was queued in.
 function sourceOf(batch: string | null, kind: string) {
@@ -32,7 +33,8 @@ export async function GET() {
   // When each published draft actually went to the website (from the activity log).
   const pubLog = admin ? await prisma.activity_log.findMany({ where: { action: { in: ['site.published', 'wordpress.published', 'schedule.published'] }, entity_type: 'draft', entity_id: { in: ids } }, select: { entity_id: true, created_at: true }, orderBy: { id: 'asc' } }) : [];
   const publishedAt = new Map(pubLog.map((l) => [l.entity_id, l.created_at]));
-  const ist = (s: string) => new Date(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z')).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }) + ' IST';
+  const now = new Date();
+  const ist = (s: string) => istText(new Date(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z')));
   return NextResponse.json(
     rows.map(({ keyword, validation_issues, ...d }: any) => {
       // Why a draft needs attention, shown on the list without opening it: the issues left after the
@@ -71,7 +73,7 @@ export async function GET() {
               ? `Published on the website ${ist(publishedAt.get(d.id) || s!.updated_at)}.`
               : 'Published on the website (date not recorded).'
             : s
-              ? `Website date: ${publishPlan(s, new Date()).headline}. ${publishPlan(s, new Date()).detail}`
+              ? ((p) => `Website date: ${p.headline}. ${p.detail}`)(publishPlan(s, now))
               : d.status === 'approved'
                 ? 'Website date: not scheduled. It goes up only when someone presses Publish in Drafts & Review.'
                 : 'Website date: not scheduled. Approve it, then press Publish in Drafts & Review.',

@@ -1,7 +1,7 @@
 // Role rules: what each of the four roles may do, checked the same way proxy.ts checks requests.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { actionFor, can, canBlock, type Role } from '../lib/permissions';
+import { actionFor, can, canBlock, isPaidRead, type Role } from '../lib/permissions';
 
 const allowed = (role: Role, method: string, path: string) => {
   const a = actionFor(method, path);
@@ -72,6 +72,19 @@ test('routes that change the website need more than content work', () => {
   assert.equal(actionFor('GET', '/api/site-content'), null);
   assert.equal(allowed('user', 'POST', '/api/site-content'), false);
   assert.equal(allowed('analyst', 'POST', '/api/site-content'), true);
+});
+
+test('Learning needs content work; publishing a draft changes the website; paid reads count as actions', () => {
+  assert.equal(actionFor('GET', '/api/learning'), 'content.work');
+  assert.equal(allowed('user', 'GET', '/api/learning'), false);
+  assert.equal(actionFor('POST', '/api/drafts/9/publish'), 'website.change');
+  assert.equal(allowed('user', 'POST', '/api/drafts/9/publish'), false);
+  assert.equal(actionFor('GET', '/api/seranking/research'), 'content.work');
+  assert.equal(isPaidRead('GET', '/api/seranking/research', 'keyword=x'), true);
+  assert.equal(isPaidRead('GET', '/api/seranking/ai-visibility'), true);
+  assert.equal(isPaidRead('GET', '/api/performance/explain', 'view=seo&fresh=1'), true);
+  assert.equal(isPaidRead('GET', '/api/performance/explain', 'view=seo'), false);
+  assert.equal(isPaidRead('GET', '/api/performance'), false);
 });
 
 test('blocking: admin blocks anyone but the owner; managers block users and analysts', () => {

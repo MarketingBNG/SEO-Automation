@@ -4,6 +4,18 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-19
+- (ops) Faster under load (local stress test, 1,500 drafts, 800 calendar blogs, 100 people at once): Drafts & Review list, Blog Calendar, Home and the status light are 2 to 4 times faster (India-time dates were formatted the slow way hundreds of times per call). Home sends only what its buttons need. New database indexes keep the progress bar, Learning page and Drafts list fast as the activity log grows. At most two blog covers are drawn at a time, so a page full of covers no longer slows the rest of the dashboard; the same cover asked for many times at once is drawn once. AI credits no longer looks up the dollar-rupee rate on every open page (one lookup at a time, and a 15-minute wait after a failed one).
+- (publisher) Two people (or a double press) acting on the same blog at the same moment: Approve is saved and logged once; Approve and Reject on a calendar blog no longer both land (the second gets "Someone else changed this blog at the same moment"); Pause, Resume, Reschedule and Already done get the same protection. A Facts Register mark pressed twice is saved once. Two "New photo cover" presses that both fail no longer lose the existing cover. Adding the same person to the Team twice at once gives a clear message instead of a server error.
+- (security) The Learning page (and /api/learning) needs content-work access, and lists only your own assistant questions (the admin sees everyone's). Publishing a Drafts & Review blog needs the website permission, as the assistant's draft_publish does. A blocked person can no longer run paid lookups (SE Ranking research and AI visibility, a fresh "why it changed" explanation). Only an admin can give or take away the admin role. A Facts Register mark takes only verified or needs_verify and always records the signed-in person as reviewer. A bad chat id to the assistant gets a clear error instead of a server error.
+- (scheduler) The built-in scheduler never starts a run while the previous one is still going (the Monday steps and banners could run, and pay, twice). It now also frees runs left stuck by a restart every 15 minutes and checks the writing skill's 15-day refresh daily after 03:00 UTC, so the Coolify tasks for /api/cron/sweep and /api/skill/auto-check are optional.
+- (ops) Dashboard: Back returns to the previous page of the dashboard. Crawl, audit, keyword and writing-skill dates are shown in India time (IST).
+- (publisher) Blog covers made without a photo: a long title is made smaller so it never runs into the "By author" line.
+
+## 2026-11-16
+- (publisher) Headings no longer start with "1.", "2.": the website numbers its own "On this page" list, which showed "1. 1. ...". The writer stops numbering H2/H3, and numbers at the start of H2 to H4 are removed from every post sent to the website (new posts and updates).
+- (publisher) Settings > Website connection: "Remove heading numbers from live posts" (admin) lists the posts already on the website with numbered headings and removes those numbers; only the headings change.
+
 ## 2026-11-15
 - (social) Apply my comment keeps the layout the banner was made with, also when the layout was left to the designer.
 - (social) Banner designer: "Apply my comment" redoes the banner on show with the same design and changes only what the comments ask (earlier comments are kept), and says what was changed and what could not be done. "Try another design" makes a fresh one. The layouts are now Classic and Split (navy and marble).

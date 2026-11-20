@@ -27,3 +27,22 @@ export function sqlNowOffset(modifier: string): string {
 export function sqlToday(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+// A stored UTC timestamp ('YYYY-MM-DD HH:MM:SS', or ISO with Z) shown in India time, for the
+// dashboard (the same format as the Drafts & Review list). Empty for no value.
+export function fmtIst(s?: string | null): string {
+  if (!s) return '';
+  const d = new Date(String(s).replace(' ', 'T') + (/Z$|[+-]\d\d:?\d\d$/.test(String(s)) ? '' : 'Z'));
+  if (isNaN(d.getTime())) return String(s);
+  return istText(d);
+}
+
+// '19 Nov 2026, 3:30 pm IST'. One shared formatter: Date.toLocaleString with options builds a new
+// one on every call (about 80 microseconds), which made lists of hundreds of rows (Drafts & Review,
+// the calendar, Home) spend most of their time formatting dates under load. Same text as before;
+// an invalid date gives 'Invalid Date IST' as toLocaleString did, instead of throwing.
+const IST_FORMAT = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
+export function istText(when: Date | number): string {
+  const d = typeof when === 'number' ? new Date(when) : when;
+  return (isNaN(d.getTime()) ? 'Invalid Date' : IST_FORMAT.format(d)) + ' IST';
+}
