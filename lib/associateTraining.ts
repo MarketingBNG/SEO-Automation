@@ -1,9 +1,14 @@
-// Associate Training: every morning (09:00 IST) each associate in the training gets a short study
-// lesson at their level (the company, its services, the technical side, and the latest news, rules
-// and laws, from meeting transcripts and the web). The next morning they get a test on it. A
-// question answered wrong comes back two days later until it is right. Two tests in a row at 80% or
-// more move the person up a level (1 to 5): longer lessons, more and harder questions. Below that
-// they stay at their level.
+// Team training: every morning (09:00 IST) everyone on the team except the admin gets three short
+// lessons at their level: Technical knowledge (US-India tax and compliance terms), Know UIC (our
+// services, our process and the rules behind each service) and Marketing skills (how to market those
+// services, compliance-safe). Associates get the associate lessons; managers get deeper manager
+// lessons (strategy, client handling, scoping). The next morning there is a test on them, plus the
+// questions answered wrong earlier (they come back two days later until they are right). One
+// unannounced weekday a week brings a surprise test mixed from the week's lessons and older misses.
+// Levels move with recent scores (adaptiveLevel). After the test, a short game round is built from
+// the same lesson. Admins only watch. Lessons are made once per day, track, level and audience and
+// shared by everyone there, so AI calls stay few.
+import crypto from 'crypto';
 import prisma from './prisma';
 import { goalBlock } from './goal';
 import * as settings from './settings';
@@ -15,98 +20,137 @@ import { getRecentTranscripts } from './fireflies';
 import { istDay, istHour } from './topics';
 import { onceADay, waitsForAi, AnotherRunGoing } from './onceADay';
 import { sqlNow } from './time';
+import { LEVELS, TRACKS, audienceFor, isTrainee, lessonIdsOf, buildGames, cleanVideos, lessonPrompt, questionsFor, scoreGame, systemPrompt, topicFor, type Audience, type GameAnswers, type Track } from './trainingContent';
+import { getCatalogue, serviceForDay } from './uicCatalogue';
 
+export { LEVELS, audienceFor, isTrainee, lessonIdsOf };
 export const TRAINING_HOUR_IST = 9;
-export const PASS_PERCENT = 80;
 export const MAX_LEVEL = 5;
+// Adaptive levels: over the last WINDOW tests at this level (missed ones count as 0), an average of
+// UP_AVG% or more without a falling trend moves the person up; under DOWN_AVG% moves them down.
+export const UP_AVG = 80;
+export const DOWN_AVG = 50;
+export const WINDOW = 3;
+export const PASS_PERCENT = UP_AVG;
 const REPEAT_AFTER_DAYS = 2;
 const MAX_REPEATS_PER_TEST = 5;
+const SURPRISE_QUESTIONS = 8;
 
-// How much each level reads and is asked. Level 1 starts small.
-export const LEVELS: Record<number, { words: number; questions: number; depth: string }> = {
-  1: { words: 300, questions: 5, depth: 'Basics: what the company does, each service in plain words, the key terms a new associate must know.' },
-  2: { words: 450, questions: 6, depth: 'Working knowledge: how each service is delivered, documents needed, common client questions, main deadlines.' },
-  3: { words: 600, questions: 7, depth: 'Applied: the rules behind the services (IRS, CBDT, FEMA, RBI, MCA, state filings), typical cases and mistakes.' },
-  4: { words: 750, questions: 8, depth: 'Advanced: edge cases, how recent rule changes affect clients, comparing options for a client situation.' },
-  5: { words: 900, questions: 10, depth: 'Expert: case-style questions that combine several rules, latest law and regulation changes, advising a client end to end.' },
-};
-
-export type Question = { id: string; q: string; options: string[]; answer: number; explain: string; repeat?: boolean };
+export type Question = { id: string; q: string; options: string[]; answer: number; explain: string; source?: string; track?: Track; topic?: string; repeat?: boolean };
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 const g = globalThis as unknown as { __trainingRun?: boolean };
 
-const SYSTEM = `${goalBlock()}
 
-You train new associates at USAIndiaCFO (usaindiacfo.com), a cross-border finance, tax and compliance firm serving Indian founders with US companies and NRIs. You write one short, accurate study lesson a day and the test questions on it. Use web search for the latest news, rule changes, laws and deadlines (IRS, CBDT, RBI, FEMA, MCA, SEC, state filings, GST, DTAA). Only state facts you can support; give the source URL for every news or rule item. Never invent figures, dates or rules. Keep it short: an associate reads it in a few minutes.`;
-
-function cleanQuestions(list: any[], prefix: string, max: number): Question[] {
+function cleanQuestions(list: any[], prefix: string, max: number, track: Track, topic: string): Question[] {
   return (Array.isArray(list) ? list : [])
     .filter((q) => q && q.q && Array.isArray(q.options) && q.options.length >= 2)
     .slice(0, max)
     .map((q, i) => ({
       id: `${prefix}-${i + 1}`,
-      q: String(q.q).slice(0, 500),
+      q: String(q.q).slice(0, 700),
       options: q.options.slice(0, 5).map((o: any) => String(o).slice(0, 300)),
       answer: Math.max(0, Math.min(Number(q.answer) || 0, q.options.length - 1)),
       explain: String(q.explain || '').slice(0, 600),
+      ...(/^https?:\/\//.test(String(q.source || '')) ? { source: String(q.source).slice(0, 400) } : {}),
+      track,
+      topic: topic.slice(0, 160),
     }));
 }
 
-// Makes (once) the lesson for a day and level.
-export async function makeLesson(day: string, level: number) {
-  const have = await prisma.training_lessons.findUnique({ where: { day_level: { day, level } } });
-  if (have) return have;
-  const spec = LEVELS[level] || LEVELS[1];
-  const focus = String((await settings.get('focus_services')) || 'ITIN, EIN, US company formation for Indians, NRI tax, FEMA compliance, virtual CFO');
-  let meetings = '';
-  try {
-    const t: any[] = await getRecentTranscripts(8);
-    meetings = t.map((x) => `- ${x.title}: ${x.summary?.short_summary || x.summary?.overview || ''}`.slice(0, 400)).join('\n');
-  } catch {
-    meetings = '';
-  }
-  const earlier = await prisma.training_lessons.findMany({ where: { level }, orderBy: { id: 'desc' }, take: 30, select: { title: true } });
-  const prompt = `Today is ${day} (India). Write lesson for level ${level} of 5.
-Level ${level}: ${spec.depth}
-Services we sell: ${focus}.
-What clients asked about in recent meetings (from Fireflies):
-${meetings || 'none available'}
-Earlier lessons at this level (do not repeat them; build on them): ${earlier.map((e) => e.title).join(' | ') || 'none yet'}.
+const lessonKey = (day: string, level: number, track: Track, audience: Audience) => ({ day_level_track_audience: { day, level, track, audience } });
 
-The lesson mixes: (a) one part about our company or a service and how it works technically, and (b) one current update: news, a rule, law or deadline change from the last 30 days that matters to our clients, found with web search.
-Length: about ${spec.words} words, no more. Simple English. Use <h3>, <p>, <ul><li>, <strong>.
-Then write ${spec.questions} multiple-choice questions that can be answered from the lesson alone, 4 options each, one correct.
-Inside string values never use a double quote: use single quotes, so the JSON stays valid.
-Return ONLY JSON between ===JSON=== and ===END===:
-{"title":"...","content_html":"<h3>...</h3><p>...</p>","sources":[{"title":"...","url":"https://..."}],"questions":[{"q":"...","options":["...","...","...","..."],"answer":0,"explain":"why this is right, one sentence"}]}`;
+// Makes (once) the lesson for a day, level, track and audience. null when a Know UIC lesson has no
+// service page it can read today (skipped, and not asked again that day).
+export async function makeLesson(day: string, level: number, track: Track = 'technical', audience: Audience = 'associate', ask = callClaude) {
+  const have = await prisma.training_lessons.findUnique({ where: lessonKey(day, level, track, audience) });
+  if (have) return have;
+  const skipKey = `training_skip:${day}:${level}:${track}:${audience}`;
+  if (await settings.get(skipKey)) return null;
+  let meetings = '';
+  if (track === 'technical') {
+    try {
+      const t: any[] = await getRecentTranscripts(8);
+      meetings = t.map((x) => `- ${x.title}: ${x.summary?.short_summary || x.summary?.overview || ''}`.slice(0, 400)).join('\n');
+    } catch {
+      meetings = '';
+    }
+  }
+  const catalogue = track === 'uic' ? await getCatalogue().catch(() => null) : null;
+  const service = catalogue ? serviceForDay(catalogue, day, level) : null;
+  const earlier = await prisma.training_lessons.findMany({ where: { level, track, audience }, orderBy: { id: 'desc' }, take: 30, select: { title: true } });
+  const prompt = lessonPrompt({
+    day,
+    level,
+    track,
+    audience,
+    earlier: earlier.map((e) => e.title),
+    meetings,
+    focus: String((await settings.get('focus_services')) || ''),
+    catalogue,
+    service,
+    technicalTopic: topicFor('technical', day, level),
+  });
   let j: any = null;
   let lastErr: any = null;
   for (let attempt = 0; attempt < 2 && !j; attempt++) {
     try {
-      const { text } = (await callClaude(SYSTEM, [{ role: 'user', content: prompt }], undefined, { maxUses: 5, effort: 'medium', feature: 'training' })) as { text: string };
+      const { text } = (await ask(systemPrompt(goalBlock()), [{ role: 'user', content: prompt }], undefined, { maxUses: 8, effort: 'medium', feature: 'training' })) as { text: string };
       j = parseJson(text);
+      if (j?.skip) break;
       if (!j?.content_html || !Array.isArray(j.questions) || !j.questions.length) throw new Error('The lesson came back incomplete');
     } catch (e) {
       lastErr = e;
       j = null;
     }
   }
+  if (j?.skip) {
+    await settings.set(skipKey, String(j.reason || 'no service page could be read').slice(0, 300));
+    return null;
+  }
   if (!j) throw lastErr || new Error('Could not make the lesson');
-  const sources = (Array.isArray(j.sources) ? j.sources : []).filter((s: any) => s && /^https?:\/\//.test(String(s.url || ''))).slice(0, 6).map((s: any) => ({ title: String(s.title || s.url).slice(0, 200), url: String(s.url) }));
-  const questions = cleanQuestions(j.questions, `${day}-L${level}`, spec.questions);
+  const sources = (Array.isArray(j.sources) ? j.sources : []).filter((s: any) => s && /^https?:\/\//.test(String(s.url || ''))).slice(0, 8).map((s: any) => ({ title: String(s.title || s.url).slice(0, 200), url: String(s.url) }));
+  const topic = String(j.topic || (track === 'uic' ? service?.name : topicFor(track, day, level)) || j.title || '').slice(0, 160);
+  const questions = cleanQuestions(j.questions, `${day}-L${level}-${track}-${audience}`, questionsFor(track, level), track, topic);
+  const extras = { terms: j.terms, steps: j.steps, cases: j.cases, blanks: j.blanks, slides: j.slides, videos: cleanVideos(j.videos), service: service ? { name: service.name, url: service.url } : null };
   try {
-    return await prisma.training_lessons.create({ data: { day, level, title: String(j.title || `Lesson ${day}`).slice(0, 200), content_html: String(j.content_html), sources: JSON.stringify(sources), questions: JSON.stringify(questions) } });
+    return await prisma.training_lessons.create({ data: { day, level, track, audience, topic, title: String(j.title || `Lesson ${day}`).slice(0, 200), content_html: String(j.content_html).replace(/—/g, ', '), sources: JSON.stringify(sources), questions: JSON.stringify(questions), extras: JSON.stringify(extras) } });
   } catch {
     // Made at the same moment by another run: use that one.
-    return (await prisma.training_lessons.findUnique({ where: { day_level: { day, level } } }))!;
+    return (await prisma.training_lessons.findUnique({ where: lessonKey(day, level, track, audience) }))!;
   }
 }
 
-// Gives one person today's test (yesterday's lesson + wrong answers due again) and today's lesson.
-export async function prepareDay(email: string, day: string) {
+
+// Monday of the day's week (YYYY-MM-DD).
+export function weekStart(day: string) {
+  const dow = new Date(`${day}T00:00:00Z`).getUTCDay();
+  return addDays(day, -((dow + 6) % 7));
+}
+// The one weekday (Mon-Fri) of a week that brings this person's surprise test. Not shown anywhere in
+// advance; keyed with the server secret so it cannot be worked out from the email.
+export function surpriseWeekday(email: string, day: string, secret = process.env.NEXTAUTH_SECRET || 'training'): number {
+  const h = crypto.createHmac('sha256', secret).update(`${email.toLowerCase()}|${weekStart(day)}`).digest();
+  return 1 + (h[0] % 5); // 1 = Monday ... 5 = Friday
+}
+export const isSurpriseDay = (email: string, day: string, secret?: string) => new Date(`${day}T00:00:00Z`).getUTCDay() === surpriseWeekday(email, day, secret);
+
+const seededPick = <T,>(arr: T[], n: number, seed: string): T[] =>
+  arr
+    .map((v, i) => ({ v, k: crypto.createHash('sha1').update(`${seed}|${i}`).digest().readUInt32BE(0) }))
+    .sort((a, b) => a.k - b.k)
+    .slice(0, n)
+    .map((x) => x.v);
+
+// Gives one person today's tests (daily: yesterday's lessons + wrong answers due again; on their
+// surprise day also the surprise test) and today's lessons of every track.
+export async function prepareDay(email: string, day: string, role?: string, ask = callClaude) {
   const p = await prisma.training_profiles.findUnique({ where: { email } });
   if (!p || !p.active) return;
+  const member = role ? { role } : await prisma.team_members.findUnique({ where: { email }, select: { role: true } });
+  const r = member?.role || 'user';
+  if (!isTrainee(r)) return;
+  const audience = audienceFor(r);
   // An earlier test left open counts as missed: its questions come back two days from now. So does one
   // left 'marking' by a restart in the middle of its marking (it can no longer be submitted).
   const stale = await prisma.training_tests.findMany({ where: { email, status: { in: ['open', 'marking'] }, day: { lt: day } } });
@@ -114,23 +158,62 @@ export async function prepareDay(email: string, day: string) {
     await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'missed', score: 0 } });
     for (const q of JSON.parse(t.questions) as Question[]) await addMiss(email, q, day);
   }
-  if (!(await prisma.training_tests.findUnique({ where: { email_day: { email, day } } }))) {
-    const last = p.lesson_id ? await prisma.training_lessons.findUnique({ where: { id: p.lesson_id } }) : null;
+  const current = lessonIdsOf(p);
+  if (!(await prisma.training_tests.findUnique({ where: { email_day_kind: { email, day, kind: 'daily' } } }))) {
+    const ids = Object.values(current).filter((x): x is number => Boolean(x));
+    const last = ids.length ? await prisma.training_lessons.findMany({ where: { id: { in: ids }, day: { lt: day } } }) : [];
     // A lesson is tested once: when a day's new lesson could not be made, the old one is not tested again.
-    const tested = last ? await prisma.training_tests.findFirst({ where: { email, lesson_id: last.id }, select: { id: true } }) : null;
-    const lesson = last && !tested ? last : null;
-    const fresh: Question[] = lesson && lesson.day < day ? JSON.parse(lesson.questions) : [];
+    const fresh: Question[] = [];
+    const tested: number[] = [];
+    for (const l of last) {
+      const done = await prisma.training_tests.findFirst({ where: { email, OR: [{ lesson_id: l.id }, { lesson_ids: { contains: `,${l.id},` } }] }, select: { id: true } });
+      if (done) continue;
+      tested.push(l.id);
+      fresh.push(...(JSON.parse(l.questions) as Question[]).map((q) => ({ ...q, track: q.track || (l.track as Track), topic: q.topic || l.topic || l.title })));
+    }
     const misses = await prisma.training_misses.findMany({ where: { email, cleared: false, due_day: { lte: day } }, orderBy: { due_day: 'asc' }, take: MAX_REPEATS_PER_TEST });
     const repeats: Question[] = misses.map((m) => ({ ...(JSON.parse(m.question) as Question), repeat: true }));
     const seen = new Set(fresh.map((q) => q.id));
     const questions = [...fresh, ...repeats.filter((q) => !seen.has(q.id))];
-    if (questions.length) await prisma.training_tests.create({ data: { email, day, level: p.level, lesson_id: lesson && lesson.day < day ? lesson.id : null, questions: JSON.stringify(questions), total: questions.length } });
+    if (questions.length) {
+      await prisma.training_tests.create({ data: { email, day, level: p.level, kind: 'daily', lesson_id: tested[0] || null, lesson_ids: tested.length ? `,${tested.join(',')},` : null, questions: JSON.stringify(questions), total: questions.length } }).catch(() => {});
+    }
   }
-  const current = p.lesson_id ? await prisma.training_lessons.findUnique({ where: { id: p.lesson_id }, select: { day: true } }) : null;
-  if (current?.day !== day) {
-    const lesson = await makeLesson(day, p.level);
-    await prisma.training_profiles.update({ where: { email }, data: { lesson_id: lesson.id } });
+  if (isSurpriseDay(email, day)) await prepareSurprise(email, day, p.level, audience);
+
+  // Today's lessons, one per track. A track that fails (AI paused) is tried again on a later run; the
+  // others are kept.
+  const lessons = { ...current };
+  let firstError: any = null;
+  const have = await prisma.training_lessons.findMany({ where: { id: { in: Object.values(current).filter((x): x is number => Boolean(x)) } }, select: { id: true, day: true } });
+  for (const track of TRACKS) {
+    const cur = have.find((h) => h.id === current[track]);
+    if (cur?.day === day) continue;
+    try {
+      const l = await makeLesson(day, p.level, track, audience, ask);
+      if (l) lessons[track] = l.id;
+      else delete lessons[track];
+    } catch (e) {
+      firstError ||= e;
+    }
   }
+  await prisma.training_profiles.update({ where: { email }, data: { lesson_ids: JSON.stringify(lessons), lesson_id: lessons.technical ?? p.lesson_id } });
+  const { forgetGate } = await import('./trainingGate');
+  forgetGate(email);
+  if (firstError) throw firstError;
+}
+
+// The surprise test: questions from this week's lessons at the person's level and audience, plus up to
+// three older misses (not yet due again). Once a week; nothing when the week has no lessons yet.
+export async function prepareSurprise(email: string, day: string, level: number, audience: Audience) {
+  const monday = weekStart(day);
+  if (await prisma.training_tests.findFirst({ where: { email, kind: 'surprise', day: { gte: monday } }, select: { id: true } })) return null;
+  const week = await prisma.training_lessons.findMany({ where: { day: { gte: monday, lt: day }, level, audience } });
+  const pool: Question[] = week.flatMap((l) => (JSON.parse(l.questions) as Question[]).map((q) => ({ ...q, id: `s-${q.id}`, track: q.track || (l.track as Track), topic: q.topic || l.topic || l.title })));
+  if (!pool.length) return null;
+  const older = await prisma.training_misses.findMany({ where: { email, cleared: false, due_day: { gt: day } }, orderBy: { due_day: 'asc' }, take: 3 });
+  const questions = [...seededPick(pool, SURPRISE_QUESTIONS, `${email}|${day}`), ...older.map((m) => ({ ...(JSON.parse(m.question) as Question), repeat: true }))];
+  return prisma.training_tests.create({ data: { email, day, level, kind: 'surprise', questions: JSON.stringify(questions), total: questions.length, lesson_ids: `,${week.map((w) => w.id).join(',')},` } }).catch(() => null);
 }
 
 async function addMiss(email: string, q: Question, today: string) {
@@ -149,6 +232,33 @@ export function testQuestions(t: { id: number; questions: string }): Question[] 
     seen.add(id);
     return { ...q, id };
   });
+}
+
+// The level the recent scores call for. percents: the tests at this level since the last level
+// change, newest first (missed = 0).
+export function adaptiveLevel(level: number, percents: number[]): { level: number; reason: string | null } {
+  const recent = percents.slice(0, WINDOW);
+  if (recent.length < 2) return { level, reason: null };
+  const avg = Math.round(recent.reduce((a, b) => a + b, 0) / recent.length);
+  const trend = recent[0] - recent[recent.length - 1]; // newest minus oldest
+  if (level < MAX_LEVEL && avg >= UP_AVG && trend >= -10) return { level: level + 1, reason: `average ${avg}% over the last ${recent.length} tests (${UP_AVG}% moves up), trend ${trend >= 0 ? '+' : ''}${trend}` };
+  if (level > 1 && recent.length >= WINDOW && avg < DOWN_AVG) return { level: level - 1, reason: `average ${avg}% over the last ${recent.length} tests (under ${DOWN_AVG}% moves down)` };
+  return { level, reason: null };
+}
+
+export async function setLevel(email: string, to: number, reason: string, actor = 'system') {
+  const p = await prisma.training_profiles.findUnique({ where: { email } });
+  if (!p || p.level === to) return;
+  await prisma.training_profiles.update({ where: { email }, data: { level: to, streak: 0 } });
+  await prisma.training_level_history.create({ data: { email, from_level: p.level, to_level: to, reason: reason.slice(0, 300) } });
+  await activity.log('training.level', { details: `${email}: level ${p.level} to ${to} (${reason})`.slice(0, 300), actor });
+}
+
+// Scores of the tests taken at the current level since the last level change, newest first.
+async function scoresSinceChange(email: string, level: number) {
+  const change = await prisma.training_level_history.findFirst({ where: { email }, orderBy: { id: 'desc' }, select: { created_at: true } });
+  const tests = await prisma.training_tests.findMany({ where: { email, level, status: { in: ['done', 'missed'] }, ...(change ? { created_at: { gte: change.created_at } } : {}) }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 10, select: { score: true, total: true } });
+  return tests.map((t) => Math.round(((t.score || 0) / Math.max(1, t.total)) * 100));
 }
 
 // Marks a test. Returns the result with the right answers and explanations.
@@ -178,13 +288,69 @@ export async function submitTest(email: string, testId: number, answers: Record<
   const percent = Math.round((score / Math.max(1, questions.length)) * 100);
   const p = await prisma.training_profiles.findUnique({ where: { email } });
   let levelUp = false;
+  let levelDown = false;
   if (p) {
-    const streak = percent >= PASS_PERCENT ? p.streak + 1 : 0;
-    levelUp = streak >= 2 && p.level < MAX_LEVEL;
-    await prisma.training_profiles.update({ where: { email }, data: levelUp ? { level: p.level + 1, streak: 0 } : { streak } });
+    await prisma.training_profiles.update({ where: { email }, data: { streak: percent >= UP_AVG ? p.streak + 1 : 0 } });
+    const next = adaptiveLevel(p.level, await scoresSinceChange(email, p.level));
+    if (next.level !== p.level && next.reason) {
+      levelUp = next.level > p.level;
+      levelDown = next.level < p.level;
+      await setLevel(email, next.level, next.reason);
+    }
   }
-  await activity.log('training.test', { details: `${email}: ${score}/${questions.length} (${percent}%)${levelUp ? `, moved up to level ${(p?.level || 1) + 1}` : ''}`, actor: email });
-  return { score, total: questions.length, percent, levelUp, questions, answers };
+  await activity.log('training.test', { details: `${email}: ${t.kind === 'surprise' ? 'surprise test ' : ''}${score}/${questions.length} (${percent}%)${levelUp ? `, moved up to level ${(p?.level || 1) + 1}` : levelDown ? `, moved down to level ${(p?.level || 2) - 1}` : ''}`, actor: email });
+  const { forgetGate } = await import('./trainingGate');
+  forgetGate(email);
+  return { score, total: questions.length, percent, levelUp, levelDown, kind: t.kind, questions, answers };
+}
+
+// "I have read today's lesson": records when (the daily gate needs every one of today's lessons read).
+export async function markRead(email: string, lessonId: number) {
+  const p = await prisma.training_profiles.findUnique({ where: { email } });
+  const mine = p ? Object.values(lessonIdsOf(p)) : [];
+  if (!p || !mine.includes(lessonId)) throw Object.assign(new Error('This is not one of your lessons.'), { status: 404 });
+  const row = await prisma.training_reads.upsert({ where: { email_lesson_id: { email, lesson_id: lessonId } }, create: { email, lesson_id: lessonId, read_at: sqlNow() }, update: {} });
+  await activity.log('training.read', { details: `${email} read lesson #${lessonId}`, actor: email });
+  const { forgetGate } = await import('./trainingGate');
+  forgetGate(email);
+  return { readAt: row.read_at };
+}
+
+// Days in a row (ending today or yesterday) with a game round played.
+export function gameStreak(days: string[], today: string) {
+  const set = new Set(days);
+  let d = set.has(today) ? today : addDays(today, -1);
+  let n = 0;
+  while (set.has(d)) {
+    n++;
+    d = addDays(d, -1);
+  }
+  return n;
+}
+
+// A game round on a lesson: marked here from the lesson's own game; the best round counts.
+export async function playGame(email: string, lessonId: number, answers: GameAnswers) {
+  const lesson = await prisma.training_lessons.findUnique({ where: { id: lessonId } });
+  if (!lesson) throw Object.assign(new Error('Lesson not found'), { status: 404 });
+  const games = buildGames({ id: lesson.id, extras: JSON.parse(lesson.extras || '{}'), questions: lesson.questions });
+  const { points, max } = scoreGame(games, answers || {});
+  const before = await prisma.training_games.findUnique({ where: { email_lesson_id: { email, lesson_id: lessonId } } });
+  const gain = Math.max(0, points - (before?.points || 0));
+  if (!before) await prisma.training_games.create({ data: { email, day: istDay(), lesson_id: lessonId, points, max_points: max } });
+  else if (points > before.points) await prisma.training_games.update({ where: { id: before.id }, data: { points } });
+  const p = gain ? await prisma.training_profiles.update({ where: { email }, data: { points: { increment: gain } } }).catch(() => null) : await prisma.training_profiles.findUnique({ where: { email } });
+  const days = (await prisma.training_games.findMany({ where: { email }, select: { day: true } })).map((r) => r.day);
+  return { points, max, best: Math.max(points, before?.points || 0), totalPoints: p?.points || 0, streak: gameStreak(days, istDay()) };
+}
+
+// Everyone on the team except the admin is in the training (a profile is made for them); blocked
+// people are left out (they cannot submit anything).
+export async function ensureProfiles() {
+  const team = await prisma.team_members.findMany({ where: { blocked: false, role: { not: 'admin' } }, select: { email: true, name: true } });
+  for (const m of team) {
+    const email = m.email.toLowerCase();
+    if (!(await prisma.training_profiles.findUnique({ where: { email } }))) await prisma.training_profiles.create({ data: { email, name: m.name } }).catch(() => {});
+  }
 }
 
 // Runs the day for everyone in the training. Called by the scheduler and by "Prepare today now".
@@ -194,16 +360,19 @@ export async function runTrainingDay(now = new Date()) {
   const day = istDay(now);
   const errors: string[] = [];
   try {
-    // Admins and managers watch; only associates get lessons and tests.
-    const watchers = (await prisma.team_members.findMany({ where: { role: { in: ['admin', 'manager'] } }, select: { email: true } })).map((r) => r.email.toLowerCase());
-    const people = await prisma.training_profiles.findMany({ where: { active: true, email: { notIn: watchers } } });
+    await ensureProfiles();
+    await getCatalogue().catch(() => null); // refreshed once a week
+    const team = await prisma.team_members.findMany({ select: { email: true, role: true, blocked: true } });
+    const roleOf = new Map(team.map((t) => [t.email.toLowerCase(), t]));
+    const people = (await prisma.training_profiles.findMany({ where: { active: true } })).filter((p) => {
+      const m = roleOf.get(p.email);
+      return m && !m.blocked && isTrainee(m.role);
+    });
     // A person whose lessons stopped because AI work is paused gets them on a later run that day.
     let waiting = false;
-    // Only real failures are logged: lessons waiting for AI are made on a later tick that day, and a
-    // failure row on each 15-minute tick would only be noise.
     const failed: string[] = [];
     for (const p of people)
-      await prepareDay(p.email, day).catch((e) => {
+      await prepareDay(p.email, day, roleOf.get(p.email)!.role).catch((e) => {
         errors.push(`${p.email}: ${e.message}`);
         if (waitsForAi(e)) waiting = true;
         else failed.push(`${p.email}: ${e.message}`);

@@ -59,6 +59,11 @@ export async function proxy(req: NextRequest) {
       const access = (live ? live.access : (token.access as Access)) || roleAccess(role);
       const grants = live ? live.grants : (token.grants as Grant[]) || [];
       if (action && role !== 'admin' && !allows(access, grants, action)) return NextResponse.json({ error: deniedMessage(action) }, { status: 403 });
+      // Today's training not finished: writes outside the training wait (lib/trainingGate.ts; fails open).
+      if (write) {
+        const refused = await import('@/lib/trainingGate').then((m) => m.gateRefusal(req.method, pathname, token.email ? String(token.email) : null, role)).catch(() => null);
+        if (refused) return NextResponse.json(refused.body, { status: refused.status });
+      }
     }
     return NextResponse.next();
   }

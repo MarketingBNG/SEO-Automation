@@ -552,6 +552,8 @@ model training_profiles {
   level      Int     @default(1)
   streak     Int     @default(0) // tests in a row at 80% or more; two in a row moves the level up
   lesson_id  Int? // the lesson given to read today; tomorrow's test asks about it
+  lesson_ids String? // JSON {technical, uic, marketing}: today's lesson of each track
+  points     Int     @default(0) // game points, all time
   active     Boolean @default(true)
   created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }
@@ -565,9 +567,13 @@ model training_lessons {
   content_html String
   sources      String? // JSON [{title,url}]
   questions    String // JSON [{id,q,options[],answer,explain}]
+  track        String  @default("technical") // technical | uic (Know UIC) | marketing
+  audience     String  @default("associate") // associate | manager
+  topic        String?
+  extras       String? // JSON {terms, steps, cases, blanks, slides, videos} for the Watch area and games
   created_at   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 
-  @@unique([day, level])
+  @@unique([day, level, track, audience])
 }
 
 // A person's test for a day: questions on the last lesson plus wrong answers due again.
@@ -582,10 +588,47 @@ model training_tests {
   score        Int?
   total        Int
   status       String  @default("open") // open | done | missed
+  kind         String  @default("daily") // daily | surprise (one unannounced weekday a week)
+  lesson_ids   String? // ",12,13,14,": the lessons this test asks about
   created_at   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
   submitted_at String?
 
-  @@unique([email, day])
+  @@unique([email, day, kind])
+}
+
+// A lesson the person marked "I have read today's lesson" (the daily gate needs it).
+model training_reads {
+  id        Int    @id @default(autoincrement())
+  email     String
+  lesson_id Int
+  read_at   String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@unique([email, lesson_id])
+}
+
+// Every level change (automatic from recent scores, or set by the admin).
+model training_level_history {
+  id         Int     @id @default(autoincrement())
+  email      String
+  from_level Int
+  to_level   Int
+  reason     String?
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([email])
+}
+
+// The best game round score per person and lesson.
+model training_games {
+  id         Int    @id @default(autoincrement())
+  email      String
+  day        String
+  lesson_id  Int
+  points     Int
+  max_points Int
+  created_at String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@unique([email, lesson_id])
 }
 
 // A question answered wrong (or not answered): asked again two days later until it is right.

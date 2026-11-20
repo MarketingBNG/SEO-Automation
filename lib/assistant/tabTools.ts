@@ -1126,7 +1126,7 @@ tool({
 tool({
   name: 'training_status',
   kind: 'read',
-  description: "Associate Training as the page shows it to the person asking: an associate gets their own lesson, whether a test is open (never its questions) and results; an admin or manager gets today's lessons and everyone's progress (person: one associate's page by email). Taking a test stays on the page.",
+  description: "Training as the page shows it to the person asking: everyone but the admin gets their own three lessons of today (Technical, Know UIC, Marketing), whether tests are open (never their questions), results, level history and game points; an admin or manager also gets the team report (marks, trend, strengths and weak topics per track, streaks, surprise tests) and today's lessons (person: one person's page by email). Taking a test stays on the page.",
   input_schema: obj({ person: str }),
   summarize: (i) => `Read associate training${i.person ? ` for ${i.person}` : ''}`,
   run: async (i, ctx) => {
@@ -1134,8 +1134,15 @@ tool({
     const { trainingView } = await import('@/lib/associateTrainingView');
     const v = ok(await trainingView(ctx.me, { person: String(i.person || '').toLowerCase() }));
     // An open test is the associate's to answer alone: the assistant sees that it is open, never its questions.
-    const hideTest = (p: any) => (p?.test ? { ...p, test: { id: p.test.id, day: p.test.day, total: p.test.total, open: true, note: 'Open test: taken on the Associate Training page.' } } : p);
-    return { ...v, me: hideTest(v.me), person: hideTest(v.person) };
+    const hideTest = (p: any) =>
+      p && {
+        ...p,
+        test: p.test ? { id: p.test.id, day: p.test.day, kind: p.test.kind, total: p.test.total, open: true, note: 'Open test: taken on the Associate Training page.' } : null,
+        tests: (p.tests || []).map((t: any) => ({ id: t.id, day: t.day, kind: t.kind, total: t.total, open: true })),
+        lessons: (p.lessons || []).map(({ games, slides, ...l }: any) => l),
+      };
+    const { library, todayLessons, ...rest } = v;
+    return { ...rest, todayLessons: (todayLessons || []).map(({ games, slides, ...l }: any) => l), me: hideTest(v.me), person: hideTest(v.person) };
   },
 });
 

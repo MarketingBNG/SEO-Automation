@@ -1,39 +1,324 @@
 'use client';
 
-// Associate Training: today's short lesson to read, today's test on yesterday's lesson (plus the
-// questions answered wrong two days ago), results, and the level. The admin also sees everyone.
+// Training: three short lessons a day (Technical knowledge, Know UIC, Marketing skills) to read or
+// watch, then the tests (the daily one, and an unannounced surprise test one weekday a week), then a
+// game round built from the same lessons. Everyone but the admin takes it; the admin and managers
+// also see the team report (marks, trend, levels, strengths and weak topics, CSV download).
 import { onScreen } from '@/components/shared/on-screen';
-import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, ChevronDown, GraduationCap, Loader2, RefreshCw, XCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Download, Gamepad2, GraduationCap, Loader2, Pause, Play, RefreshCw, SkipBack, SkipForward, Trophy, Video, XCircle } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { SafeHtml, safeHref } from '@/components/shared/article';
 
 const fmtDay = (d?: string | null) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { dateStyle: 'medium', timeZone: 'UTC' }) : '');
+const post = async (body: any) => {
+  const res = await fetch('/api/associate-training', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
+  if (!res.ok) throw new Error(j.error || 'Failed');
+  return j;
+};
 
-function Lesson({ l, open: startOpen }: { l: any; open?: boolean }) {
+// ---------- Watch: slide walkthrough and videos ----------
+
+function FlowDiagram({ steps }: { steps: string[] }) {
+  const h = 46;
+  return (
+    <svg viewBox={`0 0 320 ${steps.length * (h + 18)}`} className="mx-auto w-full max-w-sm" role="img" aria-label={steps.join(', then ')}>
+      {steps.map((s, i) => (
+        <g key={i} transform={`translate(10 ${i * (h + 18)})`}>
+          <rect width="300" height={h} rx="8" className="fill-primary/10 stroke-primary" strokeWidth="1.5" />
+          <text x="150" y={h / 2 + 4} textAnchor="middle" className="fill-foreground text-[11px]">
+            {i + 1}. {s.length > 48 ? `${s.slice(0, 46)}…` : s}
+          </text>
+          {i < steps.length - 1 && <path d={`M150 ${h} v14 m-5 -6 l5 6 l5 -6`} className="stroke-primary" fill="none" strokeWidth="1.5" />}
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function SlidePlayer({ slides }: { slides: any[] }) {
+  const [i, setI] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    if (!playing) return;
+    const t = setTimeout(() => (i < slides.length - 1 ? setI(i + 1) : setPlaying(false)), 7000);
+    return () => clearTimeout(t);
+  }, [playing, i, slides.length]);
+  if (!slides?.length) return null;
+  const s = slides[Math.min(i, slides.length - 1)];
+  return (
+    <div className="space-y-2">
+      <div className="flex min-h-56 flex-col justify-center rounded-xl border bg-gradient-to-br from-primary/10 to-transparent p-5">
+        <div className="text-xs text-muted-foreground">
+          Slide {i + 1} of {slides.length}
+        </div>
+        <div className="mt-1 text-lg font-semibold">{s.heading}</div>
+        {s.flow?.length ? (
+          <div className="mt-3">
+            <FlowDiagram steps={s.flow} />
+          </div>
+        ) : (
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-sm">
+            {s.points.map((p: string, k: number) => (
+              <li key={k}>{p}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="flex items-center justify-center gap-2">
+        <Button size="sm" variant="outline" aria-label="Previous slide" disabled={i === 0} onClick={() => setI(i - 1)}>
+          <SkipBack className="size-4" />
+        </Button>
+        <Button size="sm" onClick={() => setPlaying(!playing)}>
+          {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
+          {playing ? 'Pause' : 'Play'}
+        </Button>
+        <Button size="sm" variant="outline" aria-label="Next slide" disabled={i >= slides.length - 1} onClick={() => setI(i + 1)}>
+          <SkipForward className="size-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// YouTube only, through the privacy-enhanced embed the server checked; never auto-plays.
+function Videos({ videos }: { videos: any[] }) {
+  if (!videos?.length) return <p className="text-xs text-muted-foreground">No checked video for this topic today.</p>;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {videos
+        .filter((v) => /^https:\/\/www\.youtube-nocookie\.com\/embed\/[A-Za-z0-9_-]{11}\?rel=0$/.test(v.embed))
+        .map((v) => (
+          <div key={v.id} className="space-y-1">
+            <div className="aspect-video overflow-hidden rounded-lg border">
+              <iframe className="size-full" src={v.embed} title={v.title} loading="lazy" allow="encrypted-media; picture-in-picture" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />
+            </div>
+            <div className="text-xs">
+              {v.title}
+              {v.channel && <span className="text-muted-foreground"> · {v.channel}</span>}
+            </div>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+// ---------- Game round ----------
+
+function GameRound({ lesson, onPlayed }: { lesson: any; onPlayed: (r: any) => void }) {
+  const g = lesson.games;
+  const [match, setMatch] = useState<number[]>(() => (g.match ? g.match.terms.map(() => -1) : []));
+  const [order, setOrder] = useState<number[]>(() => (g.order ? g.order.shuffled.map((_: any, i: number) => i) : []));
+  const [cases, setCases] = useState<number[]>(() => g.cases.map(() => -1));
+  const [blanks, setBlanks] = useState<number[]>(() => g.blanks.map(() => -1));
+  const [lightning, setLightning] = useState<(boolean | null)[]>(() => g.lightning.map(() => null));
+  const [started, setStarted] = useState<number | null>(null);
+  const [result, setResult] = useState<any>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const empty = !g.match && !g.order && !g.cases.length && !g.blanks.length && !g.lightning.length;
+  if (empty) return <p className="text-sm text-muted-foreground">No game for this lesson.</p>;
+  const move = (k: number, d: number) => setOrder((o) => {
+    const n = [...o];
+    const j = k + d;
+    if (j < 0 || j >= n.length) return o;
+    [n[k], n[j]] = [n[j], n[k]];
+    return n;
+  });
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const seconds = started ? Math.round((Date.now() - started) / 1000) : 0;
+      const r = await post({ action: 'game', lessonId: lesson.id, answers: { match, order, cases, blanks, lightning, seconds } });
+      setResult(r);
+      onPlayed(r);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const pick = (arr: number[], set: (v: number[]) => void, i: number, v: number) => set(arr.map((x, k) => (k === i ? v : x)));
+  return (
+    <div className="space-y-4 text-sm">
+      {g.match && (
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="font-semibold">Match each term to its meaning</div>
+          {g.match.terms.map((t: string, i: number) => (
+            <label key={i} className="block space-y-1">
+              <span className="font-medium">{t}</span>
+              <select className="w-full rounded-md border bg-background p-1.5" value={match[i]} onChange={(e) => pick(match, setMatch, i, Number(e.target.value))}>
+                <option value={-1}>Choose the meaning</option>
+                {g.match.definitions.map((d: string, k: number) => (
+                  <option key={k} value={k}>{d}</option>
+                ))}
+              </select>
+              {result && <span className={g.match.answer[i] === match[i] ? 'text-emerald-600' : 'text-red-600'}>{g.match.answer[i] === match[i] ? 'Right' : `Right answer: ${g.match.definitions[g.match.answer[i]]}`}</span>}
+            </label>
+          ))}
+        </div>
+      )}
+      {g.order && (
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="font-semibold">{g.order.title}: put the steps in order</div>
+          <ol className="space-y-1">
+            {order.map((k, pos) => (
+              <li key={k} className="flex items-center gap-2 rounded-md border p-1.5">
+                <span className="w-5 text-muted-foreground">{pos + 1}.</span>
+                <span className="flex-1">{g.order.shuffled[k]}</span>
+                <Button size="icon" variant="ghost" aria-label="Move up" disabled={pos === 0} onClick={() => move(pos, -1)}><ArrowUp className="size-4" /></Button>
+                <Button size="icon" variant="ghost" aria-label="Move down" disabled={pos === order.length - 1} onClick={() => move(pos, 1)}><ArrowDown className="size-4" /></Button>
+              </li>
+            ))}
+          </ol>
+          {result && <div className="text-xs">Right order: {g.order.answer.map((k: number) => g.order.shuffled[k]).join(' → ')}</div>}
+        </div>
+      )}
+      {g.cases.map((c: any, i: number) => (
+        <div key={i} className="space-y-1 rounded-lg border p-3">
+          <div className="font-semibold">Client case {i + 1}</div>
+          <div>{c.scenario}</div>
+          {c.options.map((o: string, k: number) => (
+            <label key={k} className="flex items-start gap-2">
+              <input type="radio" className="mt-1" name={`case-${lesson.id}-${i}`} checked={cases[i] === k} onChange={() => pick(cases, setCases, i, k)} />
+              {o}
+            </label>
+          ))}
+          {result && <div className={cases[i] === c.answer ? 'text-emerald-600' : 'text-red-600'}>{cases[i] === c.answer ? 'Right. ' : `Right answer: ${c.options[c.answer]}. `}<span className="text-muted-foreground">{c.explain}</span></div>}
+        </div>
+      ))}
+      {g.blanks.length > 0 && (
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="font-semibold">Fill in the blank</div>
+          {g.blanks.map((b: any, i: number) => (
+            <div key={i} className="space-y-1">
+              <div>{b.sentence}</div>
+              <select className="rounded-md border bg-background p-1.5" value={blanks[i]} onChange={(e) => pick(blanks, setBlanks, i, Number(e.target.value))}>
+                <option value={-1}>Choose</option>
+                {b.options.map((o: string, k: number) => (
+                  <option key={k} value={k}>{o}</option>
+                ))}
+              </select>
+              {result && <span className={`ml-2 ${blanks[i] === b.answer ? 'text-emerald-600' : 'text-red-600'}`}>{blanks[i] === b.answer ? 'Right' : b.options[b.answer]}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {g.lightning.length > 0 && (
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="font-semibold">Lightning round: true or false? Finish within 60 seconds for a bonus point each.</div>
+          {!started ? (
+            <Button size="sm" onClick={() => setStarted(Date.now())}>Start the lightning round</Button>
+          ) : (
+            g.lightning.map((q: any, i: number) => (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <span className="flex-1">{q.statement}</span>
+                {[true, false].map((v) => (
+                  <Button key={String(v)} size="sm" variant={lightning[i] === v ? 'default' : 'outline'} onClick={() => setLightning(lightning.map((x, k) => (k === i ? v : x)))}>
+                    {v ? 'True' : 'False'}
+                  </Button>
+                ))}
+                {result && <span className={lightning[i] === q.answer ? 'text-emerald-600' : 'text-red-600'}>{lightning[i] === q.answer ? 'Right' : q.answer ? 'It was true' : 'It was false'}</span>}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+      {err && <div className="text-red-600">{err}</div>}
+      {result ? (
+        <div className="flex items-center gap-2 rounded-lg bg-muted p-3 font-medium">
+          <Trophy className="size-4 text-amber-500" /> {result.points} of {result.max} points. Total {result.totalPoints} points, {result.streak} day(s) in a row.
+        </div>
+      ) : (
+        <Button onClick={submit} disabled={busy}>
+          {busy && <Loader2 className="size-4 animate-spin" />} Finish the game
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ---------- A lesson: read, watch, play ----------
+
+function Lesson({ l, open: startOpen, mine, testsOpen, onChange }: { l: any; open?: boolean; mine?: boolean; testsOpen?: boolean; onChange?: () => void }) {
   const [open, setOpen] = useState(Boolean(startOpen));
+  const [view, setView] = useState<'read' | 'watch' | 'game'>('read');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function read() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await post({ action: 'read', lessonId: l.id });
+      window.dispatchEvent(new Event('training-updated'));
+      onChange?.();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="rounded-lg border">
       <button className="flex w-full items-center justify-between gap-2 p-3 text-left" onClick={() => setOpen(!open)}>
         <span className="font-medium">
+          {l.trackLabel && <span className="mr-2 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">{l.trackLabel}</span>}
           {l.title} <span className="text-xs font-normal text-muted-foreground">{fmtDay(l.day)} · level {l.level}</span>
+          {mine && l.readAt && <CheckCircle2 className="ml-1 inline size-4 text-emerald-600" aria-label="Read" />}
         </span>
         <ChevronDown className={`size-4 shrink-0 transition ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="border-t p-3">
-          <SafeHtml className="prose prose-sm max-w-none dark:prose-invert" html={l.content_html} />
-          {l.sources?.length > 0 && (
-            <div className="mt-3 text-xs text-muted-foreground">
-              Sources:{' '}
-              {l.sources.map((s: any, i: number) => (
-                <a key={i} href={safeHref(s.url)} target="_blank" rel="noreferrer" className="mr-2 underline">
-                  {s.title}
-                </a>
-              ))}
+        <div className="space-y-3 border-t p-3">
+          {(l.slides || l.games) && (
+            <div className="flex flex-wrap gap-1">
+              <Button size="sm" variant={view === 'read' ? 'default' : 'outline'} onClick={() => setView('read')}>Read</Button>
+              {l.slides && <Button size="sm" variant={view === 'watch' ? 'default' : 'outline'} onClick={() => setView('watch')}><Video className="size-4" />Watch</Button>}
+              {mine && l.games && <Button size="sm" variant={view === 'game' ? 'default' : 'outline'} onClick={() => setView('game')}><Gamepad2 className="size-4" />Game</Button>}
             </div>
           )}
+          {view === 'read' && (
+            <>
+              <SafeHtml className="prose prose-sm max-w-none dark:prose-invert" html={l.content_html} />
+              {l.sources?.length > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  Sources:{' '}
+                  {l.sources.map((s: any, i: number) => (
+                    <a key={i} href={safeHref(s.url)} target="_blank" rel="noreferrer" className="mr-2 underline">
+                      {s.title}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {view === 'watch' && (
+            <div className="space-y-4">
+              <SlidePlayer slides={l.slides} />
+              <Videos videos={l.videos} />
+            </div>
+          )}
+          {view === 'game' &&
+            (testsOpen ? (
+              <p className="text-sm text-muted-foreground">Submit today&apos;s test first; the game round opens after the quiz.</p>
+            ) : l.played ? (
+              <div className="space-y-2">
+                <p className="text-sm">Best round on this lesson: {l.played.points} of {l.played.max_points} points. Play again to beat it.</p>
+                <GameRound lesson={l} onPlayed={() => onChange?.()} />
+              </div>
+            ) : (
+              <GameRound lesson={l} onPlayed={() => onChange?.()} />
+            ))}
+          {mine && !l.readAt && (
+            <Button onClick={read} disabled={busy}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} I have read today&apos;s lesson
+            </Button>
+          )}
+          {mine && l.readAt && <div className="text-xs text-emerald-700 dark:text-emerald-400">Marked read {l.readAt} UTC.</div>}
+          {err && <div className="text-sm text-red-600">{err}</div>}
         </div>
       )}
     </div>
@@ -56,6 +341,11 @@ function Review({ test }: { test: any }) {
               {!right && <div className="text-red-600">Your answer: {picked !== undefined ? q.options[picked] : 'not answered'}</div>}
               <div className="text-emerald-700 dark:text-emerald-400">Right answer: {q.options[q.answer]}</div>
               {q.explain && <div className="text-muted-foreground">{q.explain}</div>}
+              {q.source && (
+                <a href={safeHref(q.source)} target="_blank" rel="noreferrer" className="text-xs underline">
+                  Source
+                </a>
+              )}
               {!right && <div className="text-xs text-muted-foreground">This question will be asked again in two days.</div>}
             </div>
           </div>
@@ -86,6 +376,7 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
       const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (!res.ok) throw new Error(j.error);
       setResult(j);
+      window.dispatchEvent(new Event('training-updated'));
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -96,7 +387,8 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
     return (
       <div className="space-y-3">
         <div className="rounded-lg bg-muted p-3 font-medium">
-          Score: {result.score} / {result.total} ({result.percent}%){result.levelUp && ' · Well done, you moved up a level. Tomorrow’s lesson is a step harder.'}
+          Score: {result.score} / {result.total} ({result.percent}%){result.levelUp && ' · Well done, you moved up a level. Tomorrow’s lessons are a step harder.'}
+          {result.levelDown && ' · Your recent scores moved you down a level for now, so the lessons fit. Keep going and you will move up again.'}
         </div>
         <Review test={result} />
         <Button onClick={onDone}>Close</Button>
@@ -132,7 +424,7 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
 function TestPreview({ test }: { test: any }) {
   return (
     <div className="space-y-3">
-      <div className="text-sm text-muted-foreground">Only the associate can take this test.</div>
+      <div className="text-sm text-muted-foreground">Only the person in training can take this test.</div>
       {test.questions.map((q: any, i: number) => (
         <div key={q.id} className="rounded-lg border p-3 text-sm">
           <div className="font-medium">
@@ -149,66 +441,89 @@ function TestPreview({ test }: { test: any }) {
   );
 }
 
-// One person's training page. readOnly: an admin or manager looking at an associate's page.
+// One person's training page. readOnly: the admin or a manager looking at someone's page.
 function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: any; readOnly: boolean; onDone: () => void; openReview: (id: number) => void }) {
   const lvl = data.levels[p.profile.level];
   const who = readOnly ? p.name || p.email : 'you';
+  const testsOpen = (p.tests || []).length > 0;
   return (
     <>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <GraduationCap className="size-5" /> {readOnly ? `${p.name || p.email}` : 'Associate Training'}
+            <GraduationCap className="size-5" /> {readOnly ? `${p.name || p.email}` : 'My training'}
           </CardTitle>
           <CardDescription>
             {readOnly
-              ? 'This is the page the associate sees, read only.'
-              : `Every morning at 09:00 IST you get a short lesson to read: our company, our services and the latest news, rules and laws. The next morning there is a test on it. Questions you get wrong come back two days later. Two tests in a row at ${data.passPercent}% or more move you up a level.`}
+              ? 'This is the page they see, read only.'
+              : `Every morning at 09:00 IST: three short lessons (Technical knowledge, Know UIC, Marketing skills) to read or watch. Mark each one read. The next morning there is a test on them; one weekday a week brings a surprise test. Questions you get wrong come back two days later. After the test, play the game round. Until today's lessons are read and today's tests are submitted, the rest of the dashboard stays locked.`}
           </CardDescription>
           <CardAction>
             <div className="text-right text-sm">
-              <div className="font-semibold">Level {p.profile.level} of 5</div>
-              <div className="text-xs text-muted-foreground">
-                {lvl?.words} words, {lvl?.questions} questions a day
-              </div>
+              <div className="font-semibold">Level {p.profile.level} of 5{p.profile.audience === 'manager' ? ' (manager)' : ''}</div>
+              <div className="text-xs text-muted-foreground">{lvl?.questions} technical questions a lesson</div>
             </div>
           </CardAction>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          {p.profile.streak > 0 ? `${p.profile.streak} test at ${data.passPercent}% or more. One more to move up.` : `Score ${data.passPercent}% or more in two tests in a row to move up.`}
-          {p.dueAgain > 0 && ` ${p.dueAgain} question(s) waiting to be asked again.`}
-          {!p.profile.active && ` Training is paused for ${who} by the admin.`}
+        <CardContent className="space-y-1 text-sm text-muted-foreground">
+          <div>
+            Levels follow your recent scores: an average of {data.thresholds.up}% or more over your last {data.thresholds.window} tests (without a falling trend) moves you up; under {data.thresholds.down}% moves you down.
+            {p.dueAgain > 0 && ` ${p.dueAgain} question(s) waiting to be asked again.`}
+            {!p.profile.active && ` Training is paused for ${who} by the admin.`}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-foreground">
+            <span className="inline-flex items-center gap-1"><Trophy className="size-4 text-amber-500" /> {p.profile.points} points</span>
+            <span>{p.profile.gameStreak} game day(s) in a row</span>
+            {p.profile.badge && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{p.profile.badge}</span>}
+          </div>
+          {p.levelHistory?.length > 0 && <div className="text-xs">Level changes: {p.levelHistory.map((h: any) => `${h.created_at.slice(0, 10)} ${h.from_level}→${h.to_level}`).join(', ')}</div>}
+          {!readOnly && p.gate?.notice && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-foreground">{p.gate.notice}</div>}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Today&apos;s test</CardTitle>
-          <CardDescription>On yesterday&apos;s lesson, plus questions answered wrong earlier.</CardDescription>
+          <CardTitle>Today&apos;s lessons</CardTitle>
+          <CardDescription>Read (or watch) each one and press &quot;I have read today&apos;s lesson&quot;. Tomorrow&apos;s test asks about them.</CardDescription>
         </CardHeader>
-        <CardContent>
-          {p.test ? readOnly ? <TestPreview test={p.test} /> : <Test key={p.test.id} test={p.test} onDone={onDone} /> : <div className="text-sm text-muted-foreground">No test waiting. The first test comes the morning after the first lesson.</div>}
+        <CardContent className="space-y-2">
+          {p.lessons?.length ? p.lessons.map((l: any) => <Lesson key={l.id} l={l} open={!readOnly && !l.readAt} mine={!readOnly} testsOpen={testsOpen} onChange={onDone} />) : <div className="text-sm text-muted-foreground">Today&apos;s lessons are being prepared. This takes a few minutes; the page refreshes by itself.</div>}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Today&apos;s lesson</CardTitle>
-          <CardDescription>Read it today. Tomorrow&apos;s test asks about it.</CardDescription>
+          <CardTitle>Today&apos;s tests</CardTitle>
+          <CardDescription>On yesterday&apos;s lessons, plus questions answered wrong earlier.</CardDescription>
         </CardHeader>
-        <CardContent>{p.lesson ? <Lesson l={p.lesson} open /> : <div className="text-sm text-muted-foreground">The lesson is being prepared. This takes a few minutes; the page refreshes by itself.</div>}</CardContent>
+        <CardContent className="space-y-6">
+          {testsOpen ? (
+            p.tests.map((t: any) => (
+              <div key={t.id} className="space-y-2">
+                {t.kind === 'surprise' && <div className="rounded-md bg-violet-100 p-2 text-sm font-semibold text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">Surprise test! Questions from this week&apos;s lessons and earlier misses.</div>}
+                {readOnly ? <TestPreview test={t} /> : <Test key={t.id} test={t} onDone={onDone} />}
+              </div>
+            ))
+          ) : (
+            <div className="text-sm text-muted-foreground">No test waiting. The first test comes the morning after the first lessons.</div>
+          )}
+        </CardContent>
       </Card>
 
       {p.results.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>{readOnly ? 'Results' : 'My results'}</CardTitle>
+            <CardDescription>
+              <Sparkline series={[...p.results].reverse().map((r: any) => r.percent)} />
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <table className="w-full text-sm">
               <thead className="text-left text-muted-foreground">
                 <tr>
                   <th className="py-1">Day</th>
+                  <th>Test</th>
                   <th>Level</th>
                   <th>Score</th>
                   <th />
@@ -218,6 +533,7 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
                 {p.results.map((r: any) => (
                   <tr key={r.id} className="border-t">
                     <td className="py-1.5">{fmtDay(r.day)}</td>
+                    <td>{r.kind === 'surprise' ? 'Surprise' : 'Daily'}</td>
                     <td>{r.level}</td>
                     <td>{r.status === 'missed' ? 'Not taken' : `${r.score}/${r.total} (${r.percent}%)`}</td>
                     <td className="text-right">
@@ -251,12 +567,207 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
   );
 }
 
+// A small line of scores over time (oldest left), 0 to 100.
+function Sparkline({ series }: { series: number[] }) {
+  if (series.length < 2) return null;
+  const w = 160;
+  const h = 32;
+  const pts = series.map((v, i) => `${(i / (series.length - 1)) * w},${h - (Math.max(0, Math.min(100, v)) / 100) * h}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} role="img" aria-label={`Scores: ${series.join(', ')}%`} className="inline-block align-middle">
+      <polyline points={pts} fill="none" className="stroke-primary" strokeWidth="2" />
+    </svg>
+  );
+}
+
+// Know UIC: the services catalogue the lessons use (built from our website, refreshed weekly).
+function KnowUic({ cat, canManage, onRefresh }: { cat: any; canManage: boolean; onRefresh: () => void }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Know UIC</CardTitle>
+        <CardDescription>
+          Our services as the Know UIC lessons teach them, built only from our website (service pages in Website Content, the service links in Settings, our blog posts). Read only; refreshed every week.
+          {cat?.builtAt && ` Last built ${new Date(cat.builtAt).toLocaleDateString('en-IN')}.`}
+        </CardDescription>
+        {canManage && (
+          <CardAction>
+            <Button size="sm" variant="outline" onClick={onRefresh}><RefreshCw className="size-4" />Rebuild now</Button>
+          </CardAction>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {!cat?.services?.length ? (
+          <p className="text-muted-foreground">No service page found yet. Add the service pages in Website Content (/services/...) or the service links in Settings; until then each Know UIC lesson reads a service page on usaindiacfo.com itself, or is skipped.</p>
+        ) : (
+          cat.services.map((s: any) => (
+            <details key={s.url + s.name} className="rounded-md border p-2">
+              <summary className="cursor-pointer font-medium">{s.name}</summary>
+              <p className="mt-1">{s.summary}</p>
+              <a href={safeHref(s.url)} target="_blank" rel="noreferrer" className="text-xs underline">{s.url}</a>
+              {s.posts?.length > 0 && <div className="text-xs text-muted-foreground">Our posts: {s.posts.join(' | ')}</div>}
+            </details>
+          ))
+        )}
+        {cat?.process?.length > 0 && <div className="text-xs text-muted-foreground">How we work: {cat.process.map((p: any) => p.title).join(', ')}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Every lesson's walkthrough and videos, by track and topic.
+function Library({ items }: { items: any[] }) {
+  const [track, setTrack] = useState('all');
+  const [open, setOpen] = useState<number | null>(null);
+  const shown = items.filter((x) => track === 'all' || x.track === track);
+  const topics = useMemo(() => {
+    const m = new Map<string, any[]>();
+    for (const x of shown) m.set(`${x.trackLabel}: ${x.topic}`, [...(m.get(`${x.trackLabel}: ${x.topic}`) || []), x]);
+    return [...m.entries()];
+  }, [shown]);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><Video className="size-5" />Videos</CardTitle>
+        <CardDescription>Every lesson&apos;s slide walkthrough and its videos, by track and topic.</CardDescription>
+        <CardAction>
+          <select className="rounded-md border bg-background px-2 py-1 text-sm" value={track} onChange={(e) => setTrack(e.target.value)} aria-label="Track">
+            <option value="all">All tracks</option>
+            <option value="technical">Technical knowledge</option>
+            <option value="uic">Know UIC</option>
+            <option value="marketing">Marketing skills</option>
+          </select>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {!topics.length && <p className="text-muted-foreground">Nothing yet.</p>}
+        {topics.map(([topic, list]) => (
+          <div key={topic} className="rounded-md border p-2">
+            <div className="font-medium">{topic}</div>
+            <ul className="mt-1 space-y-1">
+              {list.map((x) => (
+                <li key={x.id}>
+                  <button className="text-left underline" onClick={() => setOpen(open === x.id ? null : x.id)}>
+                    {fmtDay(x.day)} · level {x.level}{x.audience === 'manager' ? ' (manager)' : ''}: {x.title} {x.videos.length ? `(${x.videos.length} video${x.videos.length > 1 ? 's' : ''})` : ''}
+                  </button>
+                  {open === x.id && (
+                    <div className="mt-2 space-y-3">
+                      <SlidePlayer slides={x.slides} />
+                      <Videos videos={x.videos} />
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+type SortKey = 'name' | 'level' | 'average' | 'trend' | 'points' | 'streak' | 'tests';
+// The admin's and managers' report: sortable, with the trend line, CSV download.
+function TeamReport({ data, person, setPerson, admin, openReview }: { data: any; person: string; setPerson: (e: string) => void; admin: (a: string, x?: any) => void; openReview: (id: number) => void }) {
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 });
+  const rows = [...data.report].sort((a: any, b: any) => {
+    const v = (r: any) => (sort.key === 'name' ? (r.name || r.email).toLowerCase() : r[sort.key] ?? -1e9);
+    return v(a) < v(b) ? -sort.dir : v(a) > v(b) ? sort.dir : 0;
+  });
+  const th = (key: SortKey, label: string) => (
+    <th className="cursor-pointer select-none py-1 pr-2" onClick={() => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : key === 'name' ? 1 : -1 }))}>
+      {label}
+      {sort.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+    </th>
+  );
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><GraduationCap className="size-5" /> Team training report</CardTitle>
+        <CardDescription>
+          Everyone but the admin takes the training (managers at manager level). Click a heading to sort, a name to open their page. Levels move with recent scores: {data.thresholds.up}% average over the last {data.thresholds.window} tests moves up, under {data.thresholds.down}% moves down.
+          {data.lastRun?.at && ` Last daily run: ${new Date(data.lastRun.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST${data.lastRun.errors?.length ? `, ${data.lastRun.errors.length} error(s): ${data.lastRun.errors.join('; ')}` : ''}.`}
+        </CardDescription>
+        <CardAction className="flex gap-2">
+          <a className={buttonVariants({ variant: 'outline', size: 'sm' })} href="/api/associate-training?report=csv" download>
+            <Download className="size-4" /> CSV
+          </a>
+          {data.canManage && (
+            <Button variant="outline" size="sm" onClick={() => admin('run')}>
+              <RefreshCw className="size-4" /> Prepare today now
+            </Button>
+          )}
+        </CardAction>
+      </CardHeader>
+      <CardContent className="overflow-x-auto">
+        {rows.length === 0 ? (
+          <div className="text-sm text-muted-foreground">Nobody is in the training yet. Everyone on the Team list except the admin joins at the next daily run.</div>
+        ) : (
+          <table className="w-full min-w-[56rem] text-sm">
+            <thead className="text-left text-muted-foreground">
+              <tr>
+                {th('name', 'Person')}
+                {th('level', 'Level')}
+                {th('tests', 'Tests')}
+                {th('average', 'Average (last 5)')}
+                {th('trend', 'Trend')}
+                <th className="pr-2">Over time</th>
+                <th className="pr-2">Technical / Know UIC / Marketing</th>
+                {th('streak', 'Test streak')}
+                {th('points', 'Game points')}
+                <th className="pr-2">Surprise</th>
+                <th>In training</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r: any) => (
+                <tr key={r.email} className={`border-t align-top ${person === r.email ? 'bg-muted' : ''}`}>
+                  <td className="py-1.5 pr-2">
+                    <button className="text-left underline" onClick={() => setPerson(person === r.email ? '' : r.email)}>{r.name || r.email}</button>
+                    <div className="text-xs text-muted-foreground">{r.role}</div>
+                    {r.strengths.length > 0 && <div className="text-xs text-emerald-700 dark:text-emerald-400">Strong: {r.strengths.join(', ')}</div>}
+                    {r.weak.length > 0 && <div className="text-xs text-red-600">Weak: {r.weak.join(', ')}</div>}
+                  </td>
+                  <td className="pr-2">
+                    {data.canManage ? (
+                      <select className="rounded border bg-background px-1" value={r.level} onChange={(e) => admin('level', { email: r.email, level: Number(e.target.value) })}>
+                        {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    ) : (
+                      r.level
+                    )}
+                    {r.levels.length > 0 && <div className="text-xs text-muted-foreground">{r.levels.slice(-3).map((l: any) => `${l.from}→${l.to}`).join(', ')}</div>}
+                  </td>
+                  <td className="pr-2">{r.tests}</td>
+                  <td className="pr-2">
+                    {r.average === null ? '-' : `${r.average}%`}
+                    {r.last && r.last.status === 'done' && (
+                      <button className="block text-xs underline" onClick={() => openReview(r.last.id)}>last: {r.last.percent}%</button>
+                    )}
+                  </td>
+                  <td className={`pr-2 ${r.trend > 0 ? 'text-emerald-600' : r.trend < 0 ? 'text-red-600' : ''}`}>{r.trend === null ? '-' : `${r.trend > 0 ? '+' : ''}${r.trend}`}</td>
+                  <td className="pr-2"><Sparkline series={r.series.map((s: any) => s.percent)} /></td>
+                  <td className="pr-2">{['technical', 'uic', 'marketing'].map((t) => (r.tracks[t] === null ? '-' : `${r.tracks[t]}%`)).join(' / ')}</td>
+                  <td className="pr-2">{r.streak}</td>
+                  <td className="pr-2">{r.points}{r.badge ? <div className="text-xs text-amber-700 dark:text-amber-300">{r.badge}</div> : null}</td>
+                  <td className="pr-2 text-xs">{r.surprise.length ? r.surprise.slice(0, 4).map((s: any) => `${s.day.slice(5)}: ${s.status === 'missed' ? 'missed' : `${s.percent}%`}`).join(', ') : '-'}</td>
+                  <td>{data.canManage ? <input type="checkbox" checked={r.active} onChange={(e) => admin('active', { email: r.email, active: e.target.checked })} aria-label="In training" /> : r.active ? 'Yes' : 'Paused'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AssociateTrainingTab() {
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const [review, setReview] = useState<any>(null);
-  const [busy, setBusy] = useState<string | null>(null);
   const [person, setPerson] = useState<string>('');
+  const [view, setView] = useState<'mine' | 'team' | 'uic' | 'videos'>('mine');
 
   const load = useCallback(async () => {
     try {
@@ -284,15 +795,12 @@ export default function AssociateTrainingTab() {
     if (res.ok) setReview(j.test);
   }
   async function admin(action: string, extra: any = {}) {
-    setBusy(action + (extra.email || ''));
     try {
-      const res = await fetch('/api/associate-training', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...extra }) });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) alert(j.error || 'Failed');
-      await load();
-    } finally {
-      setBusy(null);
+      await post({ action, ...extra });
+    } catch (e: any) {
+      alert(e.message);
     }
+    await load();
   }
 
   if (err) return <div className="text-sm text-red-600">{err}</div>;
@@ -315,109 +823,42 @@ export default function AssociateTrainingTab() {
       </CardContent>
     </Card>
   );
-
-  if (!data.viewer)
-    return (
-      <div className="space-y-6">
-        {data.me && <PersonPage p={data.me} data={data} readOnly={false} onDone={load} openReview={openReview} />}
-        {reviewCard}
-      </div>
-    );
+  const views: { key: typeof view; label: string }[] = [
+    ...(data.trainee ? [{ key: 'mine' as const, label: 'My training' }] : []),
+    ...(data.viewer ? [{ key: 'team' as const, label: 'Team report' }] : []),
+    { key: 'uic', label: 'Know UIC' },
+    { key: 'videos', label: 'Videos' },
+  ];
+  const current = views.some((v) => v.key === view) ? view : views[0].key;
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <GraduationCap className="size-5" /> Associate Training
-          </CardTitle>
-          <CardDescription>
-            You are watching the training: read every lesson, see each associate&apos;s page, results and answers. Only associates take the tests. Lessons come at 09:00 IST, tests the next morning; wrong answers come back two days later; two tests in a row at {data.passPercent}% or more move an associate up a level.
-            {data.lastRun?.at && ` Last daily run: ${new Date(data.lastRun.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST${data.lastRun.errors?.length ? `, ${data.lastRun.errors.length} error(s): ${data.lastRun.errors.join('; ')}` : ''}.`}
-          </CardDescription>
-          {data.canManage && (
-            <CardAction>
-              <Button variant="outline" size="sm" disabled={busy === 'run'} onClick={() => admin('run')}>
-                {busy === 'run' ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Prepare today now
-              </Button>
-            </CardAction>
-          )}
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          {data.everyone.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No associate has joined yet. They join when they first open this page.</div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="text-left text-muted-foreground">
-                <tr>
-                  <th className="py-1">Associate</th>
-                  <th>Level</th>
-                  <th>Tests</th>
-                  <th>Average (last 5)</th>
-                  <th>Last test</th>
-                  <th>Asked again</th>
-                  <th>In training</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.everyone.map((p: any) => (
-                  <tr key={p.email} className={`border-t ${person === p.email ? 'bg-muted' : ''}`}>
-                    <td className="py-1.5">
-                      <button className="text-left underline" onClick={() => setPerson(person === p.email ? '' : p.email)}>
-                        {p.name || p.email}
-                      </button>
-                    </td>
-                    <td>
-                      {data.canManage ? (
-                        <select className="rounded border bg-background px-1" value={p.level} onChange={(e) => admin('level', { email: p.email, level: Number(e.target.value) })}>
-                          {[1, 2, 3, 4, 5].map((n) => (
-                            <option key={n} value={n}>
-                              {n}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        p.level
-                      )}
-                    </td>
-                    <td>{p.tests}</td>
-                    <td>{p.average === null ? '-' : `${p.average}%`}</td>
-                    <td>
-                      {p.last ? (
-                        p.last.status === 'missed' ? (
-                          `${fmtDay(p.last.day)}: not taken`
-                        ) : (
-                          <button className="underline" onClick={() => openReview(p.last.id)}>
-                            {fmtDay(p.last.day)}: {p.last.percent}%
-                          </button>
-                        )
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                    <td>{p.dueAgain}</td>
-                    <td>{data.canManage ? <input type="checkbox" checked={p.active} onChange={(e) => admin('active', { email: p.email, active: e.target.checked })} /> : p.active ? 'Yes' : 'Paused'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </CardContent>
-      </Card>
-
+      <div className="flex flex-wrap gap-2">
+        {views.map((v) => (
+          <Button key={v.key} size="sm" variant={current === v.key ? 'default' : 'outline'} onClick={() => setView(v.key)}>
+            {v.label}
+          </Button>
+        ))}
+      </div>
+      {current === 'mine' && data.me && <PersonPage p={data.me} data={data} readOnly={false} onDone={load} openReview={openReview} />}
+      {current === 'team' && (
+        <>
+          <TeamReport data={data} person={person} setPerson={setPerson} admin={admin} openReview={openReview} />
+          {data.person && <PersonPage p={data.person} data={data} readOnly onDone={load} openReview={openReview} />}
+          <Card>
+            <CardHeader>
+              <CardTitle>Today&apos;s lessons</CardTitle>
+              <CardDescription>One lesson per track, level and audience, shared by everyone there.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {data.todayLessons.length ? data.todayLessons.map((l: any) => <Lesson key={l.id} l={l} />) : <div className="text-sm text-muted-foreground">No lessons yet today. They are made at 09:00 IST.</div>}
+            </CardContent>
+          </Card>
+        </>
+      )}
+      {current === 'uic' && <KnowUic cat={data.catalogue} canManage={data.canManage} onRefresh={() => admin('catalogue')} />}
+      {current === 'videos' && <Library items={data.library || []} />}
       {reviewCard}
-
-      {data.person && <PersonPage p={data.person} data={data} readOnly onDone={load} openReview={openReview} />}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Today&apos;s lessons</CardTitle>
-          <CardDescription>One lesson per level, read by the associates at that level.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {data.todayLessons.length ? data.todayLessons.map((l: any) => <Lesson key={l.id} l={l} />) : <div className="text-sm text-muted-foreground">No lessons yet today. They are made at 09:00 IST.</div>}
-        </CardContent>
-      </Card>
     </div>
   );
 }
