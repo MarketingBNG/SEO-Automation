@@ -135,6 +135,35 @@ export async function addRemark(me: { email: string; role: string; name?: string
   return { ok: true, remark: { id: row.id, author: row.author, authorName: row.author_name, week: row.week, level: row.level, percent: row.percent, levelUp: row.level_up, text: row.text, at: row.created_at } };
 }
 
+// ---------- Live test view ----------
+
+// Tests being taken right now, in the viewer's scope: the questions with the option picked so far
+// (the correct answer is not included). The person does not see this; it is for the admin/manager.
+export async function liveTests(me: { email: string; role: string }) {
+  if (!isViewer(me.role)) return [];
+  const only = await visibleEmails(me);
+  const rows = await prisma.training_tests.findMany({ where: { status: 'open', opened_at: { not: null } }, orderBy: { live_at: 'desc' }, take: 50 });
+  const team = await prisma.team_members.findMany({ select: { email: true, name: true } });
+  const nameOf = new Map<string, string | null>(team.map((t: any) => [t.email.toLowerCase(), t.name]));
+  return rows
+    .filter((t: any) => !only || only.has(String(t.email).toLowerCase()))
+    .map((t: any) => {
+      const live = json(t.live, {});
+      return {
+        id: t.id,
+        email: t.email,
+        name: nameOf.get(String(t.email).toLowerCase()) || t.email,
+        kind: t.kind,
+        day: t.day,
+        openedAt: t.opened_at,
+        liveAt: t.live_at,
+        total: t.total,
+        answered: Object.keys(live).length,
+        questions: testQuestions(t).map((q, i) => ({ q: q.q, options: q.options, picked: (live as any)[i] ?? (live as any)[String(i)] ?? null })),
+      };
+    });
+}
+
 // ---------- Team report ----------
 
 export type ReportRow = {

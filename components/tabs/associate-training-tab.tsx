@@ -427,6 +427,7 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
   const started = useRef(Date.now());
   const log = useRef<Record<number, { o: number; at: number }[]>>({});
   const sig = useRef({ pastes: 0, switches: 0, awayMs: 0, awaySince: 0 });
+  const saveTimer = useRef<any>(null);
   useEffect(() => {
     post({ action: 'start', testId: test.id }).catch(() => {});
     const away = () => { sig.current.switches++; sig.current.awaySince = Date.now(); };
@@ -435,11 +436,17 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
     window.addEventListener('blur', away);
     window.addEventListener('focus', back);
     document.addEventListener('visibilitychange', vis);
-    return () => { window.removeEventListener('blur', away); window.removeEventListener('focus', back); document.removeEventListener('visibilitychange', vis); };
+    return () => { window.removeEventListener('blur', away); window.removeEventListener('focus', back); document.removeEventListener('visibilitychange', vis); clearTimeout(saveTimer.current); };
   }, [test.id]);
   function pick(i: number, k: number) {
     (log.current[i] ||= []).push({ o: k, at: Date.now() - started.current });
-    setPicked((p) => ({ ...p, [i]: k }));
+    setPicked((p) => {
+      const next = { ...p, [i]: k };
+      // Save what is picked so far (debounced) so the admin/manager can watch the test live.
+      clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => post({ action: 'progress', testId: test.id, picked: next }).catch(() => {}), 800);
+      return next;
+    });
   }
   async function submit() {
     if (answered < test.questions.length && !confirm('Some questions are not answered. Submit anyway?')) return;
@@ -518,6 +525,65 @@ function TestPreview({ test }: { test: any }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// Live test view: tests being taken right now, refreshed every few seconds. The admin/manager sees
+// each person's current answers as they tick them. The person never sees this panel.
+function LiveTests() {
+  const [live, setLive] = useState<any[]>([]);
+  const [openId, setOpenId] = useState<number | null>(null);
+  useEffect(() => {
+    let on = true;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/associate-training?live=1');
+        const j = await res.json().catch(() => ({}));
+        if (on && res.ok) setLive(j.live || []);
+      } catch {}
+    };
+    load();
+    const t = setInterval(() => onScreen('tab-associates') && load(), 5000);
+    return () => { on = false; clearInterval(t); };
+  }, []);
+  if (!live.length) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <span className="inline-block size-2 animate-pulse rounded-full bg-red-500" /> Live now ({live.length})
+        </CardTitle>
+        <CardDescription>Tests being taken right now. Updates every few seconds. The person does not see this.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {live.map((t) => (
+          <div key={t.id} className="rounded-lg border">
+            <button className="flex w-full items-center justify-between gap-2 p-3 text-left" onClick={() => setOpenId(openId === t.id ? null : t.id)}>
+              <span className="text-sm font-medium">
+                {t.name} <span className="font-normal text-muted-foreground">· {t.kind === 'surprise' ? 'Surprise test' : 'Daily test'} · {t.answered}/{t.total} answered</span>
+              </span>
+              <ChevronDown className={`size-4 shrink-0 transition ${openId === t.id ? 'rotate-180' : ''}`} />
+            </button>
+            {openId === t.id && (
+              <div className="space-y-3 border-t p-3">
+                {t.questions.map((q: any, i: number) => (
+                  <div key={i} className="text-sm">
+                    <div className="font-medium">{i + 1}. {q.q}</div>
+                    <ul className="mt-1 space-y-1">
+                      {q.options.map((o: string, k: number) => (
+                        <li key={k} className={`rounded px-2 py-1 ${q.picked === k ? 'bg-primary/15 font-medium' : 'text-muted-foreground'}`}>
+                          {q.picked === k ? '● ' : '○ '}{o}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -984,6 +1050,7 @@ export default function AssociateTrainingTab() {
       {current === 'mine' && data.me && <PersonPage p={data.me} data={data} readOnly={false} onDone={load} openReview={openReview} />}
       {current === 'team' && (
         <>
+          <LiveTests />
           <TeamReport data={data} person={person} setPerson={setPerson} admin={admin} openReview={openReview} />
           {data.person && <PersonPage p={data.person} data={data} readOnly onDone={load} openReview={openReview} />}
           <Card>

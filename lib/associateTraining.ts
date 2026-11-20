@@ -322,6 +322,21 @@ export async function startTest(email: string, testId: number) {
   return { ok: true };
 }
 
+// The answers picked so far, saved as the person ticks them, for the live test view. Only their own
+// open test; bounded and sanitised. Never affects marking (submit sends the real answers).
+export async function saveProgress(email: string, testId: number, picked: Record<string, number>) {
+  const t = await prisma.training_tests.findUnique({ where: { id: testId }, select: { id: true, email: true, status: true } });
+  if (!t || t.email !== email || t.status !== 'open') return { ok: false };
+  const clean: Record<number, number> = {};
+  for (const [k, v] of Object.entries(picked || {}).slice(0, 100)) {
+    const qi = Number(k);
+    const oi = Number(v);
+    if (Number.isInteger(qi) && qi >= 0 && qi < 100 && Number.isInteger(oi) && oi >= 0 && oi < 20) clean[qi] = oi;
+  }
+  await prisma.training_tests.update({ where: { id: t.id }, data: { live: JSON.stringify(clean), live_at: sqlNow() } });
+  return { ok: true };
+}
+
 // Marks a test. Returns the result with the right answers and explanations.
 export async function submitTest(email: string, testId: number, answers: Record<string, number>, meta?: TestMeta) {
   const t = await prisma.training_tests.findUnique({ where: { id: testId } });
