@@ -289,8 +289,41 @@ async function scoresSinceChange(email: string, level: number) {
   return tests.map((t) => Math.round(((t.score || 0) / Math.max(1, t.total)) * 100));
 }
 
+// The answer trail and the AI-use signals the page sends with a submitted test, kept small and clean.
+export type TestMeta = { log?: unknown; signals?: unknown };
+const num = (v: unknown, max = 1e9) => Math.max(0, Math.min(Math.round(Number(v) || 0), max));
+function cleanLog(log: unknown): { q: number; picks: { o: number; at: number }[] }[] {
+  if (!Array.isArray(log)) return [];
+  return log.slice(0, 80).map((e: any) => ({
+    q: num(e?.q, 999),
+    picks: (Array.isArray(e?.picks) ? e.picks : []).slice(0, 25).map((p: any) => ({ o: num(p?.o, 99), at: num(p?.at) })),
+  }));
+}
+function cleanSignals(s: unknown): { pastes: number; switches: number; awayMs: number; ms: number } | null {
+  if (!s || typeof s !== 'object') return null;
+  const o = s as any;
+  return { pastes: num(o.pastes, 9999), switches: num(o.switches, 9999), awayMs: num(o.awayMs, 864e5), ms: num(o.ms, 864e5) };
+}
+
+// A person first opened a lesson: the earliest open is kept (read_at - opened_at = time on the lesson).
+export async function markLessonOpen(email: string, lessonId: number) {
+  const p = await prisma.training_profiles.findUnique({ where: { email } });
+  const mine = p ? Object.values(lessonIdsOf(p)) : [];
+  if (!p || !mine.includes(lessonId)) return { ok: false };
+  await prisma.training_lesson_opens.create({ data: { email, lesson_id: lessonId } }).catch(() => {});
+  return { ok: true };
+}
+
+// A person started a test: the open time is stamped once, so the report can show how long it took.
+export async function startTest(email: string, testId: number) {
+  const t = await prisma.training_tests.findUnique({ where: { id: testId }, select: { id: true, email: true, opened_at: true, status: true } });
+  if (!t || t.email !== email) throw Object.assign(new Error('Test not found'), { status: 404 });
+  if (!t.opened_at && t.status === 'open') await prisma.training_tests.update({ where: { id: t.id }, data: { opened_at: sqlNow() } });
+  return { ok: true };
+}
+
 // Marks a test. Returns the result with the right answers and explanations.
-export async function submitTest(email: string, testId: number, answers: Record<string, number>) {
+export async function submitTest(email: string, testId: number, answers: Record<string, number>, meta?: TestMeta) {
   const t = await prisma.training_tests.findUnique({ where: { id: testId } });
   if (!t || t.email !== email) throw Object.assign(new Error('Test not found'), { status: 404 });
   // Claimed in one step, so two submits at once (two tabs, a retry) cannot both mark it.
@@ -307,7 +340,9 @@ export async function submitTest(email: string, testId: number, answers: Record<
         await prisma.training_misses.updateMany({ where: { email, cleared: false, question: { contains: `"id":"${q.id}"` } }, data: { cleared: true } });
       } else await addMiss(email, q, today);
     }
-    await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'done', score, answers: JSON.stringify(answers || {}), submitted_at: sqlNow() } });
+    const log = cleanLog(meta?.log);
+    const signals = cleanSignals(meta?.signals);
+    await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'done', score, answers: JSON.stringify(answers || {}), submitted_at: sqlNow(), answer_log: log.length ? JSON.stringify(log) : undefined, signals: signals ? JSON.stringify(signals) : undefined } });
   } catch (e) {
     // Not left half-marked: it can be submitted again.
     await prisma.training_tests.updateMany({ where: { id: t.id, status: 'marking' }, data: { status: 'open' } }).catch(() => {});

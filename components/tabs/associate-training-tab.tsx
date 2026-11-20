@@ -5,7 +5,7 @@
 // game round built from the same lessons. Everyone but the admin takes it; the admin and managers
 // also see the team report (marks, trend, levels, strengths and weak topics, CSV download).
 import { onScreen } from '@/components/shared/on-screen';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Download, Gamepad2, GraduationCap, Loader2, Pause, Play, RefreshCw, SkipBack, SkipForward, Trophy, Video, XCircle } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -248,6 +248,11 @@ function Lesson({ l, open: startOpen, mine, testsOpen, onChange }: { l: any; ope
   const [view, setView] = useState<'read' | 'watch' | 'game'>('read');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Record when the lesson was first opened (only for the person's own, still-unread lesson): the
+  // report shows read time minus this. The server keeps the earliest open and ignores the rest.
+  useEffect(() => {
+    if (open && mine && !l.readAt) post({ action: 'open', lessonId: l.id }).catch(() => {});
+  }, [open, mine, l.id, l.readAt]);
   async function read() {
     setBusy(true);
     setErr(null);
@@ -363,16 +368,37 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const answered = Object.keys(picked).length;
+  // Timing and AI-use signals for the report: when the test was started, every option picked and
+  // re-picked, how many pastes, and how often the person left the tab (and for how long).
+  const started = useRef(Date.now());
+  const log = useRef<Record<number, { o: number; at: number }[]>>({});
+  const sig = useRef({ pastes: 0, switches: 0, awayMs: 0, awaySince: 0 });
+  useEffect(() => {
+    post({ action: 'start', testId: test.id }).catch(() => {});
+    const away = () => { sig.current.switches++; sig.current.awaySince = Date.now(); };
+    const back = () => { if (sig.current.awaySince) { sig.current.awayMs += Date.now() - sig.current.awaySince; sig.current.awaySince = 0; } };
+    const vis = () => (document.hidden ? away() : back());
+    window.addEventListener('blur', away);
+    window.addEventListener('focus', back);
+    document.addEventListener('visibilitychange', vis);
+    return () => { window.removeEventListener('blur', away); window.removeEventListener('focus', back); document.removeEventListener('visibilitychange', vis); };
+  }, [test.id]);
+  function pick(i: number, k: number) {
+    (log.current[i] ||= []).push({ o: k, at: Date.now() - started.current });
+    setPicked((p) => ({ ...p, [i]: k }));
+  }
   async function submit() {
     if (answered < test.questions.length && !confirm('Some questions are not answered. Submit anyway?')) return;
     const answers: Record<string, number> = {};
     test.questions.forEach((q: any, i: number) => {
       if (picked[i] !== undefined) answers[q.id] = picked[i];
     });
+    const logArr = Object.entries(log.current).map(([q, picks]) => ({ q: Number(q), picks }));
+    const signals = { pastes: sig.current.pastes, switches: sig.current.switches, awayMs: sig.current.awayMs + (sig.current.awaySince ? Date.now() - sig.current.awaySince : 0), ms: Date.now() - started.current };
     setBusy(true);
     setErr(null);
     try {
-      const res = await fetch('/api/associate-training', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'submit', testId: test.id, answers }) });
+      const res = await fetch('/api/associate-training', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'submit', testId: test.id, answers, log: logArr, signals }) });
       const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (!res.ok) throw new Error(j.error);
       setResult(j);
@@ -395,7 +421,7 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
       </div>
     );
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" onPaste={() => { sig.current.pastes++; }}>
       {test.questions.map((q: any, i: number) => (
         <div key={i} className="space-y-2 rounded-lg border p-3">
           <div className="text-sm font-medium">
@@ -403,7 +429,7 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
           </div>
           {q.options.map((o: string, k: number) => (
             <label key={k} className={`flex cursor-pointer items-start gap-2 rounded-md border px-2 py-1.5 text-sm ${picked[i] === k ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}>
-              <input type="radio" name={`test-${test.id}-q${i}`} className="mt-1 size-4 accent-primary" checked={picked[i] === k} onChange={() => setPicked((p) => ({ ...p, [i]: k }))} />
+              <input type="radio" name={`test-${test.id}-q${i}`} className="mt-1 size-4 accent-primary" checked={picked[i] === k} onChange={() => pick(i, k)} />
               {o}
             </label>
           ))}

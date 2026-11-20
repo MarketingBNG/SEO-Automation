@@ -594,8 +594,22 @@ model training_tests {
   lesson_ids   String? // ",12,13,14,": the lessons this test asks about
   created_at   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
   submitted_at String?
+  opened_at    String? // when the person started the test (set once); submitted_at - opened_at = time taken
+  answer_log   String? // JSON [{q, picks:[{o, at}]}]: every option picked and re-picked, for the report
+  signals      String? // JSON {pastes, switches, awayMs, ms}: copy/paste and tab-switch counts (AI-use flags)
 
   @@unique([email, day, kind])
+}
+
+// When a person first opened a lesson (not the same as reading it: the gate still needs "I have read").
+// read_at (training_reads) minus opened_at here = how long they spent on the lesson.
+model training_lesson_opens {
+  id        Int    @id @default(autoincrement())
+  email     String
+  lesson_id Int
+  opened_at String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@unique([email, lesson_id])
 }
 
 // A lesson the person marked "I have read today's lesson" (the daily gate needs it).

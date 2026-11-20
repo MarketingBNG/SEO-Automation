@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getMe } from '@/lib/auth';
-import { isTrainee, markRead, playGame, runTrainingDay, setLevel, submitTest } from '@/lib/associateTraining';
+import { isTrainee, markLessonOpen, markRead, playGame, runTrainingDay, setLevel, startTest, submitTest } from '@/lib/associateTraining';
 import { isViewer, reportCsv, teamReport, trainingView, visibleEmails } from '@/lib/associateTrainingView';
 import { trainingGate } from '@/lib/trainingGate';
 import { getCatalogue } from '@/lib/uicCatalogue';
@@ -39,11 +39,13 @@ export async function POST(req: NextRequest) {
   if (!me) return NextResponse.json({ error: 'Sign in first' }, { status: 401 });
   const body: any = (await req.json().catch(() => ({}))) || {};
   try {
-    if (['submit', 'read', 'game'].includes(body.action) && !isTrainee(me.role)) {
+    if (['submit', 'read', 'game', 'open', 'start'].includes(body.action) && !isTrainee(me.role)) {
       return NextResponse.json({ error: 'The admin watches the training; everyone else takes it.' }, { status: 403 });
     }
-    if (body.action === 'submit') return NextResponse.json(await submitTest(me.email, Number(body.testId), body.answers || {}));
+    if (body.action === 'submit') return NextResponse.json(await submitTest(me.email, Number(body.testId), body.answers || {}, { log: body.log, signals: body.signals }));
     if (body.action === 'read') return NextResponse.json(await markRead(me.email, Number(body.lessonId)));
+    if (body.action === 'open') return NextResponse.json(await markLessonOpen(me.email, Number(body.lessonId)));
+    if (body.action === 'start') return NextResponse.json(await startTest(me.email, Number(body.testId)));
     if (body.action === 'game') return NextResponse.json(await playGame(me.email, Number(body.lessonId), body.answers || {}));
     if (me.role !== 'admin') return NextResponse.json({ error: 'Only the admin can do this.' }, { status: 403 });
     if (body.action === 'catalogue') return NextResponse.json(await getCatalogue({ refresh: true }));
