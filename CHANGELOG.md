@@ -5,6 +5,10 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-20
+- (ops) Training for the whole team (everyone except the admin), every day: Technical knowledge, Know UIC (our services, how we work, the rules for each, built only from our own pages) and Marketing skills, at associate or manager level. Lessons and tests come with official sources, adaptive levels (up at 80% average, down under 50%), a weekly surprise test, game rounds, slide walkthroughs and checked YouTube videos (Videos library), and a team report with marks, growth and weak topics (CSV). Until today's lessons are read and tests submitted only Associate Training opens; nobody is locked when the day's training was not made, was made after 13:00 IST, or the person is blocked or paused.
+- (publisher) Publish checklist: Author, Title, Blog text and Banner must be ticked before approving or publishing (Drafts & Review, Post my blog, calendar, assistant). The banner that was ticked is the one published; a change after ticking undoes that tick.
+- (publisher) The assistant can change a live blog's author (from the blog authors list) and edit its words, title or meta through the website, after approval; each change can be undone. Drafts & Review gets "Change author on the live post".
+- (ops) Open in Drafts & Review and Check a blog scrolls to the editor; the left sidebar keeps its place when you switch pages.
 - (seo) Directory listings and other manual tasks stay on the dashboard after they are ticked: a Done list shows who marked each one and when, the listing's address and notes (never a password), with Mark not done for a wrong tick.
 
 ## 2026-11-19
