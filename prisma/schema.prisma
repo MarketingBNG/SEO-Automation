@@ -522,6 +522,48 @@ model team_members {
   updated_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
 }
 
+// The task a person is currently working on (chosen in the dashboard). The activity watcher's active
+// time is attributed to this task until it changes, then a work_entries row is closed and a new one
+// starts. One row per person.
+model work_current {
+  email        String  @id
+  task_id      String? // Zoho Projects task id
+  task_name    String?
+  project_id   String? // Zoho Projects project id
+  project_name String?
+  entry_id     Int? // the open work_entries row collecting time for this task
+  since        String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  set_by       String? // who set it: the person, their manager or the admin
+}
+
+// One block of work on one task: the active time the watcher measured, and whether it has been logged
+// to the person's Zoho timesheet yet. Each block is one Zoho time entry (per task, per entry).
+model work_entries {
+  id           Int     @id @default(autoincrement())
+  email        String
+  day          String // YYYY-MM-DD (IST)
+  task_id      String?
+  task_name    String?
+  project_id   String?
+  started_at   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  ended_at     String?
+  active_ms    Int     @default(0) // active time in this block (idle not counted)
+  source       String  @default("watcher") // watcher | manual
+  logged_at    String? // when it was pushed to Zoho (null = not yet)
+  zoho_log_id  String? // the Zoho timesheet log id, once logged
+  created_at   String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@index([email, day])
+}
+
+// A per-person secret the Windows watcher uses to report active time (it runs outside the browser
+// session, so it cannot use the normal sign-in). Set once during device setup.
+model work_tokens {
+  email      String @id
+  token      String @unique
+  created_at String @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+}
+
 // A person's acceptance of the monitoring terms (attendance, activity for the timesheet, training
 // review). Recorded once per version; a new version of the terms asks again. This is the consent
 // record for DPDP: who agreed, to which version, and when.

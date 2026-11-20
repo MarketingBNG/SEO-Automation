@@ -3,6 +3,7 @@ import { getToken } from 'next-auth/jwt';
 import { actionFor, allows, deniedMessage, isPaidRead, isRole, roleAccess, type Access, type Grant } from '@/lib/permissions';
 import { draftTokenAllows, hasDraftToken } from '@/lib/draftToken';
 import { cronAllows, hasCronSecret } from '@/lib/cronSecret';
+import { hasWorkToken, workTokenAllows } from '@/lib/workToken';
 
 // Replaces the old middleware.js Basic Auth: every page and API route needs a signed-in
 // @usaindiacfo.com Google account. Vercel Cron calls carry `Authorization: Bearer CRON_SECRET`.
@@ -21,6 +22,15 @@ export async function proxy(req: NextRequest) {
     return draftTokenAllows(req.method, pathname)
       ? NextResponse.next()
       : NextResponse.json({ error: 'The edit token only reads blog drafts and changes their title, meta description and article.' }, { status: 403 });
+  }
+
+  // The device activity watcher: its per-person token opens only the activity-report endpoint. The
+  // route resolves which person the token belongs to. It works even while that person's training is
+  // locked (attendance and activity should keep recording).
+  if (hasWorkToken(req)) {
+    return workTokenAllows(req.method, pathname)
+      ? NextResponse.next()
+      : NextResponse.json({ error: 'The work token only reports activity.' }, { status: 403 });
   }
 
   // Scheduled jobs: the secret opens only the job routes (GET), not the rest of the API.
