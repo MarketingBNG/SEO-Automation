@@ -285,6 +285,17 @@ function StrategyProgress({ id, approved, active = true }: { id: number; approve
                         {t.send_date} {t.method}: <strong>{t.target_site}</strong>{t.our_page ? ` for ${t.our_page}` : ''}
                         {t.status === 'manual' && <span className="ml-1 rounded border px-1.5 text-[11px] text-muted-foreground">Needs a person</span>}
                         {t.note && <span className="block text-xs text-muted-foreground">{t.note}</span>}
+                        {t.status === 'done' && (t.done_by || t.listing_url) && (
+                          <span className="block text-xs text-emerald-700 dark:text-emerald-400">
+                            Done{t.done_at ? ` ${t.done_at.slice(0, 16)} UTC` : ''}{t.done_by ? ` by ${t.done_by}` : ''}
+                            {t.listing_url && (
+                              <>
+                                {'. '}
+                                <a href={t.listing_url} target="_blank" rel="noreferrer" className="underline">Open the listing</a>
+                              </>
+                            )}
+                          </span>
+                        )}
                       </span>
                     </li>
                   ))}
@@ -426,7 +437,7 @@ export function StrategyView({ s, onChanged, active = true }: { s: any; onChange
       <StrategyProgress key={s.version} id={s.id} approved={approved} active={active} />
 
       {approved && (
-        <Section title="Tasks for your team" description="Work in this strategy that a person has to do: profiles that need a sign-up and verification, and website fixes that need a developer. Each has a step-by-step guide with links and text to copy. Tick each one when done.">
+        <Section title="Tasks for your team" description="Work in this strategy that a person has to do: profiles that need a sign-up and verification, and website fixes that need a developer. Each has a step-by-step guide with links and text to copy. Tick each one when done and add the listing address; done tasks stay under Show done, with who did them and when.">
           <ManualTaskList m={manual} />
         </Section>
       )}

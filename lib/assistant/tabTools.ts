@@ -323,14 +323,14 @@ tool({
 tool({
   name: 'list_manual_tasks',
   kind: 'read',
-  description: 'The strategy\'s manual tasks a person does (backlink outreach and technical fixes): kind, id, title, detail, date, done, who it is assigned to, and any guide already written. A user sees only the tasks assigned to them.',
+  description: 'The manual tasks a person does (directory listings, backlink outreach and technical fixes): kind, id, title, detail, date, done, who it is assigned to, any guide already written, and for done ones when and who marked them done, the listing address and notes. Done tasks from earlier months stay listed. A user sees only the tasks assigned to them or done by them.',
   input_schema: obj({ strategy_id: int }),
   summarize: () => 'List manual tasks',
   run: async (i, ctx) => {
     const { listManualTasks } = await import('@/lib/strategy/manual');
     const tasks = await listManualTasks(i.strategy_id || (await latestStrategyId()));
     const me = ctx?.me;
-    return (me?.role === 'user' || !me ? tasks.filter((t) => t.assignedTo === me?.email) : tasks).map((t) => ({ ...t, guide: t.guide ? '(written; ask to see it)' : null }));
+    return (me?.role === 'user' || !me ? tasks.filter((t) => t.assignedTo === me?.email || (me && t.doneByEmail === me.email)) : tasks).map((t) => ({ ...t, guide: t.guide ? '(written; ask to see it)' : null }));
   },
 });
 
@@ -352,12 +352,12 @@ tool({
   name: 'manual_task_update',
   kind: 'write',
   needs: (i) => (i.action === 'assign' ? 'manual.assign' : 'manual.do'),
-  description: 'Tick a manual task done ("done"), undo that ("undo"), or assign it to a team member by email ("assign", admin or manager; email empty to unassign). A user can only work on tasks assigned to them.',
-  input_schema: obj({ kind: { type: 'string', enum: ['backlink', 'fix'] }, id: int, action: { type: 'string', enum: ['done', 'undo', 'assign'] }, email: str }, ['kind', 'id', 'action']),
-  summarize: (i) => (i.action === 'assign' ? `Assign ${i.kind} task #${i.id} to ${i.email || 'nobody'}` : `Mark ${i.kind} task #${i.id} ${i.action === 'done' ? 'done' : 'not done'}`),
+  description: 'Tick a manual task done ("done", with the listing address listing_url and notes if the user gives them), undo that ("undo": back on the to-do list, details kept), save the listing address and notes only ("details"), or assign it to a team member by email ("assign", admin or manager; email empty to unassign). A user can only work on tasks assigned to them. Never save a password in notes.',
+  input_schema: obj({ kind: { type: 'string', enum: ['backlink', 'fix'] }, id: int, action: { type: 'string', enum: ['done', 'undo', 'assign', 'details'] }, email: str, listing_url: str, notes: str }, ['kind', 'id', 'action']),
+  summarize: (i) => (i.action === 'assign' ? `Assign ${i.kind} task #${i.id} to ${i.email || 'nobody'}` : i.action === 'details' ? `Save the listing details of ${i.kind} task #${i.id}` : `Mark ${i.kind} task #${i.id} ${i.action === 'done' ? 'done' : 'not done'}`),
   run: async (i, ctx) => {
     const { manualTaskAction } = await import('@/lib/strategy/manualActions');
-    return { result: ok(await manualTaskAction({ kind: i.kind, id: i.id, action: i.action, email: i.email }, ctx?.me || null)) };
+    return { result: ok(await manualTaskAction({ kind: i.kind, id: i.id, action: i.action, email: i.email, listingUrl: i.listing_url, notes: i.notes }, ctx?.me || null)) };
   },
 });
 

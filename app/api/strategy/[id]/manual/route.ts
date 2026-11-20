@@ -12,10 +12,10 @@ export const runtime = 'nodejs';
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const me = await getMe();
   const tasks = await listManualTasks(toId((await params).id));
-  // A user sees only the tasks assigned to them.
+  // A user sees only the tasks assigned to them, and the ones they marked done.
   const team = me && (await canDo(me, 'manual.assign'))
     ? await prisma.team_members.findMany({ orderBy: [{ role: 'asc' }, { email: 'asc' }], select: { email: true, name: true, role: true } })
     : undefined;
-  return NextResponse.json({ tasks: me?.role === 'user' ? tasks.filter((t) => t.assignedTo === me.email) : tasks, role: me?.role || 'user', ...(team ? { team } : {}) });
+  return NextResponse.json({ tasks: me?.role === 'user' ? tasks.filter((t) => t.assignedTo === me.email || t.doneByEmail === me.email) : tasks, role: me?.role || 'user', ...(team ? { team } : {}) });
 }
 export { methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };
