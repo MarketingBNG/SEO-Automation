@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-21
+- (ops) Zoho Projects timesheet: everyone except the admin gets a one-time "Connect Zoho" banner; after connecting, their day's attendance hours (first watcher report to last) are logged to their team's project General task. Marketing goes to Marketing_SGS_Zoho, Automation to its project. The Work time report gets an admin "Log to Zoho" button per person for a day; app-level detail stays in the dashboard. The employee does nothing beyond the one-time connect. Needs ZOHO_PROJECTS_REDIRECT_URI set and that redirect URL registered on the Zoho app.
 - (ops) Team Training: the top-level "Videos" library tab is removed; the section is Read lessons and the Game.
 - (ops) Team Training lesson view: the "Watch" (slides and videos) tab is removed; each lesson now has Read and a Game only. The game is always available for practice and understanding the lesson (the "submit the test first" message is gone).
 - (ops) Team Training, the person's own view: they no longer see any results (no score, answer review, results list or level history); only the admin and managers see those. While a test is open, lessons and notes are hidden so they answer from memory; outside a test they can re-read today's and earlier lessons, each with a short "Quick notes" summary. After submitting they see a thank-you, not the score.
