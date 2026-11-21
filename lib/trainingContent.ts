@@ -59,6 +59,9 @@ export const TECH_TOPICS = [
   'Foreign Direct Investment (FDI) into India: routes and reporting',
   'Liberalised Remittance Scheme (LRS) and TCS on foreign remittances',
   'Form 15CA and 15CB: when a payment abroad needs them',
+  'Form 16 and Form 16A: TDS certificates for salary and non-salary, and how they tie to Form 26AS and the AIS',
+  'Form 13: the lower or nil TDS deduction certificate, who applies and when it helps an NRI',
+  'Form 10F and the Tax Residency Certificate (TRC): claiming India-US treaty benefits for a non-resident',
   'TDS on payments to non-residents and lower deduction certificates',
   'GST for exporters of services and the LUT',
   'PAN: who needs one, PAN for NRIs and foreign companies',
@@ -148,9 +151,9 @@ Earlier lessons in this track and level (do not repeat them; build on them): ${a
   let body = '';
   if (a.track === 'technical') {
     const topic = topicFor('technical', a.day, a.level);
-    body = `CURRICULUM (US-India cross-border tax and compliance terms; the lessons rotate through FBAR, FATCA/Form 8938, ITIN, EIN, SSN, Form 1040/1040-NR, W-8BEN/W-8BEN-E/W-9, Form 5472, LLC vs C-Corp, PFIC, DTAA and Form 67, residency ROR/RNOR/NRI, Schedule FA, FEMA/ODI/FDI/LRS, Form 15CA/15CB, TDS, GST, PAN, Income-tax Act 2025 changes, transfer pricing basics and more).
+    body = `CURRICULUM (US-India cross-border tax and compliance terms; the lessons rotate through FBAR, FATCA/Form 8938, ITIN, EIN, SSN, Form 1040/1040-NR, W-8BEN/W-8BEN-E/W-9, Form 5472, LLC vs C-Corp, PFIC, DTAA and Form 67, residency ROR/RNOR/NRI, Schedule FA, FEMA/ODI/FDI/LRS, Form 15CA/15CB, Form 16/16A and 26AS/AIS, Form 13, Form 10F/TRC, TDS, GST, PAN, Income-tax Act 2025 changes, transfer pricing basics and more).
 Today's topic: ${topic}.
-Cover: what it is, who it applies to (and who it does not), the official form or rule, how it shows up for our clients, and at level 3 and above the exceptions. Add one current update on this topic from the last 60 days if an official source has one.
+Cover: what it is, who it applies to (and who it does not), the official form or rule, how it shows up for our clients, and at level 3 and above the exceptions. Always include at least one short WORKED EXAMPLE: a realistic client scenario with sample figures or details, clearly marked "Example" and clearly not a real client, walked through step by step so the concept is concrete. Add one current update on this topic from the last 60 days if an official source has one.
 ${a.focus ? `Services we sell (to link the topic to): ${a.focus}.` : ''}
 ${a.meetings ? `What clients asked about in recent meetings:\n${a.meetings}` : ''}
 ${a.audience === 'manager' ? MANAGER_TECH : ''}`;
