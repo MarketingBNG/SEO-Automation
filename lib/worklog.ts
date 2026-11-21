@@ -7,6 +7,7 @@ import prismaClient from './prisma';
 import { sqlNow } from './time';
 import { istDay } from './topics';
 import { tookMs, visibleEmails } from './associateTrainingView';
+import { trainingGate } from './trainingGate';
 
 const prisma: any = prismaClient;
 
@@ -160,4 +161,19 @@ export async function emailForToken(token: string): Promise<string | null> {
   if (!token) return null;
   const row = await prisma.work_tokens.findUnique({ where: { token }, select: { email: true } });
   return row?.email || null;
+}
+
+// The device lock gate, by work token. The laptop kiosk polls this: locked = true means keep the
+// laptop on the lesson screen; false means free it. The lock only applies from 09:00 IST (the start of
+// the work-day window); once today's training is done it stays false for the rest of the day, so a
+// reboot does not re-lock. The admin and an unknown token are never locked. Fails open on any error.
+export async function gateForToken(token: string): Promise<{ locked: boolean; name?: string; reason: string }> {
+  const email = await emailForToken(token);
+  if (!email) return { locked: false, reason: 'unknown token' };
+  const member = await prisma.team_members.findUnique({ where: { email }, select: { role: true, name: true } });
+  if (!member || member.role === 'admin') return { locked: false, reason: 'not a tracked person' };
+  const istHour = new Date(Date.now() + 5.5 * 3600000).getUTCHours();
+  if (istHour < 9) return { locked: false, name: member.name, reason: 'before 09:00 IST' };
+  const gate = await trainingGate(email, member.role).catch(() => ({ locked: false }) as any);
+  return { locked: Boolean(gate.locked), name: member.name, reason: gate.locked ? 'training pending' : 'training done' };
 }

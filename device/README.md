@@ -41,21 +41,35 @@ Register-ScheduledTask -TaskName "UIC Watcher" -Action $act -Trigger $trg -RunLe
 
 To stop/remove it later: `Unregister-ScheduledTask -TaskName "UIC Watcher" -Confirm:$false`.
 
-## 4. Kiosk: lock the laptop to only the dashboard (optional, test on a spare first)
-This locks the account to a single app. It is the riskiest step. The simplest reversible way is Edge
-in kiosk mode at logon:
+## 4. The lock gate (lesson lock), reversible, test on a spare first
+`uic-gate.ps1` polls the dashboard. While today's training is not done (and it is after 09:00 IST) it
+holds the laptop in a fullscreen Edge kiosk on the dashboard, so only the lesson is usable. As soon as
+the lesson/test is done the kiosk closes and the laptop is free for the rest of the day; a reboot does
+not re-lock (the dashboard remembers the day is done). It only opens and closes an Edge window and
+changes no Windows policy, so it is safe and reversible. It fails open: on a network error it does not
+lock.
+
+Copy `uic-gate.ps1` to `C:\UIC\uic-gate.ps1`. Test it in a window first (sign in to the dashboard in
+the kiosk, then do or skip today's lesson to watch it lock and free):
 
 ```
-$url = "https://YOUR-DASHBOARD"
-$act = New-ScheduledTaskAction -Execute "msedge.exe" -Argument "--kiosk $url --edge-kiosk-type=fullscreen --no-first-run"
+powershell -ExecutionPolicy Bypass -File C:\UIC\uic-gate.ps1 -Dashboard "https://YOUR-DASHBOARD" -Token "THE-PERSONS-WORK-TOKEN"
+```
+
+Run it at logon:
+
+```
+$act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument '-WindowStyle Hidden -ExecutionPolicy Bypass -File C:\UIC\uic-gate.ps1 -Dashboard "https://YOUR-DASHBOARD" -Token "THE-PERSONS-WORK-TOKEN"'
 $trg = New-ScheduledTaskTrigger -AtLogOn
-Register-ScheduledTask -TaskName "UIC Kiosk" -Action $act -Trigger $trg -RunLevel Limited -Force
+Register-ScheduledTask -TaskName "UIC Gate" -Action $act -Trigger $trg -RunLevel Limited -Force
 ```
 
-For a stronger lock (no other apps at all), Windows **Assigned Access** (Settings -> Accounts -> Other
-users -> Set up a kiosk) ties a local account to one app. Set it up on a **spare** account first and
-confirm you can still sign in as admin to undo it. To remove a kiosk task: `Unregister-ScheduledTask
--TaskName "UIC Kiosk" -Confirm:$false`.
+To stop it: `Unregister-ScheduledTask -TaskName "UIC Gate" -Confirm:$false`.
+
+For a **hard** lock (no other app can run at all, not just a kiosk window), Windows **Assigned Access**
+ties a local account to one app. It is the riskiest option: set it up on a **spare** account first and
+keep a separate admin account that can always sign in to undo it. Do this only after the reversible
+gate above is proven.
 
 ## 5. Auto-login
 Auto sign-in to Windows is a machine setting (Settings, or `netplwiz`). Combined with step 4, the
