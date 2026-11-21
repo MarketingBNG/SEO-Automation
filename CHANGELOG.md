@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-21
+- (ops) AI credits page shows team-training lessons and test grading as their own cost lines (split from the writing-skill refresh), so you can see what the AI grading of typed answers costs.
 - (ops) Training schedule: Monday and Tuesday lessons, Wednesday a test on them, Thursday and Friday lessons, Saturday a test on them, Sunday off. A test covers all the untested lessons since the last test. The first week is lessons only (no test); surprise tests begin the week after. Starts 2026-11-23; set training_pattern_start to empty for a lesson and test every day instead.
 - (ops) Tests now have typed (written-answer) questions as well as multiple choice. The AI grades each typed answer (0, 0.5 or 1 with a one-line reason, noting spelling or grammar), added to the score. Keystrokes, backspaces and time are tracked; the admin and managers see the typed answer, the AI score and these stats. Typed answers start from the first test. Each typed answer uses one AI call to grade.
 - (writer) Training lessons now cover the Indian forms Form 16/16A, Form 13, Form 10F/TRC and Form 26AS/AIS, and every technical lesson includes a worked example.

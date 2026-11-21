@@ -140,7 +140,7 @@ async function makeLessonOnce(day: string, level: number, track: Track, audience
   let lastErr: any = null;
   for (let attempt = 0; attempt < 2 && !j; attempt++) {
     try {
-      const { text } = (await ask(systemPrompt(goalBlock()), [{ role: 'user', content: prompt }], undefined, { maxUses: 8, effort: 'medium', feature: 'training' })) as { text: string };
+      const { text } = (await ask(systemPrompt(goalBlock()), [{ role: 'user', content: prompt }], undefined, { maxUses: 8, effort: 'medium', feature: 'team-training' })) as { text: string };
       j = parseJson(text);
       if (j?.skip) break;
       if (!j?.content_html || !Array.isArray(j.questions) || !j.questions.length) throw new Error('The lesson came back incomplete');
@@ -331,7 +331,7 @@ async function gradeWritten(q: Question, answer: string, ask = callClaude): Prom
   const sys = `You grade a trainee's typed answer at USAIndiaCFO (US-India tax and compliance) against a model answer and its key points. Be strict but fair: reward a correct answer in the trainee's own words, do not reward vague answers or text copied from the question. Reply ONLY JSON between ===JSON=== and ===END===: {"score": 0 | 0.5 | 1, "reason": "one short line, and note clear spelling or grammar problems if any"}. 1 = the key points are covered and correct; 0.5 = partly correct or missing a key point; 0 = wrong, empty or off-topic.`;
   const user = `Question: ${q.q}\nModel answer: ${q.model || ''}\nKey points a full answer needs: ${(q.points || []).join('; ')}\nTrainee's typed answer: ${answer.slice(0, 2000)}`;
   try {
-    const { text } = (await ask(sys, [{ role: 'user', content: user }], undefined, { maxUses: 1, effort: 'low', feature: 'training' })) as { text: string };
+    const { text } = (await ask(sys, [{ role: 'user', content: user }], undefined, { maxUses: 1, effort: 'low', feature: 'training-grading' })) as { text: string };
     const j = parseJson(text) || {};
     const raw = Number(j.score);
     const s = [0, 0.5, 1].includes(raw) ? raw : raw >= 0.75 ? 1 : raw >= 0.25 ? 0.5 : 0;
