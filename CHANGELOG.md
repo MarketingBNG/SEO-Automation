@@ -5,6 +5,9 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-21
+- (ops) Training schedule: Monday and Tuesday lessons, Wednesday a test on them, Thursday and Friday lessons, Saturday a test on them, Sunday off. A test covers all the untested lessons since the last test. The first week is lessons only (no test); surprise tests begin the week after. Starts 2026-11-23; set training_pattern_start to empty for a lesson and test every day instead.
+- (ops) Tests now have typed (written-answer) questions as well as multiple choice. The AI grades each typed answer (0, 0.5 or 1 with a one-line reason, noting spelling or grammar), added to the score. Keystrokes, backspaces and time are tracked; the admin and managers see the typed answer, the AI score and these stats. Typed answers start from the first test. Each typed answer uses one AI call to grade.
+- (writer) Training lessons now cover the Indian forms Form 16/16A, Form 13, Form 10F/TRC and Form 26AS/AIS, and every technical lesson includes a worked example.
 - (ops) Team Training groups people by team (Marketing or Automation; set it in Team & Roles). A manager now sees the training report, person pages and finished tests of their own team only; the admin still sees everyone.
 - (ops) Team Training report shows the admin and managers how long each lesson and test took, the full trail of answers picked and changed, and AI-use flags (pastes, tab-switches, time away) with a red "check" mark on a suspicious test. A person does not see these about their own test.
 - (ops) The admin (on anyone) and a manager (on their team) can add remarks on a person's training; each remark saves their level, recent average and whether they moved up that week. The person does not see them.
