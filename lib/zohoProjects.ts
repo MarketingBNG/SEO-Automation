@@ -9,6 +9,11 @@
 // NOT yet tested against a live Zoho Projects portal; the first real run may need small fixes to the
 // endpoint shape. Build it, connect one person, check the log, iterate on the real error.
 import { readTokens, writeTokens, hasTokens } from './tokenStore';
+import prismaClient from './prisma';
+import { sqlNow } from './time';
+import { istDay } from './topics';
+
+const prisma: any = prismaClient;
 
 const API = (process.env.ZOHO_PROJECTS_API_URL || 'https://projects.zoho.in').replace(/\/+$/, '');
 const PORTAL = process.env.ZOHO_PROJECTS_PORTAL || '60037687374';
