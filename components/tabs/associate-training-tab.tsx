@@ -302,11 +302,10 @@ function Lesson({ l, open: startOpen, mine, testsOpen, onChange }: { l: any; ope
       </button>
       {open && (
         <div className="space-y-3 border-t p-3">
-          {(l.slides || l.games) && (
+          {mine && l.games && (
             <div className="flex flex-wrap gap-1">
               <Button size="sm" variant={view === 'read' ? 'default' : 'outline'} onClick={() => setView('read')}>Read</Button>
-              {l.slides && <Button size="sm" variant={view === 'watch' ? 'default' : 'outline'} onClick={() => setView('watch')}><Video className="size-4" />Watch</Button>}
-              {mine && l.games && <Button size="sm" variant={view === 'game' ? 'default' : 'outline'} onClick={() => setView('game')}><Gamepad2 className="size-4" />Game</Button>}
+              <Button size="sm" variant={view === 'game' ? 'default' : 'outline'} onClick={() => setView('game')}><Gamepad2 className="size-4" />Game</Button>
             </div>
           )}
           {view === 'read' && (
@@ -334,16 +333,8 @@ function Lesson({ l, open: startOpen, mine, testsOpen, onChange }: { l: any; ope
               )}
             </>
           )}
-          {view === 'watch' && (
-            <div className="space-y-4">
-              <SlidePlayer slides={l.slides} />
-              <Videos videos={l.videos} />
-            </div>
-          )}
           {view === 'game' &&
-            (testsOpen ? (
-              <p className="text-sm text-muted-foreground">Submit today&apos;s test first; the game round opens after the quiz.</p>
-            ) : l.played ? (
+            (l.played ? (
               <div className="space-y-2">
                 <p className="text-sm">Best round on this lesson: {l.played.points} of {l.played.max_points} points. Play again to beat it.</p>
                 <GameRound lesson={l} onPlayed={() => onChange?.()} />

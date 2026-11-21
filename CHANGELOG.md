@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-21
+- (ops) Team Training lesson view: the "Watch" (slides and videos) tab is removed; each lesson now has Read and a Game only. The game is always available for practice and understanding the lesson (the "submit the test first" message is gone).
 - (ops) Team Training, the person's own view: they no longer see any results (no score, answer review, results list or level history); only the admin and managers see those. While a test is open, lessons and notes are hidden so they answer from memory; outside a test they can re-read today's and earlier lessons, each with a short "Quick notes" summary. After submitting they see a thank-you, not the score.
 - (ops) AI credits page shows team-training lessons and test grading as their own cost lines (split from the writing-skill refresh), so you can see what the AI grading of typed answers costs.
 - (ops) Training schedule: Monday and Tuesday lessons, Wednesday a test on them, Thursday and Friday lessons, Saturday a test on them, Sunday off. A test covers all the untested lessons since the last test. The first week is lessons only (no test); surprise tests begin the week after. Starts 2026-11-23; set training_pattern_start to empty for a lesson and test every day instead.
