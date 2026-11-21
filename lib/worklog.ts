@@ -6,8 +6,66 @@ import crypto from 'crypto';
 import prismaClient from './prisma';
 import { sqlNow } from './time';
 import { istDay } from './topics';
+import { tookMs, visibleEmails } from './associateTrainingView';
 
 const prisma: any = prismaClient;
+
+// The activity watcher reports what apps were active and for how long. This updates the day's
+// attendance span (first report = auto-login, last report = until manual logout) and the per-app
+// active time. Nothing here is shown to the person; only the admin and managers see it.
+export async function reportActivity(email: string, apps: { app?: string; ms?: number }[]) {
+  const who = email.toLowerCase();
+  const day = istDay();
+  const now = sqlNow();
+  await prisma.work_attendance.upsert({
+    where: { email_day: { email: who, day } },
+    create: { email: who, day, first_at: now, last_at: now },
+    update: { last_at: now },
+  });
+  for (const a of (Array.isArray(apps) ? apps : []).slice(0, 50)) {
+    const app = String(a?.app || 'Unknown').slice(0, 200);
+    const ms = Math.max(0, Math.min(Math.round(Number(a?.ms) || 0), 3600000));
+    if (!ms) continue;
+    await prisma.work_activity.upsert({
+      where: { email_day_app: { email: who, day, app } },
+      create: { email: who, day, app, active_ms: ms },
+      update: { active_ms: { increment: ms } },
+    });
+  }
+  return { ok: true };
+}
+
+// The activity and attendance report for the admin and managers, scoped: the admin sees everyone,
+// a manager sees their team (not themselves), a person sees nothing. gapMs (span - active) is the
+// time not captured on the device, which goes to the General task in the timesheet.
+export async function activityReport(me: { email: string; role: string }, day = istDay()) {
+  const only = await visibleEmails(me);
+  const team = await prisma.team_members.findMany({ where: { role: { not: 'admin' } }, select: { email: true, name: true, team: true } });
+  const people = team.filter((t: any) => !only || only.has(t.email.toLowerCase()));
+  const out: any[] = [];
+  for (const p of people) {
+    const who = p.email.toLowerCase();
+    const [att, acts] = await Promise.all([
+      prisma.work_attendance.findUnique({ where: { email_day: { email: who, day } } }),
+      prisma.work_activity.findMany({ where: { email: who, day }, orderBy: { active_ms: 'desc' } }),
+    ]);
+    const activeMs = acts.reduce((s: number, a: any) => s + a.active_ms, 0);
+    const spanMs = att ? tookMs(att.first_at, att.last_at) : null;
+    out.push({
+      email: who,
+      name: p.name,
+      team: p.team,
+      firstAt: att?.first_at || null,
+      lastAt: att?.last_at || null,
+      spanMs,
+      activeMs,
+      gapMs: spanMs !== null ? Math.max(0, spanMs - activeMs) : null,
+      apps: acts.map((a: any) => ({ app: a.app, ms: a.active_ms })),
+      logged: Boolean(att?.logged_at),
+    });
+  }
+  return out;
+}
 
 // Who may set a person's current task: the person themselves, their team's manager, or the admin.
 export async function canSetFor(actor: { email: string; role: string }, email: string): Promise<boolean> {

@@ -1,19 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMe } from '@/lib/auth';
-import { canSetFor, ensureWorkToken, getCurrent, setCurrentTask, todayEntries } from '@/lib/worklog';
+import { isViewer } from '@/lib/associateTrainingView';
+import { activityReport, canSetFor, ensureWorkToken, getCurrent, setCurrentTask, todayEntries } from '@/lib/worklog';
 import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
 
-// GET: the signed-in person's current task and today's work blocks. ?person=<email> shows that
-// person's, for their manager or the admin only.
+// GET ?report=1&day=YYYY-MM-DD: the activity and attendance report for the admin and managers
+// (scoped to their team; a person sees nothing). Otherwise the current task and today's blocks for a
+// person (admin or their manager only).
 export async function GET(req: NextRequest) {
   const me = await getMe();
   if (!me) return NextResponse.json({ error: 'Sign in first' }, { status: 401 });
+  if (req.nextUrl.searchParams.get('report')) {
+    if (!isViewer(me.role)) return NextResponse.json({ error: 'Only the admin or a manager can see the activity report.' }, { status: 403 });
+    const day = String(req.nextUrl.searchParams.get('day') || '').trim() || undefined;
+    return NextResponse.json({ report: await activityReport(me, day) });
+  }
   const person = String(req.nextUrl.searchParams.get('person') || '').toLowerCase() || me.email.toLowerCase();
   if (person !== me.email.toLowerCase() && !(await canSetFor(me, person))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 });
   const [current, entries] = await Promise.all([getCurrent(person), todayEntries(person)]);
-  // Zoho Projects connection + the task list come in part (b); none yet, so the picker starts empty.
   return NextResponse.json({ email: person, current, entries, zohoConnected: false, tasks: [] });
 }
 

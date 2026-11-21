@@ -556,6 +556,31 @@ model work_entries {
   @@index([email, day])
 }
 
+// A person's working span for a day: first activity the watcher reported (auto-login) to the last
+// (until manual logout). last_at - first_at is the attendance window the timesheet accounts for.
+model work_attendance {
+  email      String
+  day        String // YYYY-MM-DD (IST)
+  first_at   String // first activity reported today
+  last_at    String // last activity reported today
+  logged_at  String? // when this day was pushed to Zoho (null = not yet)
+  zoho_log_id String?
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+
+  @@id([email, day])
+}
+
+// Per-app active time a person spent in a day (what they did, how long). Shown to the admin and
+// managers; the person does not see it.
+model work_activity {
+  email     String
+  day       String
+  app       String // the app or window title the watcher saw
+  active_ms Int    @default(0)
+
+  @@id([email, day, app])
+}
+
 // A per-person secret the Windows watcher uses to report active time (it runs outside the browser
 // session, so it cannot use the normal sign-in). Set once during device setup.
 model work_tokens {
