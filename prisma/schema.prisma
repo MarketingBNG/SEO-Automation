@@ -653,6 +653,8 @@ model training_tests {
   signals      String? // JSON {pastes, switches, awayMs, ms}: copy/paste and tab-switch counts (AI-use flags)
   live         String? // JSON {questionIndex: optionIndex}: answers picked so far, for the live view
   live_at      String? // when the live answers were last updated (so the viewer sees "active now")
+  written      String? // JSON {questionId: {text, keystrokes, backspaces, ms, spelling}} typed answers
+  written_grades String? // JSON {questionId: {score, reason}} the AI's grade of each typed answer
 
   @@unique([email, day, kind])
 }

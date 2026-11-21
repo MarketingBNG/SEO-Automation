@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     if (['submit', 'read', 'game', 'open', 'start', 'progress'].includes(body.action) && !isTrainee(me.role)) {
       return NextResponse.json({ error: 'The admin watches the training; everyone else takes it.' }, { status: 403 });
     }
-    if (body.action === 'submit') return NextResponse.json(await submitTest(me.email, Number(body.testId), body.answers || {}, { log: body.log, signals: body.signals }));
+    if (body.action === 'submit') return NextResponse.json(await submitTest(me.email, Number(body.testId), body.answers || {}, { log: body.log, signals: body.signals, written: body.written }));
     if (body.action === 'read') return NextResponse.json(await markRead(me.email, Number(body.lessonId)));
     if (body.action === 'open') return NextResponse.json(await markLessonOpen(me.email, Number(body.lessonId)));
     if (body.action === 'start') return NextResponse.json(await startTest(me.email, Number(body.testId)));

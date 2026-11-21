@@ -369,6 +369,9 @@ function Review({ test, meta }: { test: any; meta?: boolean }) {
   const trail: Record<number, { o: number; at: number }[]> = {};
   if (meta) for (const e of safeParse(test.answer_log) || []) trail[e.q] = e.picks || [];
   const time = meta ? durStr(test.opened_at, test.submitted_at) || (sig?.ms ? fmtDur(sig.ms) : null) : null;
+  // Typed answers and their AI grades (the result object carries objects; the review endpoint strings).
+  const wGrades = typeof test.written_grades === 'string' ? safeParse(test.written_grades) : test.writtenGrades || null;
+  const wAns = typeof test.written === 'string' ? safeParse(test.written) : test.written || null;
   return (
     <div className="space-y-3">
       {meta && (
@@ -384,6 +387,24 @@ function Review({ test, meta }: { test: any; meta?: boolean }) {
         </div>
       )}
       {test.questions.map((q: any, i: number) => {
+        if (q.kind === 'written') {
+          const g = wGrades?.[q.id];
+          const a = wAns?.[q.id];
+          return (
+            <div key={q.id} className="rounded-lg border p-3 text-sm">
+              <div className="flex gap-2 font-medium">
+                {g ? (g.score >= 1 ? <CheckCircle2 className="size-4 shrink-0 text-emerald-600" /> : g.score >= 0.5 ? <CheckCircle2 className="size-4 shrink-0 text-amber-500" /> : <XCircle className="size-4 shrink-0 text-red-600" />) : <span className="size-4 shrink-0" />}
+                {i + 1}. {q.q} <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-800 dark:bg-sky-900/40 dark:text-sky-300">Typed</span>
+              </div>
+              <div className="mt-1 space-y-1 pl-6">
+                <div className="whitespace-pre-wrap"><span className="text-muted-foreground">{meta ? 'Their' : 'Your'} answer:</span> {a?.text ? a.text : <span className="text-muted-foreground">not answered</span>}</div>
+                {g && <div className={g.score >= 1 ? 'text-emerald-700 dark:text-emerald-400' : g.score >= 0.5 ? 'text-amber-700 dark:text-amber-400' : 'text-red-600'}>AI score: {g.score} of 1{g.reason ? ` — ${g.reason}` : ''}</div>}
+                <div className="text-muted-foreground"><span className="font-medium">Model answer:</span> {q.model}</div>
+                {meta && a && <div className="text-xs text-muted-foreground">Typed in {fmtDur(a.ms) ?? '—'} · {a.keystrokes ?? 0} keystrokes · {a.backspaces ?? 0} backspaces</div>}
+              </div>
+            </div>
+          );
+        }
         const picked = test.answers?.[q.id];
         const right = picked !== undefined && Number(picked) === q.answer;
         const picks = trail[i] || [];
@@ -421,13 +442,25 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
-  const answered = Object.keys(picked).length;
+  const [typed, setTyped] = useState<Record<string, string>>({});
+  const writtenQs = test.questions.filter((q: any) => q.kind === 'written');
+  const answered = Object.keys(picked).length + writtenQs.filter((q: any) => String(typed[q.id] || '').trim()).length;
   // Timing and AI-use signals for the report: when the test was started, every option picked and
   // re-picked, how many pastes, and how often the person left the tab (and for how long).
   const started = useRef(Date.now());
   const log = useRef<Record<number, { o: number; at: number }[]>>({});
   const sig = useRef({ pastes: 0, switches: 0, awayMs: 0, awaySince: 0 });
   const saveTimer = useRef<any>(null);
+  // Per typed question: how many keys, how many backspaces, and when typing started.
+  const wstats = useRef<Record<string, { keystrokes: number; backspaces: number; firstAt: number }>>({});
+  function typeAns(id: string, v: string) {
+    setTyped((t) => ({ ...t, [id]: v }));
+  }
+  function keyStat(id: string, key: string) {
+    const s = (wstats.current[id] ||= { keystrokes: 0, backspaces: 0, firstAt: Date.now() });
+    s.keystrokes++;
+    if (key === 'Backspace' || key === 'Delete') s.backspaces++;
+  }
   useEffect(() => {
     post({ action: 'start', testId: test.id }).catch(() => {});
     const away = () => { sig.current.switches++; sig.current.awaySince = Date.now(); };
@@ -452,14 +485,19 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
     if (answered < test.questions.length && !confirm('Some questions are not answered. Submit anyway?')) return;
     const answers: Record<string, number> = {};
     test.questions.forEach((q: any, i: number) => {
-      if (picked[i] !== undefined) answers[q.id] = picked[i];
+      if (q.kind !== 'written' && picked[i] !== undefined) answers[q.id] = picked[i];
     });
+    const written: Record<string, any> = {};
+    for (const q of writtenQs) {
+      const s = wstats.current[q.id] || { keystrokes: 0, backspaces: 0, firstAt: 0 };
+      written[q.id] = { text: typed[q.id] || '', keystrokes: s.keystrokes, backspaces: s.backspaces, ms: s.firstAt ? Date.now() - s.firstAt : 0 };
+    }
     const logArr = Object.entries(log.current).map(([q, picks]) => ({ q: Number(q), picks }));
     const signals = { pastes: sig.current.pastes, switches: sig.current.switches, awayMs: sig.current.awayMs + (sig.current.awaySince ? Date.now() - sig.current.awaySince : 0), ms: Date.now() - started.current };
     setBusy(true);
     setErr(null);
     try {
-      const res = await fetch('/api/associate-training', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'submit', testId: test.id, answers, log: logArr, signals }) });
+      const res = await fetch('/api/associate-training', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'submit', testId: test.id, answers, log: logArr, signals, written }) });
       const j = await res.json().catch(() => ({ error: `The server did not answer properly (HTTP ${res.status}).` }));
       if (!res.ok) throw new Error(j.error);
       setResult(j);
@@ -486,14 +524,25 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
       {test.questions.map((q: any, i: number) => (
         <div key={i} className="space-y-2 rounded-lg border p-3">
           <div className="text-sm font-medium">
-            {i + 1}. {q.q} {q.repeat && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">Asked again</span>}
+            {i + 1}. {q.q} {q.kind === 'written' && <span className="ml-1 rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-800 dark:bg-sky-900/40 dark:text-sky-300">Write your answer</span>} {q.repeat && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">Asked again</span>}
           </div>
-          {q.options.map((o: string, k: number) => (
-            <label key={k} className={`flex cursor-pointer items-start gap-2 rounded-md border px-2 py-1.5 text-sm ${picked[i] === k ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}>
-              <input type="radio" name={`test-${test.id}-q${i}`} className="mt-1 size-4 accent-primary" checked={picked[i] === k} onChange={() => pick(i, k)} />
-              {o}
-            </label>
-          ))}
+          {q.kind === 'written' ? (
+            <textarea
+              className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+              rows={4}
+              value={typed[q.id] || ''}
+              placeholder="Type your answer in your own words."
+              onKeyDown={(e) => keyStat(q.id, e.key)}
+              onChange={(e) => typeAns(q.id, e.target.value)}
+            />
+          ) : (
+            q.options.map((o: string, k: number) => (
+              <label key={k} className={`flex cursor-pointer items-start gap-2 rounded-md border px-2 py-1.5 text-sm ${picked[i] === k ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}>
+                <input type="radio" name={`test-${test.id}-q${i}`} className="mt-1 size-4 accent-primary" checked={picked[i] === k} onChange={() => pick(i, k)} />
+                {o}
+              </label>
+            ))
+          )}
         </div>
       ))}
       <div className="text-sm text-muted-foreground">
@@ -515,13 +564,17 @@ function TestPreview({ test }: { test: any }) {
       {test.questions.map((q: any, i: number) => (
         <div key={q.id} className="rounded-lg border p-3 text-sm">
           <div className="font-medium">
-            {i + 1}. {q.q} {q.repeat && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">Asked again</span>}
+            {i + 1}. {q.q} {q.kind === 'written' && <span className="ml-1 rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-800 dark:bg-sky-900/40 dark:text-sky-300">Typed answer</span>} {q.repeat && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">Asked again</span>}
           </div>
+          {q.kind === 'written' ? (
+            <div className="mt-1 pl-6 text-xs text-muted-foreground italic">The person writes their own answer; the AI grades it.</div>
+          ) : (
           <ul className="mt-1 list-disc pl-6 text-muted-foreground">
             {q.options.map((o: string, k: number) => (
               <li key={k}>{o}</li>
             ))}
           </ul>
+          )}
         </div>
       ))}
     </div>

@@ -37,6 +37,9 @@ export const questionsFor = (track: Track, level: number) => {
   const n = (LEVELS[level] || LEVELS[1]).questions;
   return track === 'technical' ? n : Math.max(3, Math.ceil(n * 0.6));
 };
+// Typed (written-answer) questions per lesson. Kept small: each one is graded by an AI call, so this
+// is also the per-lesson grading cost. Two at the higher levels, one otherwise.
+export const writtenFor = (_track: Track, level: number) => (level >= 4 ? 2 : 1);
 
 // US-India cross-border tax and compliance: the terms and concepts the technical track rotates through.
 export const TECH_TOPICS = [
@@ -124,9 +127,18 @@ const EXTRAS_SPEC = `Also return, built only from the lesson's own content (for 
 - "slides": 4 to 6 {"heading","points":[2 to 4 short points]} summarising the lesson;
 - "videos": up to 2 {"title","url","channel"} YouTube videos found with web search from official or reputable educational channels (IRS, Income Tax Department, RBI, well-known educators) that explain this topic. Only youtube.com or youtu.be links you actually found; none is better than a guess.`;
 
+// Typed questions the person answers by writing. Each carries a model answer and the key points, so
+// the AI can grade the typed answer later.
+const writtenSpec = (n: number) => `WRITTEN QUESTIONS (${n}, all required):
+- ${n} open-ended question(s) the person answers by typing a few sentences (not multiple choice).
+- Each: a short realistic scenario or an "explain ..." ask that can be answered from the lesson.
+- Give a "model_answer" (3 to 5 sentences, correct and specific) and "key_points" (3 to 5 short points a full answer must contain), used later to grade the typed answer.
+- Inside string values use single quotes, never a double quote, so the JSON stays valid.`;
+
 const JSON_SHAPE = `Return ONLY JSON between ===JSON=== and ===END===:
 {"title":"...","topic":"...","content_html":"<h3>...</h3><p>...</p>","sources":[{"title":"...","url":"https://..."}],
  "questions":[{"q":"...","options":["...","...","...","..."],"answer":0,"explain":"...","source":"https://..."}],
+ "written":[{"q":"...","model_answer":"...","key_points":["...","..."]}],
  "terms":[],"steps":{"title":"...","items":[]},"cases":[],"blanks":[],"slides":[],"videos":[]}`;
 
 export function systemPrompt(goal: string) {
@@ -183,6 +195,7 @@ ${body}
 The lesson: about ${words} words, no more. Use <h3>, <p>, <ul><li>, <strong>.
 Then write ${n} questions.
 ${QUESTION_RULES}
+${writtenSpec(writtenFor(a.track, a.level))}
 ${EXTRAS_SPEC}
 ${JSON_SHAPE}`;
 }

@@ -20,7 +20,7 @@ import { getRecentTranscripts } from './fireflies';
 import { istDay, istHour } from './topics';
 import { onceADay, waitsForAi, AnotherRunGoing } from './onceADay';
 import { sqlNow } from './time';
-import { LEVELS, TRACKS, audienceFor, isTrainee, lessonIdsOf, buildGames, cleanVideos, lessonPrompt, questionsFor, scoreGame, systemPrompt, topicFor, type Audience, type GameAnswers, type Track } from './trainingContent';
+import { LEVELS, TRACKS, audienceFor, isTrainee, lessonIdsOf, buildGames, cleanVideos, lessonPrompt, questionsFor, writtenFor, scoreGame, systemPrompt, topicFor, type Audience, type GameAnswers, type Track } from './trainingContent';
 import { getCatalogue, serviceForDay } from './uicCatalogue';
 
 // Untyped on purpose: the Prisma query types of these many queries push the build's type check past
@@ -40,7 +40,9 @@ const REPEAT_AFTER_DAYS = 2;
 const MAX_REPEATS_PER_TEST = 5;
 const SURPRISE_QUESTIONS = 8;
 
-export type Question = { id: string; q: string; options: string[]; answer: number; explain: string; source?: string; track?: Track; topic?: string; repeat?: boolean };
+// kind 'written' is a typed-answer question: options is empty, answer is -1, and model + points are
+// the correct answer and the points a full answer needs, used by the AI to grade the typed reply.
+export type Question = { id: string; q: string; options: string[]; answer: number; explain: string; source?: string; track?: Track; topic?: string; repeat?: boolean; kind?: 'mcq' | 'written'; model?: string; points?: string[] };
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 const g = globalThis as unknown as { __trainingRun?: boolean };
@@ -57,6 +59,25 @@ function cleanQuestions(list: any[], prefix: string, max: number, track: Track, 
       answer: Math.max(0, Math.min(Number(q.answer) || 0, q.options.length - 1)),
       explain: String(q.explain || '').slice(0, 600),
       ...(/^https?:\/\//.test(String(q.source || '')) ? { source: String(q.source).slice(0, 400) } : {}),
+      track,
+      topic: topic.slice(0, 160),
+    }));
+}
+
+// Typed questions as stored on the lesson: each becomes a Question with kind 'written' and no options.
+function cleanWritten(list: any[], prefix: string, max: number, track: Track, topic: string): Question[] {
+  return (Array.isArray(list) ? list : [])
+    .filter((q) => q && q.q && (q.model_answer || q.model))
+    .slice(0, max)
+    .map((q, i) => ({
+      id: `${prefix}-w${i + 1}`,
+      q: String(q.q).slice(0, 700),
+      options: [],
+      answer: -1,
+      explain: '',
+      kind: 'written' as const,
+      model: String(q.model_answer || q.model || '').slice(0, 1200),
+      points: (Array.isArray(q.key_points) ? q.key_points : (Array.isArray(q.points) ? q.points : [])).slice(0, 6).map((p: any) => String(p).slice(0, 200)),
       track,
       topic: topic.slice(0, 160),
     }));
@@ -138,7 +159,8 @@ async function makeLessonOnce(day: string, level: number, track: Track, audience
   const sources = (Array.isArray(j.sources) ? j.sources : []).filter((s: any) => s && /^https?:\/\//.test(String(s.url || ''))).slice(0, 8).map((s: any) => ({ title: String(s.title || s.url).slice(0, 200), url: String(s.url) }));
   const topic = String(j.topic || (track === 'uic' ? service?.name : topicFor(track, day, level)) || j.title || '').slice(0, 160);
   const questions = cleanQuestions(j.questions, `${day}-L${level}-${track}-${audience}`, questionsFor(track, level), track, topic);
-  const extras = { terms: j.terms, steps: j.steps, cases: j.cases, blanks: j.blanks, slides: j.slides, videos: cleanVideos(j.videos), service: service ? { name: service.name, url: service.url } : null };
+  const written = cleanWritten(j.written, `${day}-L${level}-${track}-${audience}`, writtenFor(track, level), track, topic);
+  const extras = { terms: j.terms, steps: j.steps, cases: j.cases, blanks: j.blanks, slides: j.slides, videos: cleanVideos(j.videos), written, service: service ? { name: service.name, url: service.url } : null };
   try {
     return await prisma.training_lessons.create({ data: { day, level, track, audience, topic, title: String(j.title || `Lesson ${day}`).slice(0, 200), content_html: String(j.content_html).replace(/—/g, ', '), sources: JSON.stringify(sources), questions: JSON.stringify(questions), extras: JSON.stringify(extras) } });
   } catch {
@@ -198,6 +220,9 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
       if (done) continue;
       tested.push(l.id);
       fresh.push(...(JSON.parse(l.questions) as Question[]).map((q) => ({ ...q, track: q.track || (l.track as Track), topic: q.topic || l.topic || l.title })));
+      // The lesson's typed (written-answer) questions, graded by AI at submit.
+      const written = (() => { try { return JSON.parse(l.extras || '{}').written || []; } catch { return []; } })() as Question[];
+      fresh.push(...written.map((q) => ({ ...q, kind: 'written' as const, track: q.track || (l.track as Track), topic: q.topic || l.topic || l.title })));
     }
     const misses = await prisma.training_misses.findMany({ where: { email, cleared: false, due_day: { lte: day } }, orderBy: { due_day: 'asc' }, take: MAX_REPEATS_PER_TEST });
     const repeats: Question[] = misses.map((m) => ({ ...(JSON.parse(m.question) as Question), repeat: true }));
@@ -289,8 +314,25 @@ async function scoresSinceChange(email: string, level: number) {
   return tests.map((t) => Math.round(((t.score || 0) / Math.max(1, t.total)) * 100));
 }
 
-// The answer trail and the AI-use signals the page sends with a submitted test, kept small and clean.
-export type TestMeta = { log?: unknown; signals?: unknown };
+// The answer trail, AI-use signals and typed answers the page sends with a submitted test.
+export type TestMeta = { log?: unknown; signals?: unknown; written?: Record<string, { text?: string; keystrokes?: number; backspaces?: number; ms?: number; spelling?: number }> };
+
+// The AI grades one typed answer against the model answer and key points. Returns a 0, 0.5 or 1 score
+// and a one-line reason. On any failure it returns 0 with a note so the admin can review by hand.
+async function gradeWritten(q: Question, answer: string, ask = callClaude): Promise<{ score: number; reason: string }> {
+  if (!answer.trim()) return { score: 0, reason: 'No answer written.' };
+  const sys = `You grade a trainee's typed answer at USAIndiaCFO (US-India tax and compliance) against a model answer and its key points. Be strict but fair: reward a correct answer in the trainee's own words, do not reward vague answers or text copied from the question. Reply ONLY JSON between ===JSON=== and ===END===: {"score": 0 | 0.5 | 1, "reason": "one short line, and note clear spelling or grammar problems if any"}. 1 = the key points are covered and correct; 0.5 = partly correct or missing a key point; 0 = wrong, empty or off-topic.`;
+  const user = `Question: ${q.q}\nModel answer: ${q.model || ''}\nKey points a full answer needs: ${(q.points || []).join('; ')}\nTrainee's typed answer: ${answer.slice(0, 2000)}`;
+  try {
+    const { text } = (await ask(sys, [{ role: 'user', content: user }], undefined, { maxUses: 1, effort: 'low', feature: 'training' })) as { text: string };
+    const j = parseJson(text) || {};
+    const raw = Number(j.score);
+    const s = [0, 0.5, 1].includes(raw) ? raw : raw >= 0.75 ? 1 : raw >= 0.25 ? 0.5 : 0;
+    return { score: s, reason: String(j.reason || '').slice(0, 200) };
+  } catch {
+    return { score: 0, reason: 'Could not grade automatically; please review by hand.' };
+  }
+}
 const num = (v: unknown, max = 1e9) => Math.max(0, Math.min(Math.round(Number(v) || 0), max));
 function cleanLog(log: unknown): { q: number; picks: { o: number; at: number }[] }[] {
   if (!Array.isArray(log)) return [];
@@ -298,6 +340,21 @@ function cleanLog(log: unknown): { q: number; picks: { o: number; at: number }[]
     q: num(e?.q, 999),
     picks: (Array.isArray(e?.picks) ? e.picks : []).slice(0, 25).map((p: any) => ({ o: num(p?.o, 99), at: num(p?.at) })),
   }));
+}
+// The typed answers and their keystroke stats, bounded and cleaned, for storage and the report.
+function cleanWrittenAnswers(w: Record<string, any>): Record<string, { text: string; keystrokes: number; backspaces: number; ms: number; spelling: number }> {
+  const out: Record<string, any> = {};
+  for (const [id, v] of Object.entries(w || {}).slice(0, 40)) {
+    if (!v || typeof v !== 'object') continue;
+    out[String(id).slice(0, 80)] = {
+      text: String((v as any).text || '').slice(0, 4000),
+      keystrokes: num((v as any).keystrokes, 1e5),
+      backspaces: num((v as any).backspaces, 1e5),
+      ms: num((v as any).ms, 864e5),
+      spelling: num((v as any).spelling, 9999),
+    };
+  }
+  return out;
 }
 function cleanSignals(s: unknown): { pastes: number; switches: number; awayMs: number; ms: number } | null {
   if (!s || typeof s !== 'object') return null;
@@ -347,17 +404,28 @@ export async function submitTest(email: string, testId: number, answers: Record<
   const today = istDay();
   const questions = testQuestions(t);
   let score = 0;
+  const writtenGrades: Record<string, { score: number; reason: string }> = {};
   try {
     for (const q of questions) {
+      if (q.kind === 'written') {
+        // Typed answer: graded by the AI against the model answer and key points.
+        const typed = String(meta?.written?.[q.id]?.text || '').trim();
+        const g = await gradeWritten(q, typed);
+        writtenGrades[q.id] = g;
+        score += g.score;
+        continue;
+      }
       const right = Number(answers?.[q.id]) === q.answer && answers?.[q.id] !== undefined && answers?.[q.id] !== null;
       if (right) {
-        score++;
         await prisma.training_misses.updateMany({ where: { email, cleared: false, question: { contains: `"id":"${q.id}"` } }, data: { cleared: true } });
+        score++;
       } else await addMiss(email, q, today);
     }
+    score = Math.round(score);
     const log = cleanLog(meta?.log);
     const signals = cleanSignals(meta?.signals);
-    await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'done', score, answers: JSON.stringify(answers || {}), submitted_at: sqlNow(), answer_log: log.length ? JSON.stringify(log) : undefined, signals: signals ? JSON.stringify(signals) : undefined } });
+    const written = meta?.written && typeof meta.written === 'object' ? cleanWrittenAnswers(meta.written) : null;
+    await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'done', score, answers: JSON.stringify(answers || {}), submitted_at: sqlNow(), answer_log: log.length ? JSON.stringify(log) : undefined, signals: signals ? JSON.stringify(signals) : undefined, written: written ? JSON.stringify(written) : undefined, written_grades: Object.keys(writtenGrades).length ? JSON.stringify(writtenGrades) : undefined } });
   } catch (e) {
     // Not left half-marked: it can be submitted again.
     await prisma.training_tests.updateMany({ where: { id: t.id, status: 'marking' }, data: { status: 'open' } }).catch(() => {});
@@ -379,7 +447,7 @@ export async function submitTest(email: string, testId: number, answers: Record<
   await activity.log('training.test', { details: `${email}: ${t.kind === 'surprise' ? 'surprise test ' : ''}${score}/${questions.length} (${percent}%)${levelUp ? `, moved up to level ${(p?.level || 1) + 1}` : levelDown ? `, moved down to level ${(p?.level || 2) - 1}` : ''}`, actor: email });
   const { forgetGate } = await import('./trainingGate');
   forgetGate(email);
-  return { score, total: questions.length, percent, levelUp, levelDown, kind: t.kind, questions, answers };
+  return { score, total: questions.length, percent, levelUp, levelDown, kind: t.kind, questions, answers, writtenGrades, written: meta?.written || {} };
 }
 
 // "I have read today's lesson": records when (the daily gate needs every one of today's lessons read).
