@@ -1114,7 +1114,6 @@ export default function AssociateTrainingTab() {
     ...(data.trainee ? [{ key: 'mine' as const, label: 'My training' }] : []),
     ...(data.viewer ? [{ key: 'team' as const, label: 'Team report' }] : []),
     { key: 'uic', label: 'Know UIC' },
-    { key: 'videos', label: 'Videos' },
   ];
   const current = views.some((v) => v.key === view) ? view : views[0].key;
 
@@ -1145,7 +1144,6 @@ export default function AssociateTrainingTab() {
         </>
       )}
       {current === 'uic' && <KnowUic cat={data.catalogue} canManage={data.canManage} onRefresh={() => admin('catalogue')} />}
-      {current === 'videos' && <Library items={data.library || []} />}
       {reviewCard}
     </div>
   );
