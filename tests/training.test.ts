@@ -219,6 +219,8 @@ test('the daily gate: locks pages and API writes until lessons are read and test
   const calls: string[] = [];
   await prisma.training_profiles.create({ data: { email: assoc, name: 'Assoc' } });
   await prisma.training_profiles.create({ data: { email: mgr, name: 'Mgr' } });
+  // This test checks the daily gate with a lesson and a test every day, so turn the weekly pattern off.
+  await (await import('../lib/settings')).set('training_pattern_start', '');
   try {
     // Nothing made for today (Testing mode, paused AI, a failed run): open, with a notice.
     const failing = async () => {

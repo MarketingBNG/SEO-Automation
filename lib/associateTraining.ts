@@ -22,6 +22,7 @@ import { onceADay, waitsForAi, AnotherRunGoing } from './onceADay';
 import { sqlNow } from './time';
 import { LEVELS, TRACKS, audienceFor, isTrainee, lessonIdsOf, buildGames, cleanVideos, lessonPrompt, questionsFor, writtenFor, scoreGame, systemPrompt, topicFor, type Audience, type GameAnswers, type Track } from './trainingContent';
 import { getCatalogue, serviceForDay } from './uicCatalogue';
+import { getSchedule, isLessonDay, isTestDay, surpriseOn } from './trainingSchedule';
 
 // Untyped on purpose: the Prisma query types of these many queries push the build's type check past
 // its memory limit (see lib/assistant/tabTools.ts). The tests cover the queries.
@@ -208,14 +209,17 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
     await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'missed', score: 0 } });
     for (const q of JSON.parse(t.questions) as Question[]) await addMiss(email, q, day);
   }
+  const sched = await getSchedule();
   const current = lessonIdsOf(p);
-  if (!(await prisma.training_tests.findUnique({ where: { email_day_kind: { email, day, kind: 'daily' } } }))) {
-    const ids = Object.values(current).filter((x): x is number => Boolean(x));
-    const last = ids.length ? await prisma.training_lessons.findMany({ where: { id: { in: ids }, day: { lt: day } } }) : [];
+  if (isTestDay(day, sched) && !(await prisma.training_tests.findUnique({ where: { email_day_kind: { email, day, kind: 'daily' } } }))) {
+    // The lessons since the last test that this person has not been tested on yet (all tracks at their
+    // level and audience). In the weekly pattern a Wednesday test covers Monday and Tuesday, a Saturday
+    // test covers Thursday and Friday. With the schedule off it is just yesterday's lessons.
+    const recent = await prisma.training_lessons.findMany({ where: { level: p.level, audience, day: { lt: day, gte: addDays(day, -8) } }, orderBy: [{ day: 'asc' }, { track: 'asc' }] });
     // A lesson is tested once: when a day's new lesson could not be made, the old one is not tested again.
     const fresh: Question[] = [];
     const tested: number[] = [];
-    for (const l of last) {
+    for (const l of recent) {
       const done = await prisma.training_tests.findFirst({ where: { email, OR: [{ lesson_id: l.id }, { lesson_ids: { contains: `,${l.id},` } }] }, select: { id: true } });
       if (done) continue;
       tested.push(l.id);
@@ -232,25 +236,28 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
       await prisma.training_tests.create({ data: { email, day, level: p.level, kind: 'daily', lesson_id: tested[0] || null, lesson_ids: tested.length ? `,${tested.join(',')},` : ',', questions: JSON.stringify(questions), total: questions.length } }).catch(() => {});
     }
   }
-  if (isSurpriseDay(email, day)) await prepareSurprise(email, day, p.level, audience);
+  if (surpriseOn(day, sched) && isSurpriseDay(email, day)) await prepareSurprise(email, day, p.level, audience);
 
-  // Today's lessons, one per track. A track that fails (AI paused) is tried again on a later run; the
-  // others are kept.
-  const lessons = { ...current };
+  // Today's lessons, one per track, on a lesson day only. A track that fails (AI paused) is tried again
+  // on a later run; the others are kept. On a test day (or Sunday) no new lessons are made and the
+  // person keeps the lessons they already have.
   let firstError: any = null;
-  const have = await prisma.training_lessons.findMany({ where: { id: { in: Object.values(current).filter((x): x is number => Boolean(x)) } }, select: { id: true, day: true } });
-  for (const track of TRACKS) {
-    const cur = have.find((h) => h.id === current[track]);
-    if (cur?.day === day) continue;
-    try {
-      const l = await makeLesson(day, p.level, track, audience, ask);
-      if (l) lessons[track] = l.id;
-      else delete lessons[track];
-    } catch (e) {
-      firstError ||= e;
+  if (isLessonDay(day, sched)) {
+    const lessons = { ...current };
+    const have = await prisma.training_lessons.findMany({ where: { id: { in: Object.values(current).filter((x): x is number => Boolean(x)) } }, select: { id: true, day: true } });
+    for (const track of TRACKS) {
+      const cur = have.find((h) => h.id === current[track]);
+      if (cur?.day === day) continue;
+      try {
+        const l = await makeLesson(day, p.level, track, audience, ask);
+        if (l) lessons[track] = l.id;
+        else delete lessons[track];
+      } catch (e) {
+        firstError ||= e;
+      }
     }
+    await prisma.training_profiles.update({ where: { email }, data: { lesson_ids: JSON.stringify(lessons), lesson_id: lessons.technical ?? p.lesson_id } });
   }
-  await prisma.training_profiles.update({ where: { email }, data: { lesson_ids: JSON.stringify(lessons), lesson_id: lessons.technical ?? p.lesson_id } });
   const { forgetGate } = await import('./trainingGate');
   forgetGate(email);
   if (firstError) throw firstError;
