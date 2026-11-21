@@ -20,7 +20,7 @@ const PORTAL = process.env.ZOHO_PROJECTS_PORTAL || '60037687374';
 // Which Zoho project each team logs time to.
 export const PROJECT_BY_TEAM: Record<string, string> = {
   marketing: process.env.ZOHO_PROJECT_MARKETING || '283967000001053334', // Marketing_SGS_Zoho
-  automation: process.env.ZOHO_PROJECT_AUTOMATION || '283967000005394035', // Zoho Development
+  automation: process.env.ZOHO_PROJECT_AUTOMATION || '283967000006362390', // Automation team timesheet project
 };
 const SCOPES = ['ZohoProjects.portals.READ', 'ZohoProjects.projects.READ', 'ZohoProjects.tasks.ALL', 'ZohoProjects.timesheets.ALL'].join(',');
 const provider = (email: string) => `zoho_projects:${email.toLowerCase()}`;
