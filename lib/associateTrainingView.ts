@@ -35,7 +35,9 @@ export async function visibleEmails(me: { email: string; role: string }): Promis
   const self = await prisma.team_members.findUnique({ where: { email: me.email }, select: { team: true } });
   if (!self?.team) return new Set<string>();
   const rows = await prisma.team_members.findMany({ where: { team: self.team }, select: { email: true } });
-  return new Set<string>(rows.map((r: any) => r.email.toLowerCase()));
+  // A manager sees their team but not their own training; the manager's own goes to the admin only.
+  const mine = me.email.toLowerCase();
+  return new Set<string>(rows.map((r: any) => r.email.toLowerCase()).filter((e: string) => e !== mine));
 }
 
 // UTC 'YYYY-MM-DD HH:MM:SS' to millis; null when empty or unparseable.
