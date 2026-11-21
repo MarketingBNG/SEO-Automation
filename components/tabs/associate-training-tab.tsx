@@ -312,6 +312,16 @@ function Lesson({ l, open: startOpen, mine, testsOpen, onChange }: { l: any; ope
           {view === 'read' && (
             <>
               <SafeHtml className="prose prose-sm max-w-none dark:prose-invert" html={l.content_html} />
+              {l.terms?.length > 0 && (
+                <div className="rounded-md border bg-muted/50 p-2 text-sm">
+                  <div className="mb-1 font-medium">Quick notes</div>
+                  <ul className="space-y-0.5">
+                    {l.terms.map((t: any, i: number) => (
+                      <li key={i}><span className="font-medium">{t.term}:</span> <span className="text-muted-foreground">{t.definition}</span></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {l.sources?.length > 0 && (
                 <div className="text-xs text-muted-foreground">
                   Sources:{' '}
@@ -512,10 +522,9 @@ function Test({ test, onDone }: { test: any; onDone: () => void }) {
     return (
       <div className="space-y-3">
         <div className="rounded-lg bg-muted p-3 font-medium">
-          Score: {result.score} / {result.total} ({result.percent}%){result.levelUp && ' · Well done, you moved up a level. Tomorrow’s lessons are a step harder.'}
-          {result.levelDown && ' · Your recent scores moved you down a level for now, so the lessons fit. Keep going and you will move up again.'}
+          Test submitted. Thank you.{result.levelUp && ' Well done, you moved up a level. Your next lessons are a step harder.'}
+          {result.levelDown && ' Your level was adjusted so the lessons fit you. Keep going and you will move up again.'}
         </div>
-        <Review test={result} />
         <Button onClick={onDone}>Close</Button>
       </div>
     );
@@ -700,6 +709,29 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
   const lvl = data.levels[p.profile.level];
   const who = readOnly ? p.name || p.email : 'you';
   const testsOpen = (p.tests || []).length > 0;
+  const unreadToday = p.gate?.unread?.length || 0;
+
+  // A trainee taking a test: focus mode. Only the test shows, no lessons, notes, results or stats, so
+  // they answer from memory. If a lesson is still unread today (rare), both show so they are not locked.
+  if (!readOnly && testsOpen && unreadToday === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Today&apos;s test</CardTitle>
+          <CardDescription>Answer from memory. Your lessons and notes are hidden while the test is open.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {p.tests.map((t: any) => (
+            <div key={t.id} className="space-y-2">
+              {t.kind === 'surprise' && <div className="rounded-md bg-violet-100 p-2 text-sm font-semibold text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">Surprise test! Questions from this week&apos;s lessons and earlier misses.</div>}
+              <Test key={t.id} test={t} onDone={onDone} />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <>
       <Card>
@@ -710,7 +742,7 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
           <CardDescription>
             {readOnly
               ? 'This is the page they see, read only.'
-              : `Every morning at 09:00 IST: three short lessons (Technical knowledge, Know UIC, Marketing skills) to read or watch. Mark each one read. The next morning there is a test on them; one weekday a week brings a surprise test. Questions you get wrong come back two days later. After the test, play the game round. Until today's lessons are read and today's tests are submitted, the rest of the dashboard stays locked.`}
+              : 'Read each lesson and press "I have read today\'s lesson". On test days a test opens here. Until today\'s training is done, the rest of the dashboard stays locked.'}
           </CardDescription>
           <CardAction>
             <div className="text-right text-sm">
@@ -720,17 +752,19 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-1 text-sm text-muted-foreground">
-          <div>
-            Levels follow your recent scores: an average of {data.thresholds.up}% or more over your last {data.thresholds.window} tests (without a falling trend) moves you up; under {data.thresholds.down}% moves you down.
-            {p.dueAgain > 0 && ` ${p.dueAgain} question(s) waiting to be asked again.`}
-            {!p.profile.active && ` Training is paused for ${who} by the admin.`}
-          </div>
+          {readOnly && (
+            <div>
+              Levels follow recent scores: an average of {data.thresholds.up}% or more over the last {data.thresholds.window} tests (without a falling trend) moves up; under {data.thresholds.down}% moves down.
+              {p.dueAgain > 0 && ` ${p.dueAgain} question(s) waiting to be asked again.`}
+            </div>
+          )}
+          {!readOnly && !p.profile.active && <div>Training is paused for you by the admin.</div>}
           <div className="flex flex-wrap items-center gap-3 text-foreground">
             <span className="inline-flex items-center gap-1"><Trophy className="size-4 text-amber-500" /> {p.profile.points} points</span>
             <span>{p.profile.gameStreak} game day(s) in a row</span>
             {p.profile.badge && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{p.profile.badge}</span>}
           </div>
-          {p.levelHistory?.length > 0 && <div className="text-xs">Level changes: {p.levelHistory.map((h: any) => `${h.created_at.slice(0, 10)} ${h.from_level}→${h.to_level}`).join(', ')}</div>}
+          {readOnly && p.levelHistory?.length > 0 && <div className="text-xs">Level changes: {p.levelHistory.map((h: any) => `${h.created_at.slice(0, 10)} ${h.from_level}→${h.to_level}`).join(', ')}</div>}
           {!readOnly && p.gate?.notice && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-foreground">{p.gate.notice}</div>}
         </CardContent>
       </Card>
@@ -738,38 +772,40 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
       <Card>
         <CardHeader>
           <CardTitle>Today&apos;s lessons</CardTitle>
-          <CardDescription>Read (or watch) each one and press &quot;I have read today&apos;s lesson&quot;. Tomorrow&apos;s test asks about them.</CardDescription>
+          <CardDescription>Read (or watch) each one and press &quot;I have read today&apos;s lesson&quot;.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {p.lessons?.length ? p.lessons.map((l: any) => <Lesson key={l.id} l={l} open={!readOnly && !l.readAt} mine={!readOnly} testsOpen={testsOpen} onChange={onDone} />) : <div className="text-sm text-muted-foreground">Today&apos;s lessons are being prepared. This takes a few minutes; the page refreshes by itself.</div>}
+          {p.lessons?.length ? p.lessons.map((l: any) => <Lesson key={l.id} l={l} open={!readOnly && !l.readAt} mine={!readOnly} testsOpen={testsOpen} onChange={onDone} />) : <div className="text-sm text-muted-foreground">No lessons today (a test day or a rest day), or they are still being prepared.</div>}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Today&apos;s tests</CardTitle>
-          <CardDescription>On yesterday&apos;s lessons, plus questions answered wrong earlier.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {testsOpen ? (
-            p.tests.map((t: any) => (
-              <div key={t.id} className="space-y-2">
-                {t.kind === 'surprise' && <div className="rounded-md bg-violet-100 p-2 text-sm font-semibold text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">Surprise test! Questions from this week&apos;s lessons and earlier misses.</div>}
-                {readOnly ? <TestPreview test={t} /> : <Test key={t.id} test={t} onDone={onDone} />}
-              </div>
-            ))
-          ) : (
-            <div className="text-sm text-muted-foreground">No test waiting. The first test comes the morning after the first lessons.</div>
-          )}
-        </CardContent>
-      </Card>
+      {readOnly && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Today&apos;s test</CardTitle>
+            <CardDescription>What the person sees during the test (read only).</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {testsOpen ? (
+              p.tests.map((t: any) => (
+                <div key={t.id} className="space-y-2">
+                  {t.kind === 'surprise' && <div className="rounded-md bg-violet-100 p-2 text-sm font-semibold text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">Surprise test! Questions from this week&apos;s lessons and earlier misses.</div>}
+                  <TestPreview test={t} />
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-muted-foreground">No open test right now.</div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {readOnly && <Remarks email={p.email} remarks={p.remarks || []} onSaved={onDone} />}
 
-      {p.results.length > 0 && (
+      {readOnly && p.results.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>{readOnly ? 'Results' : 'My results'}</CardTitle>
+            <CardTitle>Results</CardTitle>
             <CardDescription>
               <Sparkline series={[...p.results].reverse().map((r: any) => r.percent)} />
             </CardDescription>

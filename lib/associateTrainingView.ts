@@ -67,6 +67,8 @@ function lessonOut(l: any, read?: string | null, openedAt?: string | null) {
     videos: extras.videos || [],
     service: extras.service || null,
     games: buildGames({ id: l.id, extras, questions: l.questions }),
+    // A short notes summary for quick revision (the lesson's key terms), built from the lesson itself.
+    terms: Array.isArray(extras.terms) ? extras.terms.slice(0, 8) : [],
     readAt: read ?? null,
     // For a viewer (admin or manager) only: when they opened it and how long it took to read.
     openedAt: openedAt ?? null,
@@ -97,10 +99,11 @@ async function personView(email: string, role: string, forViewer = false) {
     lesson: lessons.length ? lessonOut(lessons.find((l) => l.track === 'technical') || lessons[0]) : null,
     tests: open.map((t) => ({ id: t.id, day: t.day, kind: t.kind, total: t.total, questions: hidden(testQuestions(t)) })),
     test: open[0] ? { id: open[0].id, day: open[0].day, kind: open[0].kind, total: open[0].total, questions: hidden(testQuestions(open[0])) } : null,
-    results: results.map((r) => ({ id: r.id, day: r.day, level: r.level, score: r.score, total: r.total, status: r.status, kind: r.kind, percent: pct(r), ...(forViewer ? { tookMs: tookMs(r.opened_at, r.submitted_at), signals: json(r.signals, null) } : {}) })),
+    // A person does not see their own results; only the admin and managers do.
+    results: forViewer ? results.map((r) => ({ id: r.id, day: r.day, level: r.level, score: r.score, total: r.total, status: r.status, kind: r.kind, percent: pct(r), tookMs: tookMs(r.opened_at, r.submitted_at), signals: json(r.signals, null) })) : [],
     pastLessons: past.map((l) => ({ id: l.id, day: l.day, level: l.level, track: l.track, trackLabel: TRACK_LABEL[l.track as Track] || l.track, title: l.title, content_html: l.content_html, sources: json(l.sources, []) })),
     dueAgain: await prisma.training_misses.count({ where: { email, cleared: false } }),
-    levelHistory: await prisma.training_level_history.findMany({ where: { email }, orderBy: { id: 'desc' }, take: 20 }),
+    levelHistory: forViewer ? await prisma.training_level_history.findMany({ where: { email }, orderBy: { id: 'desc' }, take: 20 }) : [],
     remarks: forViewer ? await getRemarks(email) : [],
     gate: await trainingGate(email, role),
   };
@@ -288,7 +291,9 @@ export async function trainingView(me: { email: string; name: string; role: stri
   const only = viewer ? await visibleEmails(me) : new Set<string>();
   if (testId) {
     const t = await prisma.training_tests.findUnique({ where: { id: testId } });
-    const canSee = t && (t.email === me.email || (viewer && (!only || only.has(String(t.email).toLowerCase()))));
+    // Only the admin or a manager (of that person's team) may open a finished test; a person does not
+    // see their own results or answers.
+    const canSee = t && viewer && (!only || only.has(String(t.email).toLowerCase()));
     if (!canSee) return { status: 404, body: { error: 'Test not found' } };
     // 'marking' is unfinished too (it can go back to 'open', or stay there after a restart until the
     // next day): its answer key is not shown yet.
