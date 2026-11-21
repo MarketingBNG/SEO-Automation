@@ -163,6 +163,8 @@ export function actionFor(method: string, path: string): Action | null {
   if (/^\/api\/consent/.test(p)) return null;
   // Worklog (own current task, activity report): the route does its own checks and scoping.
   if (/^\/api\/worklog/.test(p)) return null;
+  // Zoho connect / status / callback (anyone signed in), and sync (admin-only, checked in the route).
+  if (/^\/api\/zoho-projects/.test(p)) return null;
   if (/^\/api\/seranking\/topup/.test(p)) return 'settings.change';
   // Post my blog: saving to Drafts is content work; posting live also needs blog.publish_now (checked
   // in lib/myBlog.ts, which knows whether the person asked to post or to save).

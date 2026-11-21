@@ -25,6 +25,7 @@ import { useRole } from '@/hooks/use-role';
 import { defaultAccess } from '@/lib/permissions';
 import { TabBoundary } from '@/components/shared/tab-boundary';
 import { ConsentGate } from '@/components/consent-gate';
+import { ZohoConnect } from '@/components/zoho-connect';
 
 // Each page's code loads the first time the page is opened, not all at start-up, so the dashboard
 // starts fast on low-end devices. The pages work exactly as before once loaded.
@@ -357,6 +358,7 @@ export default function Dashboard() {
         </div>
 
         <main className="min-w-0 flex-1 p-3 sm:p-6">
+          <ZohoConnect />
           {who.blocked && (
             <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm font-medium">
               Your account is blocked from taking actions. You can still look around. Ask an admin or your manager to unblock you.

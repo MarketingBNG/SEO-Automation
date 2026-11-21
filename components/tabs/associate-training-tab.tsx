@@ -10,6 +10,7 @@ import { ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Download, Gamepad2, Grad
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { SafeHtml, safeHref } from '@/components/shared/article';
+import { useRole } from '@/hooks/use-role';
 
 const fmtDay = (d?: string | null) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { dateStyle: 'medium', timeZone: 'UTC' }) : '');
 const fmtDur = (ms?: number | null) => {
@@ -643,9 +644,12 @@ function LiveTests() {
 // Work time: attendance and per-app activity from the device watcher, for the admin and managers.
 // Scoped by the server (a manager sees their team, not themselves; a person sees nothing).
 function WorkTime() {
+  const { role } = useRole();
+  const isAdmin = role === 'admin';
   const [rows, setRows] = useState<any[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [zoho, setZoho] = useState<Record<string, { busy?: boolean; msg?: string; ok?: boolean }>>({});
   useEffect(() => {
     let on = true;
     fetch('/api/worklog?report=1')
@@ -655,8 +659,21 @@ function WorkTime() {
     return () => { on = false; };
   }, []);
   const fmtT = (s: string | null) => (s ? new Date(s.replace(' ', 'T') + 'Z').toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '—');
+  async function logZoho(email: string) {
+    setZoho((z) => ({ ...z, [email]: { busy: true } }));
+    try {
+      const res = await fetch('/api/zoho-projects/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+      const j = await res.json().catch(() => ({}));
+      const r = j.result || {};
+      if (!res.ok) throw new Error(j.error || 'Failed');
+      setZoho((z) => ({ ...z, [email]: { ok: Boolean(r.ok), msg: r.ok ? `Logged ${r.hours}h` : r.reason || 'Not logged' } }));
+    } catch (e: any) {
+      setZoho((z) => ({ ...z, [email]: { ok: false, msg: e.message } }));
+    }
+  }
   if (err) return <div className="text-sm text-red-600">{err}</div>;
   if (!rows) return <Loader2 className="size-5 animate-spin" />;
+  const cols = isAdmin ? 8 : 7;
   return (
     <Card>
       <CardHeader>
@@ -669,7 +686,7 @@ function WorkTime() {
         ) : (
           <table className="w-full text-sm">
             <thead className="text-left text-muted-foreground">
-              <tr><th className="py-1">Person</th><th>Login</th><th>Logout</th><th>In office</th><th>Active</th><th>General (gap)</th><th /></tr>
+              <tr><th className="py-1">Person</th><th>Login</th><th>Logout</th><th>In office</th><th>Active</th><th>General (gap)</th>{isAdmin && <th>Zoho</th>}<th /></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
@@ -681,10 +698,21 @@ function WorkTime() {
                     <td>{fmtDur(r.spanMs) ?? '—'}</td>
                     <td>{fmtDur(r.activeMs) ?? '—'}</td>
                     <td>{fmtDur(r.gapMs) ?? '—'}</td>
+                    {isAdmin && (
+                      <td className="text-xs">
+                        {r.logged || zoho[r.email]?.ok ? (
+                          <span className="text-green-600">{zoho[r.email]?.msg || 'Logged ✓'}</span>
+                        ) : (
+                          <button className="underline disabled:opacity-50" disabled={zoho[r.email]?.busy} onClick={() => logZoho(r.email)}>
+                            {zoho[r.email]?.busy ? 'Logging…' : zoho[r.email]?.msg || 'Log to Zoho'}
+                          </button>
+                        )}
+                      </td>
+                    )}
                     <td className="text-right">{r.apps?.length > 0 && <button className="text-xs underline" onClick={() => setOpen(open === r.email ? null : r.email)}>{open === r.email ? 'hide' : 'apps'}</button>}</td>
                   </tr>
                   {open === r.email && (
-                    <tr><td colSpan={7} className="pb-2"><ul className="ml-4 list-disc text-xs text-muted-foreground">{r.apps.map((a: any, i: number) => <li key={i}>{a.app}: {fmtDur(a.ms)}</li>)}</ul></td></tr>
+                    <tr><td colSpan={cols} className="pb-2"><ul className="ml-4 list-disc text-xs text-muted-foreground">{r.apps.map((a: any, i: number) => <li key={i}>{a.app}: {fmtDur(a.ms)}</li>)}</ul></td></tr>
                   )}
                 </Fragment>
               ))}

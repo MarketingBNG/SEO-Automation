@@ -36,9 +36,10 @@ function cfg() {
   return { clientId, clientSecret, accountsUrl: accountsUrl.replace(/\/+$/, ''), redirectUri };
 }
 
-// The consent URL a person opens to connect their Zoho. state carries their email so the callback
-// stores the token under the right person.
-export function authUrl(email: string) {
+// The consent URL a person opens to connect their Zoho. The callback stores the token under the
+// person who is signed in to the dashboard (from the session), not from any value in the URL, so the
+// `state` parameter is left for the CSRF-state wrapper (app/api/_lib/oauthState) to fill.
+export function authUrl() {
   const { clientId, accountsUrl, redirectUri } = cfg();
   const url = new URL(`${accountsUrl}/oauth/v2/auth`);
   url.searchParams.set('scope', SCOPES);
@@ -47,7 +48,6 @@ export function authUrl(email: string) {
   url.searchParams.set('access_type', 'offline');
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('prompt', 'consent');
-  url.searchParams.set('state', email.toLowerCase());
   return url.toString();
 }
 
@@ -135,4 +135,47 @@ export async function logTime(email: string, projectId: string, day: string, hou
   });
   const log = res?.timelogs?.date?.[0]?.tasklogs?.[0] || res?.tasklogs?.[0] || null;
   return { ok: true, zohoLogId: log ? String(log.id_string || log.id) : null };
+}
+
+// Parse a stored UTC timestamp ("YYYY-MM-DD HH:MM:SS") into ms.
+const parseUtcMs = (s: any): number | null => {
+  const t = Date.parse(String(s || '').replace(' ', 'T') + 'Z');
+  return Number.isFinite(t) ? t : null;
+};
+
+// Log one person's hours for a day to their team's project General task. Hours = attendance span
+// (first watcher report to last). Runs once per day: if logged_at is already set, it does nothing.
+// Returns a small result object (never throws for the expected "nothing to do" cases).
+export async function syncPersonDay(email: string, day: string = istDay()) {
+  const who = email.toLowerCase();
+  if (!(await isConnected(who))) return { email: who, ok: false, reason: 'Zoho not connected' };
+  const member = await prisma.team_members.findUnique({ where: { email: who }, select: { team: true, role: true } });
+  if (!member || member.role === 'admin') return { email: who, ok: false, reason: 'not a tracked person' };
+  const projectId = member.team ? PROJECT_BY_TEAM[member.team] : null;
+  if (!projectId) return { email: who, ok: false, reason: `no project mapped for team "${member.team || '(none)'}"` };
+  const att = await prisma.work_attendance.findUnique({ where: { email_day: { email: who, day } } });
+  if (!att) return { email: who, ok: false, reason: `no attendance recorded on ${day}` };
+  if (att.logged_at) return { email: who, ok: false, reason: 'already logged', zohoLogId: att.zoho_log_id };
+  const first = parseUtcMs(att.first_at);
+  const last = parseUtcMs(att.last_at);
+  const ms = first !== null && last !== null && last > first ? last - first : 0;
+  const hours = Math.round((ms / 3600000) * 100) / 100;
+  if (hours <= 0) return { email: who, ok: false, reason: 'zero hours' };
+  const res = await logTime(who, projectId, day, hours, `Attendance ${day} (recorded by the activity watcher)`);
+  await prisma.work_attendance.update({ where: { email_day: { email: who, day } }, data: { logged_at: sqlNow(), zoho_log_id: res.zohoLogId || null } });
+  return { email: who, ok: true, hours, projectId, zohoLogId: res.zohoLogId || null };
+}
+
+// Log every tracked person's hours for a day (the once-a-day job; usually the previous day).
+export async function syncAllDay(day: string = istDay()) {
+  const people = await prisma.team_members.findMany({ where: { role: { not: 'admin' }, blocked: false }, select: { email: true } });
+  const out: any[] = [];
+  for (const p of people) {
+    try {
+      out.push(await syncPersonDay(p.email, day));
+    } catch (e: any) {
+      out.push({ email: p.email.toLowerCase(), ok: false, error: e.message });
+    }
+  }
+  return out;
 }
