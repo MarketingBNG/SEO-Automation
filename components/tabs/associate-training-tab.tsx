@@ -5,7 +5,7 @@
 // game round built from the same lessons. Everyone but the admin takes it; the admin and managers
 // also see the team report (marks, trend, levels, strengths and weak topics, CSV download).
 import { onScreen } from '@/components/shared/on-screen';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Download, Gamepad2, GraduationCap, Loader2, Pause, Play, RefreshCw, SkipBack, SkipForward, Trophy, Video, XCircle } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -640,6 +640,62 @@ function LiveTests() {
   );
 }
 
+// Work time: attendance and per-app activity from the device watcher, for the admin and managers.
+// Scoped by the server (a manager sees their team, not themselves; a person sees nothing).
+function WorkTime() {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  useEffect(() => {
+    let on = true;
+    fetch('/api/worklog?report=1')
+      .then((r) => r.json().then((j) => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => on && (ok ? setRows(j.report || []) : setErr(j.error || 'Failed')))
+      .catch((e) => on && setErr(String(e)));
+    return () => { on = false; };
+  }, []);
+  const fmtT = (s: string | null) => (s ? new Date(s.replace(' ', 'T') + 'Z').toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '—');
+  if (err) return <div className="text-sm text-red-600">{err}</div>;
+  if (!rows) return <Loader2 className="size-5 animate-spin" />;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Work time (today)</CardTitle>
+        <CardDescription>Attendance and what each person worked on, from the activity watcher. The person does not see this. Time not captured on the device (meetings, offline) goes to the General task in the timesheet.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {rows.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No activity recorded yet. It appears once the device watcher is installed and reporting.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-left text-muted-foreground">
+              <tr><th className="py-1">Person</th><th>Login</th><th>Logout</th><th>In office</th><th>Active</th><th>General (gap)</th><th /></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <Fragment key={r.email}>
+                  <tr className="border-t">
+                    <td className="py-1.5">{r.name || r.email}{r.team && <div className="text-xs capitalize text-muted-foreground">{r.team}</div>}</td>
+                    <td>{fmtT(r.firstAt)}</td>
+                    <td>{fmtT(r.lastAt)}</td>
+                    <td>{fmtDur(r.spanMs) ?? '—'}</td>
+                    <td>{fmtDur(r.activeMs) ?? '—'}</td>
+                    <td>{fmtDur(r.gapMs) ?? '—'}</td>
+                    <td className="text-right">{r.apps?.length > 0 && <button className="text-xs underline" onClick={() => setOpen(open === r.email ? null : r.email)}>{open === r.email ? 'hide' : 'apps'}</button>}</td>
+                  </tr>
+                  {open === r.email && (
+                    <tr><td colSpan={7} className="pb-2"><ul className="ml-4 list-disc text-xs text-muted-foreground">{r.apps.map((a: any, i: number) => <li key={i}>{a.app}: {fmtDur(a.ms)}</li>)}</ul></td></tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // The admin's or manager's remarks on a person (weekend review). The person does not see these.
 function Remarks({ email, remarks, onSaved }: { email: string; remarks: any[]; onSaved: () => void }) {
   const [text, setText] = useState('');
@@ -1054,7 +1110,7 @@ export default function AssociateTrainingTab() {
   const [err, setErr] = useState<string | null>(null);
   const [review, setReview] = useState<any>(null);
   const [person, setPerson] = useState<string>('');
-  const [view, setView] = useState<'mine' | 'team' | 'uic' | 'videos'>('mine');
+  const [view, setView] = useState<'mine' | 'team' | 'uic' | 'worktime'>('mine');
 
   const load = useCallback(async () => {
     try {
@@ -1113,6 +1169,7 @@ export default function AssociateTrainingTab() {
   const views: { key: typeof view; label: string }[] = [
     ...(data.trainee ? [{ key: 'mine' as const, label: 'My training' }] : []),
     ...(data.viewer ? [{ key: 'team' as const, label: 'Team report' }] : []),
+    ...(data.viewer ? [{ key: 'worktime' as const, label: 'Work time' }] : []),
     { key: 'uic', label: 'Know UIC' },
   ];
   const current = views.some((v) => v.key === view) ? view : views[0].key;
@@ -1143,6 +1200,7 @@ export default function AssociateTrainingTab() {
           </Card>
         </>
       )}
+      {current === 'worktime' && <WorkTime />}
       {current === 'uic' && <KnowUic cat={data.catalogue} canManage={data.canManage} onRefresh={() => admin('catalogue')} />}
       {reviewCard}
     </div>
