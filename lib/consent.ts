@@ -4,7 +4,7 @@ import prismaClient from './prisma';
 
 const prisma: any = prismaClient;
 
-export const CONSENT_VERSION = '1';
+export const CONSENT_VERSION = '2';
 export const CONSENT_TITLE = 'Before you start: how this laptop and dashboard work';
 // The plain, honest list the person reads and agrees to. Keep it truthful: whatever the system does
 // is here, nothing hidden. If the device setup changes what is recorded, change this and bump the
@@ -13,7 +13,7 @@ export const CONSENT_POINTS = [
   'Your attendance is recorded from when you sign in and sign out on this laptop.',
   'During work hours, which app or window is open and for how long is recorded, only to fill your timesheet. Screenshots, keystrokes and passwords are NOT recorded.',
   'Your Zoho timesheet is filled automatically from this.',
-  'This laptop is set to open only this dashboard, and the daily training must be completed.',
+  'During work hours, until you finish the day’s training (the lesson, and the test on test days), this company laptop stays on the training screen and other apps are not open. As soon as you click Finish/Complete, the laptop unlocks for the rest of the day. Sundays and holidays have no lesson.',
   'Your training lessons and tests, including the time taken and the answers, are reviewed by your manager and the admin.',
   'This information is visible to your employer.',
 ];
