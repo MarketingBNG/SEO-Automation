@@ -4,6 +4,14 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-21
+- (ops) Team Training groups people by team (Marketing or Automation; set it in Team & Roles). A manager now sees the training report, person pages and finished tests of their own team only; the admin still sees everyone.
+- (ops) Team Training report shows the admin and managers how long each lesson and test took, the full trail of answers picked and changed, and AI-use flags (pastes, tab-switches, time away) with a red "check" mark on a suspicious test. A person does not see these about their own test.
+- (ops) The admin (on anyone) and a manager (on their team) can add remarks on a person's training; each remark saves their level, recent average and whether they moved up that week. The person does not see them.
+- (ops) A "Live now" panel shows the admin and managers the tests being taken right now, refreshing every few seconds, with each person's current answers. The person taking the test does not see it.
+- (ops) Everyone except the admin accepts a one-time monitoring-terms screen before using the dashboard (attendance, work activity for the timesheet with no screenshots or keystrokes, training review, visible to the employer). Their acceptance is recorded with name, version and date; it shows once per person.
+- (ops) Groundwork for the per-task timesheet: each person's current task and the blocks of active time behind it are stored, and a per-person token lets the device activity watcher report time. The Zoho Projects connection, the task picker and the watcher itself are not live yet.
+
 ## 2026-11-20
 - (ops) The dashboard section "Associate Training" is now called "Team Training" (sidebar, access editor, the training lock message and the assistant). Only the name changed; the lessons, tests, levels, data and web addresses are the same.
 - (ops) Training for the whole team (everyone except the admin), every day: Technical knowledge, Know UIC (our services, how we work, the rules for each, built only from our own pages) and Marketing skills, at associate or manager level. Lessons and tests come with official sources, adaptive levels (up at 80% average, down under 50%), a weekly surprise test, game rounds, slide walkthroughs and checked YouTube videos (Videos library), and a team report with marks, growth and weak topics (CSV). Until today's lessons are read and tests submitted only Associate Training opens; nobody is locked when the day's training was not made, was made after 13:00 IST, or the person is blocked or paused.
