@@ -138,6 +138,13 @@ export async function todayEntries(email: string, day = istDay()) {
   return rows.map((r: any) => ({ id: r.id, taskId: r.task_id, taskName: r.task_name || (r.task_id ? null : 'Unassigned'), projectId: r.project_id, activeMs: r.active_ms, startedAt: r.started_at, endedAt: r.ended_at, logged: Boolean(r.logged_at), source: r.source }));
 }
 
+// Everyone who gets a device set up: the whole team except the admin (and not blocked). For the
+// admin's device-setup panel.
+export async function listTrainees() {
+  const rows = await prisma.team_members.findMany({ where: { role: { not: 'admin' }, blocked: false }, orderBy: [{ team: 'asc' }, { email: 'asc' }], select: { email: true, name: true, team: true } });
+  return rows.map((r: any) => ({ email: r.email, name: r.name, team: r.team }));
+}
+
 // The per-person watcher token (created once). Returned only to the admin during device setup.
 export async function ensureWorkToken(email: string) {
   const who = email.toLowerCase();

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMe } from '@/lib/auth';
 import { isViewer } from '@/lib/associateTrainingView';
-import { activityReport, canSetFor, ensureWorkToken, getCurrent, setCurrentTask, todayEntries } from '@/lib/worklog';
+import { activityReport, canSetFor, ensureWorkToken, getCurrent, listTrainees, setCurrentTask, todayEntries } from '@/lib/worklog';
 import { methodNotAllowed } from '../_lib/http';
 
 export const runtime = 'nodejs';
@@ -16,6 +16,10 @@ export async function GET(req: NextRequest) {
     if (!isViewer(me.role)) return NextResponse.json({ error: 'Only the admin or a manager can see the activity report.' }, { status: 403 });
     const day = String(req.nextUrl.searchParams.get('day') || '').trim() || undefined;
     return NextResponse.json({ report: await activityReport(me, day) });
+  }
+  if (req.nextUrl.searchParams.get('people')) {
+    if (me.role !== 'admin') return NextResponse.json({ error: 'Only the admin can set up devices.' }, { status: 403 });
+    return NextResponse.json({ people: await listTrainees() });
   }
   const person = String(req.nextUrl.searchParams.get('person') || '').toLowerCase() || me.email.toLowerCase();
   if (person !== me.email.toLowerCase() && !(await canSetFor(me, person))) return NextResponse.json({ error: 'Not allowed' }, { status: 403 });

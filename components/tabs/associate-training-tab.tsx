@@ -696,6 +696,58 @@ function WorkTime() {
   );
 }
 
+// Admin device-setup helper: for each person, get their watcher token and the ready-to-run command.
+function DeviceSetup() {
+  const [people, setPeople] = useState<any[] | null>(null);
+  const [tok, setTok] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let on = true;
+    fetch('/api/worklog?people=1').then((r) => r.json()).then((j) => on && setPeople(j.people || [])).catch(() => on && setPeople([]));
+    return () => { on = false; };
+  }, []);
+  async function show(email: string) {
+    setBusy(email);
+    setErr(null);
+    try {
+      const res = await fetch('/api/worklog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'token', email }) });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || 'Failed');
+      setTok((t) => ({ ...t, [email]: j.token }));
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://YOUR-DASHBOARD';
+  if (!people) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Device setup</CardTitle>
+        <CardDescription>For each person, get their watcher token and the command to run on their laptop (steps in device/README.md). Keep each token private; it only reports that person&apos;s activity.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {err && <div className="text-red-600">{err}</div>}
+        {people.length === 0 && <div className="text-muted-foreground">No people yet. Add them in Team &amp; Roles.</div>}
+        {people.map((p) => (
+          <div key={p.email} className="rounded-lg border p-2">
+            <div className="flex items-center justify-between gap-2">
+              <div><span className="font-medium">{p.name || p.email}</span> <span className="text-xs capitalize text-muted-foreground">{p.email}{p.team ? ` · ${p.team}` : ''}</span></div>
+              <Button size="sm" variant="outline" disabled={busy === p.email} onClick={() => show(p.email)}>{busy === p.email ? <Loader2 className="size-4 animate-spin" /> : tok[p.email] ? 'Show again' : 'Get token'}</Button>
+            </div>
+            {tok[p.email] && (
+              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs">{`powershell -ExecutionPolicy Bypass -File C:\\UIC\\uic-watcher.ps1 -Dashboard "${origin}" -Token "${tok[p.email]}"`}</pre>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 // The admin's or manager's remarks on a person (weekend review). The person does not see these.
 function Remarks({ email, remarks, onSaved }: { email: string; remarks: any[]; onSaved: () => void }) {
   const [text, setText] = useState('');
@@ -1200,7 +1252,12 @@ export default function AssociateTrainingTab() {
           </Card>
         </>
       )}
-      {current === 'worktime' && <WorkTime />}
+      {current === 'worktime' && (
+        <div className="space-y-6">
+          <WorkTime />
+          {data.canManage && <DeviceSetup />}
+        </div>
+      )}
       {current === 'uic' && <KnowUic cat={data.catalogue} canManage={data.canManage} onRefresh={() => admin('catalogue')} />}
       {reviewCard}
     </div>
