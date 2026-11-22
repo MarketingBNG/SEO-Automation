@@ -33,10 +33,11 @@ export async function proxy(req: NextRequest) {
       : NextResponse.json({ error: 'The work token only reports activity.' }, { status: 403 });
   }
 
-  // SEB pilot: the locked-down training browser authenticates with its own short-lived handoff code and
-  // an httpOnly SEB session cookie, not a Google session. These routes enforce that themselves. The
-  // handoff MINT endpoint still needs a signed-in Google session, so it is not bypassed here.
-  if (pathname.startsWith('/api/seb/') && pathname !== '/api/seb/handoff') {
+  // SEB pilot: the locked-down training browser authenticates with its own short-lived handoff code /
+  // enrollment credential and an httpOnly SEB session cookie, not a Google session. These routes enforce
+  // that themselves. The handoff MINT and the admin (enrollment revoke/list) endpoints still need a
+  // signed-in Google session, so they are not bypassed here.
+  if (pathname.startsWith('/api/seb/') && pathname !== '/api/seb/handoff' && !pathname.startsWith('/api/seb/admin')) {
     return NextResponse.next();
   }
 

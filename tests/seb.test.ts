@@ -15,6 +15,7 @@ const { trainingGate } = require('../lib/trainingGate') as typeof import('../lib
 const { enqueuePriorDays, processQueue } = require('../lib/timesheetSync') as typeof import('../lib/timesheetSync');
 const settings = require('../lib/settings') as typeof import('../lib/settings');
 const { sebTodayItem } = require('../lib/associateTrainingView') as typeof import('../lib/associateTrainingView');
+const enroll = require('../lib/sebEnroll') as typeof import('../lib/sebEnroll');
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const Q = '[{"id":"q1","q":"W?","options":["a","b","c","d"],"answer":0,"explain":"e"}]';
@@ -130,6 +131,45 @@ test('failed completion save: submitTest throws for an unknown test (finish retu
   await prisma.team_members.create({ data: { email: 'x@x.com', name: 'x', role: 'user', blocked: false } });
   await prisma.training_profiles.create({ data: { email: 'x@x.com', name: 'x', level: 1, lesson_ids: '{}', active: true } });
   await assert.rejects(() => submitTest('x@x.com', 999999, {}), /not found|no test|Test/i);
+});
+
+// ---- one-time device enrollment: silent re-auth, bound to the Windows user, revocable ----
+const SID = 'S-1-5-21-111-222-333-1001';
+test('enrollment: exchange returns the email for the same Windows user (silent re-auth)', { skip: !db }, async () => {
+  await wipe();
+  const { id, secret } = await enroll.createEnrollment('en@x.com', SID, 'VM-PC');
+  assert.equal(await enroll.exchangeEnrollment(id, secret, SID), 'en@x.com');
+  // repeatable (each launch/reboot) — no code needed
+  assert.equal(await enroll.exchangeEnrollment(id, secret, SID), 'en@x.com');
+});
+
+test('enrollment: a different Windows user is rejected (ask for a code)', { skip: !db }, async () => {
+  await wipe();
+  const { id, secret } = await enroll.createEnrollment('en@x.com', SID);
+  assert.equal(await enroll.exchangeEnrollment(id, secret, 'S-1-5-21-999-OTHER-2002'), null);
+});
+
+test('enrollment: wrong credential is rejected', { skip: !db }, async () => {
+  await wipe();
+  const { id } = await enroll.createEnrollment('en@x.com', SID);
+  assert.equal(await enroll.exchangeEnrollment(id, 'not-the-secret', SID), null);
+});
+
+test('enrollment: revoked -> rejected (launcher falls back to Check In)', { skip: !db }, async () => {
+  await wipe();
+  const { id, secret } = await enroll.createEnrollment('en@x.com', SID);
+  assert.equal(await enroll.revokeEnrollment(id), 1);
+  assert.equal(await enroll.exchangeEnrollment(id, secret, SID), null);
+});
+
+test('enrollment: re-enrolling the same device-user revokes the previous credential', { skip: !db }, async () => {
+  await wipe();
+  const first = await enroll.createEnrollment('en@x.com', SID);
+  const second = await enroll.createEnrollment('en@x.com', SID);
+  assert.equal(await enroll.exchangeEnrollment(first.id, first.secret, SID), null, 'old credential revoked');
+  assert.equal(await enroll.exchangeEnrollment(second.id, second.secret, SID), 'en@x.com');
+  const list = await enroll.listEnrollments('en@x.com');
+  assert.equal(list.filter((e: any) => e.active).length, 1, 'one active enrollment');
 });
 
 // ---- no-training auto-quit on /seb (Sunday): quit URL + read-only (no completion, no sync) ----

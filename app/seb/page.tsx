@@ -26,7 +26,24 @@ export default function SebPage() {
     setToday(j);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // On launch the Windows launcher opens /seb#code=<fresh single-use code> (from the enrollment
+  // exchange). Redeem it silently for the SEB session, scrub it from the address bar, then load. If no
+  // code and no session, the manual Check In screen is shown.
+  useEffect(() => {
+    (async () => {
+      try {
+        const h = typeof window !== 'undefined' ? window.location.hash : '';
+        const m = h ? /[#&]code=([^&]+)/.exec(h) : null;
+        if (m) {
+          const c = decodeURIComponent(m[1]);
+          try { history.replaceState(null, '', window.location.pathname); } catch { /* ignore */ }
+          await fetch('/api/seb/check-in', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: c }) }).catch(() => {});
+        }
+      } finally {
+        await load();
+      }
+    })();
+  }, [load]);
 
   // On a no-training day (e.g. Sunday) quit SEB to the desktop. Read-only: nothing is marked complete
   // and no timesheet sync is triggered.
@@ -42,6 +59,14 @@ export default function SebPage() {
       const r = await fetch('/api/seb/check-in', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.trim() }) });
       const j = await r.json();
       if (!r.ok) { setMsg(j.error || 'Check in failed.'); return; }
+      await load();
+    } finally { setBusy(false); }
+  }
+
+  async function punch() {
+    setBusy(true); setMsg(null);
+    try {
+      await fetch('/api/seb/punch', { method: 'POST' }).then((r) => r.json()).catch(() => ({}));
       await load();
     } finally { setBusy(false); }
   }
@@ -81,7 +106,12 @@ export default function SebPage() {
   if (!today) return <div className={wrap}><div className={card}>Loading…</div></div>;
 
   const att = today.attendance?.status;
-  const attLine = att && att !== 'none' ? <div className="mb-3 text-xs text-slate-400">Attendance: {att}{today.attendance?.reason ? ` — ${today.attendance.reason}` : ''}</div> : null;
+  const attLine = (
+    <div className="mb-3 flex items-center justify-between gap-2 text-xs text-slate-400">
+      <span>Attendance: {att && att !== 'none' ? att : 'not checked in'}{today.attendance?.reason ? ` — ${today.attendance.reason}` : ''}</span>
+      {att !== 'confirmed' && <button disabled={busy} onClick={punch} className="shrink-0 rounded bg-indigo-500 px-2 py-1 text-xs text-white disabled:opacity-50">{busy ? '…' : 'Check In'}</button>}
+    </div>
+  );
 
   const info = (t: string) => <div className={wrap}><div className={card}>{attLine}<h1 className="text-xl font-semibold">{t}</h1></div></div>;
   if (today.status === 'before-window') return info('Training opens at 9:00 AM IST.');

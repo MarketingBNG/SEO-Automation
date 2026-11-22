@@ -80,3 +80,12 @@ can always get back in.
 - `Unregister-ScheduledTask -TaskName "UIC Watcher" -Confirm:$false`
 - `Unregister-ScheduledTask -TaskName "UIC Kiosk" -Confirm:$false`
 - Turn off Assigned Access and auto-login in Settings.
+
+## SEB enrollment launcher (one-time code, then silent)
+`uic-seb-launcher.ps1` replaces typing a code every day. First run: enter the one-time code from
+`/seb-code` (regular browser); the launcher links this employee to this Windows user, stores a revocable
+credential with DPAPI (per Windows user), and opens SEB. Later runs/reboots exchange the stored
+credential silently for a fresh single-use code and open SEB — no code needed. A code is asked again only
+if the enrollment is revoked (admin, `/api/seb/admin`), the credential is wrong, or a different Windows
+user signs in. DEVICE-SIDE and NOT tested on Windows here; test on a spare/VM. The durable credential
+never appears in a URL; SEB only ever receives a fresh single-use code in the URL fragment.
