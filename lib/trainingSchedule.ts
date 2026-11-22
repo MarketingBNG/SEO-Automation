@@ -1,31 +1,48 @@
-// The weekly training rhythm. The normal week is: Monday and Tuesday lessons, Wednesday a test on
-// them, Thursday and Friday lessons, Saturday a test on them, Sunday off. Before the pattern starts
-// (the first week) it is lessons only, no tests. Surprise tests begin a week after that.
+// The training rhythm.
 //
-// It is controlled by two settings (dates, YYYY-MM-DD), with the defaults below:
-//   training_pattern_start  - the Monday the lesson/test pattern begins (before it: lessons only)
-//   training_surprise_start - the Monday surprise tests begin
-// Set either to an empty string to turn the whole schedule off and go back to a lesson and a test
-// every day (this is what the tests do, and the old behaviour).
+// Week 1 (the launch week, the week of training_pattern_start): two tests, on Wednesday and Saturday,
+// lessons on the other working days.
+// Week 2 onward: still two tests a week, but on two UNANNOUNCED days chosen per person per week (not
+// the same day for everyone, not a fixed day). Lessons on the other working days.
+// A day is a lesson day OR a test day, never both. Sunday is off (no lesson, no test).
+// Once a month (from training_grand_start), the last Tuesday of the month is a GRAND test for everyone
+// on everything learned so far; that day is a test day (no lesson, no weekly test).
+//
+// Controlled by three settings (dates, YYYY-MM-DD), with the defaults below:
+//   training_pattern_start  - the Monday the rhythm begins (week 1 = this week; before it: lessons only)
+//   training_surprise_start - kept for compatibility; the random test days begin the week after week 1
+//   training_grand_start    - the first day from which the monthly grand test runs (defaults to next month)
+// Set training_pattern_start to an empty string to turn the schedule off and go back to a lesson and a
+// test every day (the old behaviour; this is what the DB tests use).
+import crypto from 'crypto';
 
 export const DEFAULT_PATTERN_START = '2026-11-23'; // Monday
 export const DEFAULT_SURPRISE_START = '2026-11-30'; // the Monday after
-const LESSON_DOW = [1, 2, 4, 5]; // Mon, Tue, Thu, Fri
-const TEST_DOW = [3, 6]; // Wed, Sat
+export const DEFAULT_GRAND_START = '2026-12-01'; // next month: the monthly grand test starts then
+const LESSON_DOW = [1, 2, 4, 5]; // Mon, Tue, Thu, Fri (used only for the old shared helpers)
+const TEST_DOW = [3, 6]; // Wed, Sat (week 1, and the old shared helpers)
+const WORK_DOW = [1, 2, 3, 4, 5, 6]; // Mon..Sat (Sunday off)
 
 const dow = (day: string) => new Date(`${day}T00:00:00Z`).getUTCDay(); // 0 = Sunday
+// The Monday (YYYY-MM-DD) of the week containing day.
+function mondayOf(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
 
-export type Schedule = { on: boolean; patternStart: string; surpriseStart: string };
+export type Schedule = { on: boolean; patternStart: string; surpriseStart: string; grandStart: string };
 
 export async function getSchedule(): Promise<Schedule> {
   const settings = await import('./settings');
   const patternStart = String((await settings.get('training_pattern_start')) ?? DEFAULT_PATTERN_START).trim();
   const surpriseStart = String((await settings.get('training_surprise_start')) ?? DEFAULT_SURPRISE_START).trim();
-  return { on: Boolean(patternStart), patternStart, surpriseStart };
+  const grandStart = String((await settings.get('training_grand_start')) ?? DEFAULT_GRAND_START).trim();
+  return { on: Boolean(patternStart), patternStart, surpriseStart, grandStart };
 }
 
-// A day lessons are made. Schedule off: every day (old behaviour). Before the pattern: every day but
-// Sunday. In the pattern: Monday, Tuesday, Thursday, Friday.
+// --- The old shared helpers (kept for the gate's "is this a working day" check and existing tests).
+// isLessonDay OR isTestDay is still exactly "a non-Sunday working day", which is all the gate needs.
 export function isLessonDay(day: string, s: Schedule): boolean {
   if (!s.on) return true;
   const d = dow(day);
@@ -33,17 +50,57 @@ export function isLessonDay(day: string, s: Schedule): boolean {
   if (day < s.patternStart) return true;
   return LESSON_DOW.includes(d);
 }
-
-// A day a test is set. Schedule off: every day. Before the pattern: never. In the pattern: Wednesday
-// (on Monday + Tuesday lessons) and Saturday (on Thursday + Friday lessons).
 export function isTestDay(day: string, s: Schedule): boolean {
   if (!s.on) return true;
   if (day < s.patternStart) return false;
   return TEST_DOW.includes(dow(day));
 }
-
-// Whether surprise tests have started. Schedule off: yes (old behaviour).
 export function surpriseOn(day: string, s: Schedule): boolean {
   if (!s.on) return true;
   return Boolean(s.surpriseStart) && day >= s.surpriseStart;
+}
+
+// --- The per-person rhythm that actually drives what each person gets each day. ---
+
+// The two weekday numbers (1=Mon..6=Sat) that are this person's test days for the week containing day.
+// Week 1 is fixed to Wed + Sat; later weeks are two unannounced days, stable within the week, keyed with
+// the server secret so they cannot be worked out from the email.
+export function testWeekdaysFor(email: string, day: string, s: Schedule, secret = process.env.NEXTAUTH_SECRET || 'training'): number[] {
+  const ws = mondayOf(day);
+  if (ws === mondayOf(s.patternStart)) return [...TEST_DOW]; // week 1: Wed + Sat
+  const h = crypto.createHmac('sha256', secret).update(`test|${email.toLowerCase()}|${ws}`).digest();
+  const first = WORK_DOW[h[0] % WORK_DOW.length];
+  let second = WORK_DOW[h[1] % WORK_DOW.length];
+  if (second === first) second = WORK_DOW[(WORK_DOW.indexOf(first) + 1) % WORK_DOW.length];
+  return [first, second].sort((a, b) => a - b);
+}
+
+// Is day one of this person's two test days this week? (Sunday never; before the launch never; schedule
+// off = a test every day, the old behaviour.)
+export function isTestDayFor(email: string, day: string, s: Schedule, secret?: string): boolean {
+  if (!s.on) return true;
+  if (dow(day) === 0) return false;
+  if (day < s.patternStart) return false;
+  return testWeekdaysFor(email, day, s, secret).includes(dow(day));
+}
+
+// A lesson day for this person: a non-Sunday working day that is not one of their test days. (Schedule
+// off = a lesson every day, the old behaviour.)
+export function isLessonDayFor(email: string, day: string, s: Schedule, secret?: string): boolean {
+  if (!s.on) return true;
+  if (dow(day) === 0) return false;
+  return !isTestDayFor(email, day, s, secret);
+}
+
+// The monthly grand test: the last Tuesday of the month, from grandStart onward. Same day for everyone.
+function isLastTuesdayOfMonth(day: string): boolean {
+  const d = new Date(`${day}T00:00:00Z`);
+  if (d.getUTCDay() !== 2) return false; // Tuesday
+  const nextWeek = new Date(d);
+  nextWeek.setUTCDate(d.getUTCDate() + 7);
+  return nextWeek.getUTCMonth() !== d.getUTCMonth(); // no Tuesday next week in the same month
+}
+export function isGrandTestDay(day: string, s: Schedule): boolean {
+  if (!s.on || !s.grandStart || day < s.grandStart) return false;
+  return isLastTuesdayOfMonth(day);
 }

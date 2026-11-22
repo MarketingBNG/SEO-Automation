@@ -22,7 +22,7 @@ import { onceADay, waitsForAi, AnotherRunGoing } from './onceADay';
 import { sqlNow } from './time';
 import { LEVELS, TRACKS, audienceFor, isTrainee, lessonIdsOf, buildGames, cleanVideos, lessonPrompt, questionsFor, writtenFor, scoreGame, systemPrompt, topicFor, type Audience, type GameAnswers, type Track } from './trainingContent';
 import { getCatalogue, serviceForDay } from './uicCatalogue';
-import { getSchedule, isLessonDay, isTestDay, surpriseOn } from './trainingSchedule';
+import { getSchedule, isTestDayFor, isLessonDayFor, isGrandTestDay } from './trainingSchedule';
 
 // Untyped on purpose: the Prisma query types of these many queries push the build's type check past
 // its memory limit (see lib/assistant/tabTools.ts). The tests cover the queries.
@@ -42,6 +42,7 @@ export const PASS_PERCENT = UP_AVG;
 const REPEAT_AFTER_DAYS = 2;
 const MAX_REPEATS_PER_TEST = 5;
 const SURPRISE_QUESTIONS = 8;
+const GRAND_QUESTIONS = 20; // the monthly grand test is the biggest
 
 // kind 'written' is a typed-answer question: options is empty, answer is -1, and model + points are
 // the correct answer and the points a full answer needs, used by the AI to grade the typed reply.
@@ -212,8 +213,16 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
     for (const q of JSON.parse(t.questions) as Question[]) await addMiss(email, q, day);
   }
   const sched = await getSchedule();
+  // One day is a lesson OR a test, never both. The monthly grand test (last Tuesday from grand_start)
+  // takes over its day. Week 1's tests are Wed + Sat; from week 2 each person gets two unannounced test
+  // days a week. Lessons fall on the remaining working days. Sunday is off.
+  const grandToday = isGrandTestDay(day, sched);
+  const testToday = !grandToday && isTestDayFor(email, day, sched);
+  // isLessonDayFor already excludes a person's test days when the schedule is on, and is true every day
+  // when the schedule is off (old behaviour: a lesson and a test the same day).
+  const lessonToday = !grandToday && isLessonDayFor(email, day, sched);
   const current = lessonIdsOf(p);
-  if (isTestDay(day, sched) && !(await prisma.training_tests.findUnique({ where: { email_day_kind: { email, day, kind: 'daily' } } }))) {
+  if (testToday && !(await prisma.training_tests.findUnique({ where: { email_day_kind: { email, day, kind: 'daily' } } }))) {
     // The lessons since the last test that this person has not been tested on yet (all tracks at their
     // level and audience). In the weekly pattern a Wednesday test covers Monday and Tuesday, a Saturday
     // test covers Thursday and Friday. With the schedule off it is just yesterday's lessons.
@@ -238,13 +247,13 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
       await prisma.training_tests.create({ data: { email, day, level: p.level, kind: 'daily', lesson_id: tested[0] || null, lesson_ids: tested.length ? `,${tested.join(',')},` : ',', questions: JSON.stringify(questions), total: questions.length } }).catch(() => {});
     }
   }
-  if (surpriseOn(day, sched) && isSurpriseDay(email, day)) await prepareSurprise(email, day, p.level, audience);
+  if (grandToday) await prepareGrand(email, day, p.level, audience);
 
   // Today's lessons, one per track, on a lesson day only. A track that fails (AI paused) is tried again
   // on a later run; the others are kept. On a test day (or Sunday) no new lessons are made and the
   // person keeps the lessons they already have.
   let firstError: any = null;
-  if (isLessonDay(day, sched)) {
+  if (lessonToday) {
     const lessons = { ...current };
     const have = await prisma.training_lessons.findMany({ where: { id: { in: Object.values(current).filter((x): x is number => Boolean(x)) } }, select: { id: true, day: true } });
     for (const track of TRACKS) {
@@ -276,6 +285,19 @@ export async function prepareSurprise(email: string, day: string, level: number,
   const older = await prisma.training_misses.findMany({ where: { email, cleared: false, due_day: { gt: day } }, orderBy: { due_day: 'asc' }, take: 3 });
   const questions = [...seededPick(pool, SURPRISE_QUESTIONS, `${email}|${day}`), ...older.map((m) => ({ ...(JSON.parse(m.question) as Question), repeat: true }))];
   return prisma.training_tests.create({ data: { email, day, level, kind: 'surprise', questions: JSON.stringify(questions), total: questions.length, lesson_ids: `,${week.map((w) => w.id).join(',')},` } }).catch(() => null);
+}
+
+// The monthly grand test: a bigger test on everything learned so far (the person's past lessons at or
+// below their level, over the last ~2 months), once a month on the last Tuesday. Nothing when there are
+// no past lessons yet.
+export async function prepareGrand(email: string, day: string, level: number, audience: Audience) {
+  const monthStart = day.slice(0, 7) + '-01';
+  if (await prisma.training_tests.findFirst({ where: { email, kind: 'grand', day: { gte: monthStart } }, select: { id: true } })) return null;
+  const past = await prisma.training_lessons.findMany({ where: { audience, level: { lte: level }, day: { lt: day, gte: addDays(day, -60) } } });
+  const pool: Question[] = past.flatMap((l) => (JSON.parse(l.questions) as Question[]).map((q) => ({ ...q, id: `g-${q.id}`, track: q.track || (l.track as Track), topic: q.topic || l.topic || l.title })));
+  if (!pool.length) return null;
+  const questions = seededPick(pool, GRAND_QUESTIONS, `${email}|${day}|grand`);
+  return prisma.training_tests.create({ data: { email, day, level, kind: 'grand', questions: JSON.stringify(questions), total: questions.length, lesson_ids: `,${past.map((w) => w.id).join(',')},` } }).catch(() => null);
 }
 
 async function addMiss(email: string, q: Question, today: string) {
