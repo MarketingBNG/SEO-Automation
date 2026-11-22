@@ -614,7 +614,7 @@ function LiveTests() {
           <div key={t.id} className="rounded-lg border">
             <button className="flex w-full items-center justify-between gap-2 p-3 text-left" onClick={() => setOpenId(openId === t.id ? null : t.id)}>
               <span className="text-sm font-medium">
-                {t.name} <span className="font-normal text-muted-foreground">· {t.kind === 'surprise' ? 'Surprise test' : 'Daily test'} · {t.answered}/{t.total} answered</span>
+                {t.name} <span className="font-normal text-muted-foreground">· {t.kind === 'grand' ? 'Brain Test' : t.kind === 'surprise' ? 'Surprise test' : 'Daily test'} · {t.answered}/{t.total} answered</span>
               </span>
               <ChevronDown className={`size-4 shrink-0 transition ${openId === t.id ? 'rotate-180' : ''}`} />
             </button>
@@ -850,7 +850,7 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
         <CardContent className="space-y-6">
           {p.tests.map((t: any) => (
             <div key={t.id} className="space-y-2">
-              {t.kind === 'surprise' && <div className="rounded-md bg-violet-100 p-2 text-sm font-semibold text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">Surprise test! Questions from this week&apos;s lessons and earlier misses.</div>}
+              {t.kind === 'surprise' && <div className="rounded-md bg-violet-100 p-2 text-sm font-semibold text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">Surprise test! Questions from this week&apos;s lessons and earlier misses.</div>}{t.kind === 'grand' && <div className="rounded-md bg-fuchsia-100 p-2 text-sm font-semibold text-fuchsia-900 dark:bg-fuchsia-900/40 dark:text-fuchsia-200">Brain Test! Everything you have learned so far.</div>}
               <Test key={t.id} test={t} onDone={onDone} />
             </div>
           ))}
@@ -916,7 +916,7 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
             {testsOpen ? (
               p.tests.map((t: any) => (
                 <div key={t.id} className="space-y-2">
-                  {t.kind === 'surprise' && <div className="rounded-md bg-violet-100 p-2 text-sm font-semibold text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">Surprise test! Questions from this week&apos;s lessons and earlier misses.</div>}
+                  {t.kind === 'surprise' && <div className="rounded-md bg-violet-100 p-2 text-sm font-semibold text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">Surprise test! Questions from this week&apos;s lessons and earlier misses.</div>}{t.kind === 'grand' && <div className="rounded-md bg-fuchsia-100 p-2 text-sm font-semibold text-fuchsia-900 dark:bg-fuchsia-900/40 dark:text-fuchsia-200">Brain Test! Everything you have learned so far.</div>}
                   <TestPreview test={t} />
                 </div>
               ))

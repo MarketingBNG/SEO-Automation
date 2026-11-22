@@ -121,3 +121,17 @@ export function isGrandTestDay(day: string, s: Schedule): boolean {
   if (!s.on || !s.grandStart || day < s.grandStart) return false;
   return isLastTuesdayOfMonth(day);
 }
+
+// The test dates (YYYY-MM-DD) in the week containing day, for the admin/manager view only (never the
+// employee's). Normal test days plus the grand test day, if any.
+export function testDatesForWeek(email: string, day: string, s: Schedule, secret?: string): string[] {
+  const mon = mondayOf(day);
+  const out: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(`${mon}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + i); // Mon..Sat
+    const ds = d.toISOString().slice(0, 10);
+    if (isTestDayFor(email, ds, s, secret) || isGrandTestDay(ds, s)) out.push(ds);
+  }
+  return out;
+}

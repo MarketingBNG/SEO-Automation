@@ -34,6 +34,18 @@ test('exactly 2 tests every week, for every person (including grand weeks)', () 
   }
 });
 
+test('every week has exactly 4 lessons and 2 tests (6 working days, Sunday off)', () => {
+  for (const monday of ['2026-11-23', '2026-11-30', '2026-12-07', '2026-12-28']) {
+    for (const email of emails) {
+      const lessons = week(monday).filter((d) => isLessonDayFor(email, d, s, SEC)).length;
+      const tests = week(monday).filter((d) => isTest(email, d, s, SEC)).length;
+      assert.equal(lessons, 4, `${email} week ${monday} has ${lessons} lessons`);
+      assert.equal(tests, 2, `${email} week ${monday} has ${tests} tests`);
+      assert.equal(lessons + tests, 6, 'Mon-Sat');
+    }
+  }
+});
+
 test('grand week: exactly 1 normal test + the grand test = 2', () => {
   const monday = '2026-12-28'; // week holds the last Tuesday of Dec (grand)
   for (const email of emails) {

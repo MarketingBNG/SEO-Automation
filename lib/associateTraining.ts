@@ -223,10 +223,13 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
   const lessonToday = !grandToday && isLessonDayFor(email, day, sched);
   const current = lessonIdsOf(p);
   if (testToday && !(await prisma.training_tests.findUnique({ where: { email_day_kind: { email, day, kind: 'daily' } } }))) {
-    // The lessons since the last test that this person has not been tested on yet (all tracks at their
-    // level and audience). In the weekly pattern a Wednesday test covers Monday and Tuesday, a Saturday
-    // test covers Thursday and Friday. With the schedule off it is just yesterday's lessons.
-    const recent = await prisma.training_lessons.findMany({ where: { level: p.level, audience, day: { lt: day, gte: addDays(day, -8) } }, orderBy: [{ day: 'asc' }, { track: 'asc' }] });
+    // The lessons since this person's last test that they have not been tested on yet (all tracks at
+    // their level and audience). Test days are now per person and can be more than a week apart, so the
+    // window runs from the last test (any kind), not a fixed number of days back. With no prior test, it
+    // falls back to the last 8 days. A lesson is still only ever tested once (the filter below).
+    const lastTest = await prisma.training_tests.findFirst({ where: { email, day: { lt: day } }, orderBy: { day: 'desc' }, select: { day: true } });
+    const since = lastTest ? lastTest.day : addDays(day, -8);
+    const recent = await prisma.training_lessons.findMany({ where: { level: p.level, audience, day: { lt: day, gte: since } }, orderBy: [{ day: 'asc' }, { track: 'asc' }] });
     // A lesson is tested once: when a day's new lesson could not be made, the old one is not tested again.
     const fresh: Question[] = [];
     const tested: number[] = [];

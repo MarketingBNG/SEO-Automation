@@ -9,6 +9,7 @@ import { istDay } from '@/lib/topics';
 import { DOWN_AVG, LEVELS, PASS_PERCENT, UP_AVG, WINDOW, gameStreak, isTrainee, lessonIdsOf, testQuestions, weekStart, type Question } from '@/lib/associateTraining';
 import { TRACKS, TRACK_LABEL, audienceFor, badgeFor, buildGames, buildSlides, type Track } from '@/lib/trainingContent';
 import { trainingGate } from '@/lib/trainingGate';
+import { getSchedule, testDatesForWeek } from '@/lib/trainingSchedule';
 
 // Untyped on purpose: the Prisma query types of these many queries push the build's type check past
 // its memory limit (see lib/assistant/tabTools.ts). The tests cover the queries.
@@ -192,6 +193,7 @@ export type ReportRow = {
   levels: { at: string; from: number; to: number; reason: string | null }[];
   last: { id: number; day: string; percent: number; status: string } | null;
   dueAgain: number;
+  testDays: string[]; // this week's test dates for this person (admin/manager view only; never the employee)
 };
 
 // Per track and per topic: how many questions were answered right, from the stored tests.
@@ -226,6 +228,7 @@ export async function teamReport(only?: Set<string> | null): Promise<ReportRow[]
   const team = await prisma.team_members.findMany({ select: { email: true, role: true } });
   const roleOf = new Map<string, string>(team.map((t: any) => [t.email.toLowerCase(), t.role]));
   const people = (await prisma.training_profiles.findMany({ orderBy: { email: 'asc' } })).filter((p) => isTrainee(roleOf.get(p.email) || 'user') && (!only || only.has(p.email.toLowerCase())));
+  const sched = await getSchedule();
   const out: ReportRow[] = [];
   for (const p of people) {
     const tests = await prisma.training_tests.findMany({ where: { email: p.email, status: { notIn: ['open', 'marking'] } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 60 });
@@ -257,6 +260,7 @@ export async function teamReport(only?: Set<string> | null): Promise<ReportRow[]
       levels: (await prisma.training_level_history.findMany({ where: { email: p.email }, orderBy: { id: 'asc' } })).map((h) => ({ at: h.created_at, from: h.from_level, to: h.to_level, reason: h.reason })),
       last: tests[0] ? { id: tests[0].id, day: tests[0].day, percent: pct(tests[0]), status: tests[0].status } : null,
       dueAgain: await prisma.training_misses.count({ where: { email: p.email, cleared: false } }),
+      testDays: testDatesForWeek(p.email, istDay(), sched),
     });
   }
   return out;
