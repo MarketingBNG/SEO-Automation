@@ -62,16 +62,32 @@ export function surpriseOn(day: string, s: Schedule): boolean {
 
 // --- The per-person rhythm that actually drives what each person gets each day. ---
 
-// The two weekday numbers (1=Mon..6=Sat) that are this person's test days for the week containing day.
-// Week 1 is fixed to Wed + Sat; later weeks are two unannounced days, stable within the week, keyed with
-// the server secret so they cannot be worked out from the email.
+// The Tuesday of day's week, and (if the monthly grand test falls that week) that grand day.
+function tuesdayOfWeek(day: string): string {
+  const d = new Date(`${mondayOf(day)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+function grandDayOfWeek(day: string, s: Schedule): string | null {
+  const tue = tuesdayOfWeek(day);
+  return isGrandTestDay(tue, s) ? tue : null;
+}
+
+// The NORMAL (weekly) test weekday numbers (1=Mon..6=Sat) for this person's week. Week 1 is fixed to
+// Wed + Sat; later weeks are unannounced days, stable within the week, keyed with the server secret.
+// A week that holds the monthly grand test gets only ONE normal test (the grand is the second), so the
+// week still has exactly two tests. The grand day (a Tuesday) is never also a normal test day.
 export function testWeekdaysFor(email: string, day: string, s: Schedule, secret = process.env.NEXTAUTH_SECRET || 'training'): number[] {
   const ws = mondayOf(day);
-  if (ws === mondayOf(s.patternStart)) return [...TEST_DOW]; // week 1: Wed + Sat
+  const grandTue = grandDayOfWeek(day, s); // non-null only in the grand week
+  if (ws === mondayOf(s.patternStart) && !grandTue) return [...TEST_DOW]; // week 1: Wed + Sat
+  const count = grandTue ? 1 : 2; // grand week: one normal test + the grand
+  const pool = grandTue ? WORK_DOW.filter((d) => d !== 2) : [...WORK_DOW]; // exclude Tuesday (the grand day)
   const h = crypto.createHmac('sha256', secret).update(`test|${email.toLowerCase()}|${ws}`).digest();
-  const first = WORK_DOW[h[0] % WORK_DOW.length];
-  let second = WORK_DOW[h[1] % WORK_DOW.length];
-  if (second === first) second = WORK_DOW[(WORK_DOW.indexOf(first) + 1) % WORK_DOW.length];
+  const first = pool[h[0] % pool.length];
+  if (count === 1) return [first];
+  let second = pool[h[1] % pool.length];
+  if (second === first) second = pool[(pool.indexOf(first) + 1) % pool.length];
   return [first, second].sort((a, b) => a - b);
 }
 
@@ -89,6 +105,7 @@ export function isTestDayFor(email: string, day: string, s: Schedule, secret?: s
 export function isLessonDayFor(email: string, day: string, s: Schedule, secret?: string): boolean {
   if (!s.on) return true;
   if (dow(day) === 0) return false;
+  if (isGrandTestDay(day, s)) return false; // the grand test day is test-only
   return !isTestDayFor(email, day, s, secret);
 }
 

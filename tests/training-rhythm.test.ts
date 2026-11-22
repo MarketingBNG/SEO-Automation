@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isTestDayFor, isLessonDayFor, testWeekdaysFor, isGrandTestDay, type Schedule } from '../lib/trainingSchedule';
 
+// A day counts as a test if it's a normal test day OR the monthly grand test day.
+const isTest = (email: string, d: string, s: Schedule, sec: string) => isTestDayFor(email, d, s, sec) || isGrandTestDay(d, s);
+
 // Week 1 = 2026-11-23 Mon .. 11-29 Sun. Week 2 = 11-30 Mon .. 12-06 Sun.
 const s: Schedule = { on: true, patternStart: '2026-11-23', surpriseStart: '2026-11-30', grandStart: '2026-12-01' };
 const SEC = 'secret';
@@ -22,20 +25,30 @@ test('Sunday: no lesson, no test', () => {
   assert.equal(isLessonDayFor('a@x.com', '2026-11-29', s, SEC), false);
 });
 
-test('exactly 2 test days every week, for every person', () => {
-  for (const monday of ['2026-11-23', '2026-11-30', '2026-12-07', '2026-12-14']) {
+test('exactly 2 tests every week, for every person (including grand weeks)', () => {
+  for (const monday of ['2026-11-23', '2026-11-30', '2026-12-07', '2026-12-14', '2026-12-28']) {
     for (const email of emails) {
-      const tests = week(monday).filter((d) => isTestDayFor(email, d, s, SEC));
+      const tests = week(monday).filter((d) => isTest(email, d, s, SEC));
       assert.equal(tests.length, 2, `${email} week ${monday} has ${tests.length} tests`);
     }
   }
 });
 
+test('grand week: exactly 1 normal test + the grand test = 2', () => {
+  const monday = '2026-12-28'; // week holds the last Tuesday of Dec (grand)
+  for (const email of emails) {
+    const normal = week(monday).filter((d) => isTestDayFor(email, d, s, SEC)).length;
+    const grand = week(monday).filter((d) => isGrandTestDay(d, s)).length;
+    assert.equal(grand, 1, `${email}: one grand test`);
+    assert.equal(normal, 1, `${email}: exactly one normal test in a grand week`);
+  }
+});
+
 test('a day is a lesson day OR a test day, never both; never neither on a working day', () => {
-  for (const monday of ['2026-11-23', '2026-11-30', '2026-12-07']) {
+  for (const monday of ['2026-11-23', '2026-11-30', '2026-12-07', '2026-12-28']) {
     for (const email of emails) {
       for (const d of week(monday)) {
-        const t = isTestDayFor(email, d, s, SEC);
+        const t = isTest(email, d, s, SEC);
         const l = isLessonDayFor(email, d, s, SEC);
         assert.ok(!(t && l), `${email} ${d} is both`);
         assert.ok(t || l, `${email} ${d} is neither (working day)`);
