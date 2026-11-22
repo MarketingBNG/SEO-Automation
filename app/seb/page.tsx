@@ -6,7 +6,7 @@
 // Google OAuth is never done here. No secret is in the URL.
 import { useCallback, useEffect, useState } from 'react';
 
-type Today = { status: string; locked: boolean; name: string | null; item: any; attendance: any; error?: string };
+type Today = { status: string; locked: boolean; name: string | null; item: any; attendance: any; quitUrl?: string; error?: string };
 
 export default function SebPage() {
   const [today, setToday] = useState<Today | null>(null);
@@ -27,6 +27,14 @@ export default function SebPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // On a no-training day (e.g. Sunday) quit SEB to the desktop. Read-only: nothing is marked complete
+  // and no timesheet sync is triggered.
+  useEffect(() => {
+    if (today && today.status === 'no-training' && today.quitUrl) {
+      window.location.href = today.quitUrl;
+    }
+  }, [today]);
 
   async function checkIn() {
     setBusy(true); setMsg(null);
@@ -79,7 +87,7 @@ export default function SebPage() {
   if (today.status === 'before-window') return info('Training opens at 9:00 AM IST.');
   if (today.status === 'done') return info('Today’s training is complete. You may quit.');
   if (today.status === 'not-ready') return info('Today’s training is being prepared. Please wait a moment and refresh.');
-  if (today.status === 'no-training') return info('No training scheduled today.');
+  if (today.status === 'no-training') return info(today.quitUrl ? 'No training today. Returning to the desktop…' : 'No training scheduled today.');
   if (today.status === 'error') return info('Could not load training. Please try again shortly.');
 
   const item = today.item;

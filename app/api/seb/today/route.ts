@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prismaClient from '@/lib/prisma';
-import { sebSessionEmail, SEB_COOKIE } from '@/lib/seb';
+import { sebSessionEmail, SEB_COOKIE, resolveSebQuitUrl } from '@/lib/seb';
 import { gateForEmail } from '@/lib/worklog';
 import { sebTodayItem } from '@/lib/associateTrainingView';
 import { attendanceStatus } from '@/lib/attendance';
@@ -18,6 +18,10 @@ export async function GET(req: NextRequest) {
   const gate = await gateForEmail(email);
   const item = gate.status === 'pending' ? await sebTodayItem(email, member?.role || 'user') : null;
   const attendance = await attendanceStatus(email);
-  return NextResponse.json({ status: gate.status, locked: gate.locked, name: member?.name || null, item, attendance });
+  // On a no-training day (e.g. Sunday) the SEB page quits to the desktop. This is read-only: it does
+  // not mark training complete and does not enqueue a timesheet sync. The quit URL is given only for
+  // no-training so the page cannot quit while training is pending.
+  const quitUrl = gate.status === 'no-training' ? await resolveSebQuitUrl() : '';
+  return NextResponse.json({ status: gate.status, locked: gate.locked, name: member?.name || null, item, attendance, quitUrl });
 }
 export { methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

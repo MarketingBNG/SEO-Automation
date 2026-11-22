@@ -4,9 +4,16 @@
 // httpOnly SEB session cookie. Google OAuth stays entirely in the regular browser.
 import crypto from 'crypto';
 import prismaClient from './prisma';
+import * as settings from './settings';
 import { sqlNow } from './time';
 
 const prisma: any = prismaClient;
+
+// The SEB quit link: the dashboard setting seb_quit_url overrides the SEB_QUIT_URL env, else empty.
+// Read-only; used by both the no-training auto-quit and the Finished flow.
+export async function resolveSebQuitUrl(): Promise<string> {
+  return String((await settings.get('seb_quit_url')) || process.env.SEB_QUIT_URL || '');
+}
 
 export const SEB_COOKIE = 'seb_session';
 const HANDOFF_TTL_MS = 5 * 60 * 1000; // 5 minutes, single use

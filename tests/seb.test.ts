@@ -13,6 +13,8 @@ const { gateForEmail, gateDecision } = require('../lib/worklog') as typeof impor
 const { markRead, submitTest } = require('../lib/associateTraining') as typeof import('../lib/associateTraining');
 const { trainingGate } = require('../lib/trainingGate') as typeof import('../lib/trainingGate');
 const { enqueuePriorDays, processQueue } = require('../lib/timesheetSync') as typeof import('../lib/timesheetSync');
+const settings = require('../lib/settings') as typeof import('../lib/settings');
+const { sebTodayItem } = require('../lib/associateTrainingView') as typeof import('../lib/associateTrainingView');
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const Q = '[{"id":"q1","q":"W?","options":["a","b","c","d"],"answer":0,"explain":"e"}]';
@@ -128,6 +130,37 @@ test('failed completion save: submitTest throws for an unknown test (finish retu
   await prisma.team_members.create({ data: { email: 'x@x.com', name: 'x', role: 'user', blocked: false } });
   await prisma.training_profiles.create({ data: { email: 'x@x.com', name: 'x', level: 1, lesson_ids: '{}', active: true } });
   await assert.rejects(() => submitTest('x@x.com', 999999, {}), /not found|no test|Test/i);
+});
+
+// ---- no-training auto-quit on /seb (Sunday): quit URL + read-only (no completion, no sync) ----
+test('no-training is unlocked and not done (desktop access, not complete)', () => {
+  const r = gateDecision({ email: 'k@x', member: { role: 'user', name: 'K' }, istHour: 10, gate: { locked: false, openReason: 'no-training' } });
+  assert.equal(r.status, 'no-training');
+  assert.equal(r.locked, false);
+  assert.notEqual(r.status, 'done');
+});
+
+test('SEB quit URL resolves; dashboard setting overrides the env', { skip: !db }, async () => {
+  await wipe();
+  process.env.SEB_QUIT_URL = 'https://seo.usaindiacfo.us/seb/quit';
+  await settings.set('seb_quit_url', '');
+  assert.equal(await seb.resolveSebQuitUrl(), 'https://seo.usaindiacfo.us/seb/quit');
+  await settings.set('seb_quit_url', 'https://override.example/quit');
+  assert.equal(await seb.resolveSebQuitUrl(), 'https://override.example/quit');
+});
+
+test('SEB today path is read-only: no completion and no timesheet sync written', { skip: !db }, async () => {
+  await wipe();
+  await seedWorkDay('ro@x.com', '2026-11-27'); // a prior worked day: a wrongful sync would create a queue row
+  await prisma.training_profiles.create({ data: { email: 'ro@x.com', name: 'ro', level: 1, lesson_ids: '{}', active: true } });
+  const before = { reads: await prisma.training_reads.count(), queue: await prisma.timesheet_sync_queue.count() };
+  // Exactly what /api/seb/today calls:
+  await gateForEmail('ro@x.com');
+  await attendanceStatus('ro@x.com');
+  await sebTodayItem('ro@x.com', 'user');
+  const after = { reads: await prisma.training_reads.count(), queue: await prisma.timesheet_sync_queue.count() };
+  assert.deepEqual(after, before);
+  assert.equal(before.reads + before.queue, 0);
 });
 
 // ---- Zoho Projects timesheet sync (mock Zoho; no live write) ----
