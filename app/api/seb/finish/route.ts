@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sebSessionEmail, SEB_COOKIE } from '@/lib/seb';
 import { markRead, submitTest } from '@/lib/associateTraining';
 import { gateForEmail } from '@/lib/worklog';
+import { enqueuePriorDays } from '@/lib/timesheetSync';
 import * as settings from '@/lib/settings';
 import { methodNotAllowed } from '../../_lib/http';
 
@@ -31,6 +32,10 @@ export async function POST(req: NextRequest) {
   // Verify against the gate: quit only when the server confirms today is done.
   const gate = await gateForEmail(email);
   const done = gate.status === 'done';
+  // On confirmed Finished, enqueue the person's prior worked days for Zoho Projects sync. Fire-and-forget
+  // and failure-tolerant: SEB exit and desktop access do not depend on the sync. The processor (cron)
+  // posts the hours later.
+  if (done) void enqueuePriorDays(email).catch(() => {});
   const quitUrl = done ? String((await settings.get('seb_quit_url')) || process.env.SEB_QUIT_URL || '') : '';
   return NextResponse.json({ status: gate.status, done, quitUrl });
 }

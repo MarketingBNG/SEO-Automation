@@ -952,3 +952,21 @@ model attendance_punches {
 
   @@id([email, day])
 }
+
+// On confirmed Finished, prior worked days are enqueued for Zoho Projects timesheet sync. One row per
+// (email, work day) prevents duplicate entries across retries and restarts; the project mapping in effect
+// on the work date is captured at enqueue time.
+model timesheet_sync_queue {
+  email       String
+  day         String // the IST work date to post hours under
+  project_id  String // the team's Zoho project, captured when enqueued
+  status      String  @default("pending") // pending | syncing | done | skipped | failed
+  zoho_log_id String?
+  attempts    Int     @default(0)
+  note        String?
+  created_at  String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  updated_at  String?
+
+  @@id([email, day])
+  @@index([status])
+}
