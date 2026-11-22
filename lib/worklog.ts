@@ -232,3 +232,25 @@ export async function gateForToken(token: string): Promise<GateResult> {
     return { locked: false, status: 'error', reason: e?.message || 'gate check failed' };
   }
 }
+
+// The same gate as gateForToken, but by email (for the SEB flow, which identifies the person by its own
+// session rather than a device token). Same statuses, same fail-open behaviour; preserves the contract.
+export async function gateForEmail(email: string): Promise<GateResult> {
+  try {
+    const who = email.toLowerCase();
+    const istHour = istHourNow();
+    const member = await prisma.team_members.findUnique({ where: { email: who }, select: { role: true, name: true } });
+    let gate: { locked: boolean; error?: boolean; openReason?: 'done' | 'not-ready' | 'no-training' } | undefined;
+    let gateThrew = false;
+    if (member && member.role !== 'admin' && istHour >= GATE_LOCK_HOUR_IST) {
+      try {
+        gate = await trainingGate(who, member.role);
+      } catch {
+        gateThrew = true;
+      }
+    }
+    return gateDecision({ email: who, member, istHour, gate, gateThrew });
+  } catch (e: any) {
+    return { locked: false, status: 'error', reason: e?.message || 'gate check failed' };
+  }
+}

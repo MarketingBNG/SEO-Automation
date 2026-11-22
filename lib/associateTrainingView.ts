@@ -112,6 +112,20 @@ async function personView(email: string, role: string, forViewer = false) {
   };
 }
 
+// The one item assigned to this person today (for the SEB page): the open test if there is one, else the
+// first unread lesson, else null. Answers are already stripped (reuses the trainee personView). The
+// caller decides the lock/status via lib/worklog gateForEmail.
+export async function sebTodayItem(email: string, role: string): Promise<any | null> {
+  const v: any = await personView(email, role);
+  if (!v) return null;
+  const g = v.gate || {};
+  if ((g.openTests?.length || 0) > 0 && v.test) return { kind: 'test', ...v.test };
+  const unread: number[] = (g.unread || []).map((u: any) => u.id);
+  const lesson = (v.lessons || []).find((l: any) => unread.includes(l.id)) || null;
+  if (lesson) return { kind: 'lesson', ...lesson };
+  return null;
+}
+
 // ---------- Remarks ----------
 
 // The remarks on one person (newest first). Shown to viewers only (in personView).

@@ -9,7 +9,7 @@ import { hasWorkToken, workTokenAllows } from '@/lib/workToken';
 // @usaindiacfo.com Google account. Vercel Cron calls carry `Authorization: Bearer CRON_SECRET`.
 
 // /api/site/v1 is the website's content API: it checks its own keys (SITE_API_KEY, SITE_IMPORT_KEY).
-const PUBLIC_PREFIXES = ['/api/auth', '/login', '/api/site/v1'];
+const PUBLIC_PREFIXES = ['/api/auth', '/login', '/api/site/v1', '/seb'];
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -31,6 +31,13 @@ export async function proxy(req: NextRequest) {
     return workTokenAllows(req.method, pathname)
       ? NextResponse.next()
       : NextResponse.json({ error: 'The work token only reports activity.' }, { status: 403 });
+  }
+
+  // SEB pilot: the locked-down training browser authenticates with its own short-lived handoff code and
+  // an httpOnly SEB session cookie, not a Google session. These routes enforce that themselves. The
+  // handoff MINT endpoint still needs a signed-in Google session, so it is not bypassed here.
+  if (pathname.startsWith('/api/seb/') && pathname !== '/api/seb/handoff') {
+    return NextResponse.next();
   }
 
   // Scheduled jobs: the secret opens only the job routes (GET), not the rest of the API.

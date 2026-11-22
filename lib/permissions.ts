@@ -165,6 +165,11 @@ export function actionFor(method: string, path: string): Action | null {
   if (/^\/api\/worklog/.test(p)) return null;
   // Zoho connect / status / callback (anyone signed in), and sync (admin-only, checked in the route).
   if (/^\/api\/zoho-projects/.test(p)) return null;
+  // Zoho People connect (anyone signed in; the route checks).
+  if (/^\/api\/zoho-people/.test(p)) return null;
+  // SEB pilot: handoff mint needs a signed-in session but no special permission; the other SEB routes
+  // authenticate with the SEB session cookie and are allowed through the proxy separately.
+  if (/^\/api\/seb\//.test(p)) return null;
   if (/^\/api\/seranking\/topup/.test(p)) return 'settings.change';
   // Post my blog: saving to Drafts is content work; posting live also needs blog.publish_now (checked
   // in lib/myBlog.ts, which knows whether the person asked to post or to save).

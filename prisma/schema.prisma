@@ -916,3 +916,39 @@ model agent_memories {
   @@unique([agent, key])
   @@index([agent, status])
 }
+
+// SEB pilot: a short-lived, single-use code that hands the signed-in regular-browser identity to the
+// locked-down Safe Exam Browser (no secret in the URL), the SEB session it mints, and the idempotent
+// Zoho People attendance punch (one per employee per IST day).
+model seb_handoffs {
+  code       String  @id // random, single-use, short-lived
+  email      String
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  expires_at String
+  used_at    String?
+
+  @@index([email])
+}
+
+model seb_sessions {
+  token      String  @id // random; kept in an httpOnly cookie for the SEB page
+  email      String
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  expires_at String
+
+  @@index([email])
+}
+
+model attendance_punches {
+  email      String
+  day        String // YYYY-MM-DD (IST)
+  status     String  @default("pending") // pending | punching | confirmed | failed
+  zoho_id    String? // the Zoho People attendance record id, once confirmed
+  attempts   Int     @default(0)
+  attempt_at String? // when the current punch attempt was claimed (for stale reclaim)
+  note       String?
+  created_at String  @default(dbgenerated("to_char((now() AT TIME ZONE 'utc'::text), 'YYYY-MM-DD HH24:MI:SS'::text)"))
+  updated_at String?
+
+  @@id([email, day])
+}
