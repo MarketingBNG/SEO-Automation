@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-22
+- (ops) Daily training is now generated at 08:00 IST, one hour before the 09:00 device lock window, so a trainee's lesson and test are ready before their laptop locks (earlier it generated at 09:00, the same time the lock opened, so the lock could fail open until generation finished).
 - (ops) Device lock gate now reports a clear status (done, pending, invalid-token, before-window, not-tracked, error) alongside the lock flag. A backend failure is reported as "error" and no longer looks like a real training completion; the laptop still fails open. No change to what the device reads (the lock flag).
 
 ## 2026-11-21
