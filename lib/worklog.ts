@@ -163,17 +163,62 @@ export async function emailForToken(token: string): Promise<string | null> {
   return row?.email || null;
 }
 
+// The distinct outcomes of a device gate check, so a caller can tell completion, an unknown token and a
+// backend failure apart (not just by the boolean lock).
+export type GateStatus = 'invalid-token' | 'not-tracked' | 'before-window' | 'pending' | 'done' | 'error';
+export type GateResult = { locked: boolean; status: GateStatus; name?: string; reason: string };
+
+// The gate decision as a pure function of its inputs, so every branch is testable without a database.
+// locked and reason are kept for existing callers; status is the machine-readable outcome.
+//   email null                                  -> invalid-token (unlocked; an unknown token never locks)
+//   no member, or admin                         -> not-tracked  (unlocked)
+//   before 09:00 IST                            -> before-window (unlocked; the work-day window is 09:00+)
+//   the gate could not be computed              -> error        (unlocked; fail open, but say so)
+//   today's training not finished               -> pending      (locked)
+//   today's training finished                   -> done         (unlocked)
+export function gateDecision(input: {
+  email: string | null;
+  member: { role: string; name?: string | null } | null;
+  istHour: number;
+  gate?: { locked: boolean; error?: boolean };
+  gateThrew?: boolean;
+}): GateResult {
+  if (!input.email) return { locked: false, status: 'invalid-token', reason: 'unknown token' };
+  const m = input.member;
+  if (!m || m.role === 'admin') return { locked: false, status: 'not-tracked', reason: 'not a tracked person' };
+  const name = m.name || undefined;
+  if (input.istHour < 9) return { locked: false, status: 'before-window', name, reason: 'before 09:00 IST' };
+  if (input.gateThrew || !input.gate || input.gate.error) return { locked: false, status: 'error', name, reason: 'training status unavailable' };
+  return input.gate.locked
+    ? { locked: true, status: 'pending', name, reason: 'training pending' }
+    : { locked: false, status: 'done', name, reason: 'training done' };
+}
+
+// IST hour (0-23) for the window check.
+const istHourNow = () => new Date(Date.now() + 5.5 * 3600000).getUTCHours();
+
 // The device lock gate, by work token. The laptop kiosk polls this: locked = true means keep the
 // laptop on the lesson screen; false means free it. The lock only applies from 09:00 IST (the start of
 // the work-day window); once today's training is done it stays false for the rest of the day, so a
-// reboot does not re-lock. The admin and an unknown token are never locked. Fails open on any error.
-export async function gateForToken(token: string): Promise<{ locked: boolean; name?: string; reason: string }> {
-  const email = await emailForToken(token);
-  if (!email) return { locked: false, reason: 'unknown token' };
-  const member = await prisma.team_members.findUnique({ where: { email }, select: { role: true, name: true } });
-  if (!member || member.role === 'admin') return { locked: false, reason: 'not a tracked person' };
-  const istHour = new Date(Date.now() + 5.5 * 3600000).getUTCHours();
-  if (istHour < 9) return { locked: false, name: member.name, reason: 'before 09:00 IST' };
-  const gate = await trainingGate(email, member.role).catch(() => ({ locked: false }) as any);
-  return { locked: Boolean(gate.locked), name: member.name, reason: gate.locked ? 'training pending' : 'training done' };
+// reboot does not re-lock. The admin and an unknown token are never locked. Fails open on any error,
+// and status says which case it is (see gateDecision).
+export async function gateForToken(token: string): Promise<GateResult> {
+  try {
+    const email = await emailForToken(token);
+    const istHour = istHourNow();
+    if (!email) return gateDecision({ email: null, member: null, istHour });
+    const member = await prisma.team_members.findUnique({ where: { email }, select: { role: true, name: true } });
+    let gate: { locked: boolean; error?: boolean } | undefined;
+    let gateThrew = false;
+    if (member && member.role !== 'admin' && istHour >= 9) {
+      try {
+        gate = await trainingGate(email, member.role);
+      } catch {
+        gateThrew = true;
+      }
+    }
+    return gateDecision({ email, member, istHour, gate, gateThrew });
+  } catch (e: any) {
+    return { locked: false, status: 'error', reason: e?.message || 'gate check failed' };
+  }
 }

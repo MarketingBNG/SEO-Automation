@@ -14,7 +14,10 @@ const prisma: any = prismaClient;
 const istDay = (d = new Date()) => new Date(d.getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
 
 export const GATE_MESSAGE = "Finish today's training to open the dashboard";
-export type Gate = { locked: boolean; unread: { id: number; title: string; track: string }[]; openTests: { id: number; kind: string }[]; notice: string | null };
+// error is set only when the gate could not be computed (a backend failure). It is optional and
+// defaults to absent, so existing callers that read locked/unread/openTests/notice are unaffected;
+// callers that need to tell "could not check" from "nothing to do" (the device gate) read it.
+export type Gate = { locked: boolean; unread: { id: number; title: string; track: string }[]; openTests: { id: number; kind: string }[]; notice: string | null; error?: boolean };
 const OPEN: Gate = { locked: false, unread: [], openTests: [], notice: null };
 
 // Cached 30 seconds per person (the proxy asks on every API write); shared across bundles through
@@ -28,9 +31,13 @@ export async function trainingGate(email: string, role: string, day = istDay()):
   if (!e || !isTrainee(role)) return OPEN;
   const hit = cache.get(e);
   if (hit && hit.day === day && Date.now() - hit.at < 30_000) return hit.value;
-  const value = await computeGate(e, day).catch(() => OPEN);
-  cache.set(e, { at: Date.now(), day, value });
-  if (cache.size > 500) cache.delete(cache.keys().next().value!);
+  // A backend failure is reported (error: true), not cached, and not silently treated as "nothing to
+  // do": a caller that acts on the gate can tell it apart from a real completion.
+  const value = await computeGate(e, day).catch(() => ({ ...OPEN, error: true }));
+  if (!value.error) {
+    cache.set(e, { at: Date.now(), day, value });
+    if (cache.size > 500) cache.delete(cache.keys().next().value!);
+  }
   return value;
 }
 
