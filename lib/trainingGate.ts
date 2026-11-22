@@ -71,7 +71,7 @@ async function computeGate(email: string, day: string): Promise<Gate> {
   const locked = unread.length > 0 || openTests.length > 0;
   if (!locked) {
     if (late) return { ...OPEN, notice: `Today's training was ready late (after ${GATE_CUTOFF_HOUR_IST}:00 IST), so it does not lock the dashboard today. Please do it today; from tomorrow the dashboard waits for it again.` };
-    if (!all.length && !tests.length) return { ...OPEN, notice: "Today's training is not ready yet (lessons are made after 09:00 IST, and wait while AI work is paused or in Testing mode). The dashboard stays open meanwhile." };
+    if (!all.length && !tests.length) return { ...OPEN, notice: "Today's training is not ready yet (lessons are made early each morning, and wait while AI work is paused or in Testing mode). The dashboard stays open meanwhile." };
   }
   return { locked, unread, openTests, notice: null };
 }

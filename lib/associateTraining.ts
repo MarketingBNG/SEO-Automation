@@ -29,7 +29,9 @@ import { getSchedule, isLessonDay, isTestDay, surpriseOn } from './trainingSched
 const prisma: any = prismaClient;
 
 export { LEVELS, audienceFor, isTrainee, lessonIdsOf };
-export const TRAINING_HOUR_IST = 9;
+// Lessons and tests are generated at this hour IST, one hour BEFORE the 09:00 device lock window
+// (lib/worklog GATE_LOCK_HOUR_IST), so a trainee's training is ready before their laptop locks at 09:00.
+export const TRAINING_HOUR_IST = 8;
 export const MAX_LEVEL = 5;
 // Adaptive levels: over the last WINDOW tests at this level (missed ones count as 0), an average of
 // UP_AVG% or more without a falling trend moves the person up; under DOWN_AVG% moves them down.
@@ -545,7 +547,8 @@ export async function runTrainingDay(now = new Date()) {
   }
 }
 
-// Called by the scheduler every 15 minutes: once a day after 09:00 IST.
+// Called by the scheduler every 15 minutes: once a day from 08:00 IST (before the 09:00 lock), so the
+// day's lessons and tests are ready before a trainee's laptop locks.
 export async function trainingTick(now = new Date()) {
   if (istHour(now) < TRAINING_HOUR_IST) return;
   const day = istDay(now);

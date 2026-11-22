@@ -163,6 +163,10 @@ export async function emailForToken(token: string): Promise<string | null> {
   return row?.email || null;
 }
 
+// The work-day lock window opens at this hour IST. Before it, the laptop is not locked. Training is
+// generated one hour earlier (lib/associateTraining TRAINING_HOUR_IST) so it is ready before this.
+export const GATE_LOCK_HOUR_IST = 9;
+
 // The distinct outcomes of a device gate check, so a caller can tell completion, an unknown token and a
 // backend failure apart (not just by the boolean lock).
 export type GateStatus = 'invalid-token' | 'not-tracked' | 'before-window' | 'pending' | 'done' | 'error';
@@ -187,7 +191,7 @@ export function gateDecision(input: {
   const m = input.member;
   if (!m || m.role === 'admin') return { locked: false, status: 'not-tracked', reason: 'not a tracked person' };
   const name = m.name || undefined;
-  if (input.istHour < 9) return { locked: false, status: 'before-window', name, reason: 'before 09:00 IST' };
+  if (input.istHour < GATE_LOCK_HOUR_IST) return { locked: false, status: 'before-window', name, reason: 'before 09:00 IST' };
   if (input.gateThrew || !input.gate || input.gate.error) return { locked: false, status: 'error', name, reason: 'training status unavailable' };
   return input.gate.locked
     ? { locked: true, status: 'pending', name, reason: 'training pending' }
@@ -210,7 +214,7 @@ export async function gateForToken(token: string): Promise<GateResult> {
     const member = await prisma.team_members.findUnique({ where: { email }, select: { role: true, name: true } });
     let gate: { locked: boolean; error?: boolean } | undefined;
     let gateThrew = false;
-    if (member && member.role !== 'admin' && istHour >= 9) {
+    if (member && member.role !== 'admin' && istHour >= GATE_LOCK_HOUR_IST) {
       try {
         gate = await trainingGate(email, member.role);
       } catch {
