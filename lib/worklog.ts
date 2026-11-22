@@ -167,9 +167,10 @@ export async function emailForToken(token: string): Promise<string | null> {
 // generated one hour earlier (lib/associateTraining TRAINING_HOUR_IST) so it is ready before this.
 export const GATE_LOCK_HOUR_IST = 9;
 
-// The distinct outcomes of a device gate check, so a caller can tell completion, an unknown token and a
-// backend failure apart (not just by the boolean lock).
-export type GateStatus = 'invalid-token' | 'not-tracked' | 'before-window' | 'pending' | 'done' | 'error';
+// The distinct outcomes of a device gate check, so a caller can tell completion, training that is not
+// generated yet, a day with no training, an unknown token and a backend failure apart (not just by the
+// boolean lock).
+export type GateStatus = 'invalid-token' | 'not-tracked' | 'before-window' | 'pending' | 'done' | 'not-ready' | 'no-training' | 'error';
 export type GateResult = { locked: boolean; status: GateStatus; name?: string; reason: string };
 
 // The gate decision as a pure function of its inputs, so every branch is testable without a database.
@@ -179,12 +180,16 @@ export type GateResult = { locked: boolean; status: GateStatus; name?: string; r
 //   before 09:00 IST                            -> before-window (unlocked; the work-day window is 09:00+)
 //   the gate could not be computed              -> error        (unlocked; fail open, but say so)
 //   today's training not finished               -> pending      (locked)
+//   today's training expected but not generated  -> not-ready    (unlocked; fail open)
+//   no training scheduled today                  -> no-training  (unlocked)
 //   today's training finished                   -> done         (unlocked)
+// When the gate carries no openReason (an older caller), an unlocked gate defaults to done, preserving
+// the previous behavior; only trainingGate, which now sets openReason, distinguishes the cases.
 export function gateDecision(input: {
   email: string | null;
   member: { role: string; name?: string | null } | null;
   istHour: number;
-  gate?: { locked: boolean; error?: boolean };
+  gate?: { locked: boolean; error?: boolean; openReason?: 'done' | 'not-ready' | 'no-training' };
   gateThrew?: boolean;
 }): GateResult {
   if (!input.email) return { locked: false, status: 'invalid-token', reason: 'unknown token' };
@@ -193,9 +198,10 @@ export function gateDecision(input: {
   const name = m.name || undefined;
   if (input.istHour < GATE_LOCK_HOUR_IST) return { locked: false, status: 'before-window', name, reason: 'before 09:00 IST' };
   if (input.gateThrew || !input.gate || input.gate.error) return { locked: false, status: 'error', name, reason: 'training status unavailable' };
-  return input.gate.locked
-    ? { locked: true, status: 'pending', name, reason: 'training pending' }
-    : { locked: false, status: 'done', name, reason: 'training done' };
+  if (input.gate.locked) return { locked: true, status: 'pending', name, reason: 'training pending' };
+  if (input.gate.openReason === 'not-ready') return { locked: false, status: 'not-ready', name, reason: "today's training is not generated yet" };
+  if (input.gate.openReason === 'no-training') return { locked: false, status: 'no-training', name, reason: 'no training scheduled today' };
+  return { locked: false, status: 'done', name, reason: 'training done' };
 }
 
 // IST hour (0-23) for the window check.

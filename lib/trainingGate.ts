@@ -17,8 +17,18 @@ export const GATE_MESSAGE = "Finish today's training to open the dashboard";
 // error is set only when the gate could not be computed (a backend failure). It is optional and
 // defaults to absent, so existing callers that read locked/unread/openTests/notice are unaffected;
 // callers that need to tell "could not check" from "nothing to do" (the device gate) read it.
-export type Gate = { locked: boolean; unread: { id: number; title: string; track: string }[]; openTests: { id: number; kind: string }[]; notice: string | null; error?: boolean };
+export type Gate = { locked: boolean; unread: { id: number; title: string; track: string }[]; openTests: { id: number; kind: string }[]; notice: string | null; error?: boolean; openReason?: OpenReason };
 const OPEN: Gate = { locked: false, unread: [], openTests: [], notice: null };
+
+// Why the gate is open (not locked), when it is not locked: the day's training is done, it is
+// expected today but not generated yet, or no training is scheduled today. Optional and only set when
+// locked is false, so existing callers that read locked/unread/openTests/notice are unaffected.
+export type OpenReason = 'done' | 'not-ready' | 'no-training';
+export function openReasonFor(scheduled: boolean, generated: boolean): OpenReason {
+  if (!scheduled) return 'no-training';
+  if (!generated) return 'not-ready';
+  return 'done';
+}
 
 // Cached 30 seconds per person (the proxy asks on every API write); shared across bundles through
 // globalThis so marking a lesson read or submitting a test unlocks at once.
@@ -68,12 +78,18 @@ async function computeGate(email: string, day: string): Promise<Gate> {
   const read = new Set((await prisma.training_reads.findMany({ where: { email, lesson_id: { in: todays.map((l: any) => l.id) } }, select: { lesson_id: true } })).map((r: any) => r.lesson_id));
   const unread = todays.filter((l: any) => !read.has(l.id)).map((l: any) => ({ id: l.id, title: l.title, track: TRACK_LABEL[l.track as Track] || l.track }));
   const openTests = tests.filter((t: any) => !madeLate(t.created_at, day)).map((t: any) => ({ id: t.id, kind: t.kind }));
+  // Whether training is expected today (per the schedule) and whether it has been generated. These let
+  // an unlocked gate say "done" vs "not generated yet" (not-ready) vs "no training today".
+  const { getSchedule, isLessonDay, isTestDay } = await import('./trainingSchedule');
+  const sched = await getSchedule();
+  const scheduled = isLessonDay(day, sched) || isTestDay(day, sched);
+  const generated = all.length > 0 || tests.length > 0;
   const locked = unread.length > 0 || openTests.length > 0;
-  if (!locked) {
-    if (late) return { ...OPEN, notice: `Today's training was ready late (after ${GATE_CUTOFF_HOUR_IST}:00 IST), so it does not lock the dashboard today. Please do it today; from tomorrow the dashboard waits for it again.` };
-    if (!all.length && !tests.length) return { ...OPEN, notice: "Today's training is not ready yet (lessons are made early each morning, and wait while AI work is paused or in Testing mode). The dashboard stays open meanwhile." };
-  }
-  return { locked, unread, openTests, notice: null };
+  if (locked) return { locked, unread, openTests, notice: null };
+  const openReason = openReasonFor(scheduled, generated);
+  if (late) return { ...OPEN, openReason, notice: `Today's training was ready late (after ${GATE_CUTOFF_HOUR_IST}:00 IST), so it does not lock the dashboard today. Please do it today; from tomorrow the dashboard waits for it again.` };
+  if (!generated) return { ...OPEN, openReason, notice: scheduled ? "Today's training is not ready yet (lessons are made early each morning, and wait while AI work is paused or in Testing mode). The dashboard stays open meanwhile." : null };
+  return { ...OPEN, openReason };
 }
 
 // API paths a locked person may still write to: the training itself (sign-in and sign-out are public).

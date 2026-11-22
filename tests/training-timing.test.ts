@@ -39,11 +39,11 @@ test('after lesson read and the required test Finished: done, unlocked', () => {
   assert.equal(r.locked, false);
 });
 
-// Reported behavior for missing lessons: the gate fails open (does not lock). This is exactly the
-// case the timing fix avoids by generating before 09:00.
-test('lesson missing / not generated yet: fails open as done, not locked', () => {
-  const r = gateDecision({ email: 'k@x.com', member: trainee, istHour: GATE_LOCK_HOUR_IST, gate: { locked: false } });
-  assert.equal(r.status, 'done');
+// Missing lessons: expected today but not generated -> not-ready (unlocked, fail open). This is the
+// case the timing fix reduces by generating before 09:00.
+test('lesson missing / not generated yet: not-ready, not locked', () => {
+  const r = gateDecision({ email: 'k@x.com', member: trainee, istHour: GATE_LOCK_HOUR_IST, gate: { locked: false, openReason: 'not-ready' } });
+  assert.equal(r.status, 'not-ready');
   assert.equal(r.locked, false);
 });
 
