@@ -15,6 +15,11 @@ export async function resolveSebQuitUrl(): Promise<string> {
   return String((await settings.get('seb_quit_url')) || process.env.SEB_QUIT_URL || '');
 }
 
+// The launcher runs the gate before opening SEB and launches ONLY for pending training (which the gate
+// returns at/after 09:00 IST). Before 09:00 (before-window), on a no-training day, or after completion
+// (done) the normal desktop stays available and SEB is not opened.
+export const shouldLaunchSeb = (status: string) => status === 'pending';
+
 export const SEB_COOKIE = 'seb_session';
 const HANDOFF_TTL_MS = 5 * 60 * 1000; // 5 minutes, single use
 const SESSION_TTL_MS = 10 * 60 * 60 * 1000; // a work day

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  USAIndiaCFO Safe Exam Browser config (SAMPLE / starting point).
+
+  The launcher (device/uic-seb-launcher.ps1) copies this file to a temp config and replaces the literal
+  __START_URL__ below with a fresh single-use URL (https://seo.usaindiacfo.us/seb#code=<one-time-code>)
+  JUST before launching SEB. Keep __START_URL__ exactly as-is; do not hardcode a real URL here.
+
+  This is a minimal, readable profile. For production, open it in the SEB Configuration Tool, set a real
+  quitURL / hashedQuitPassword and admin password, re-tighten the kiosk and permitted-process settings for
+  your build of SEB, and re-export. Re-exporting preserves __START_URL__ as long as you do not change the
+  start URL field. Settings below are the common ones; your SEB version may add or rename keys.
+-->
+<plist version="1.0">
+<dict>
+  <!-- Start page: REPLACED at launch by the PowerShell launcher. Never put a durable secret here. -->
+  <key>startURL</key>
+  <string>__START_URL__</string>
+
+  <!-- Where SEB sends the browser when training is finished (the page navigates here; SEB then quits). -->
+  <key>quitURL</key>
+  <string>https://seo.usaindiacfo.us/seb-quit</string>
+  <key>quitURLConfirm</key>
+  <false/>
+
+  <!-- Kiosk: lock the machine down to this browser while an exam/lesson is open. -->
+  <key>browserViewMode</key>
+  <integer>1</integer>
+  <key>mainBrowserWindowWidth</key>
+  <string>100%</string>
+  <key>mainBrowserWindowHeight</key>
+  <string>100%</string>
+  <key>enableBrowserWindowToolbar</key>
+  <false/>
+  <key>showMenuBar</key>
+  <false/>
+  <key>showTaskBar</key>
+  <true/>
+
+  <!-- Quitting: allow a clean quit, but gate it behind a quit password in production (set below). -->
+  <key>allowQuit</key>
+  <true/>
+  <key>hashedQuitPassword</key>
+  <string></string>
+
+  <!-- Keep the session usable but contained. -->
+  <key>allowReload</key>
+  <true/>
+  <key>showReloadButton</key>
+  <true/>
+  <key>allowBrowsingBackForward</key>
+  <false/>
+  <key>newBrowserWindowByLinkPolicy</key>
+  <integer>0</integer>
+  <key>newBrowserWindowByScriptPolicy</key>
+  <integer>0</integer>
+  <key>allowDownUploads</key>
+  <false/>
+  <key>allowSpellCheck</key>
+  <false/>
+
+  <!-- Only the dashboard host is reachable from inside SEB. Tighten/expand for your deploy. -->
+  <key>URLFilterEnable</key>
+  <true/>
+  <key>URLFilterEnableContentFilter</key>
+  <false/>
+  <key>whitelistURLFilter</key>
+  <string>seo.usaindiacfo.us/*</string>
+
+  <!-- Config purpose: a starting config to open (not a stored exam-key client config). -->
+  <key>sebConfigPurpose</key>
+  <integer>0</integer>
+  <key>sendBrowserExamKey</key>
+  <true/>
+</dict>
+</plist>

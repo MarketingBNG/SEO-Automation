@@ -180,6 +180,35 @@ test('no-training is unlocked and not done (desktop access, not complete)', () =
   assert.notEqual(r.status, 'done');
 });
 
+// The launcher runs enroll-session, which runs the gate and launches SEB ONLY for pending training. This
+// is the pure decision both the route (code returned only when launch) and the PowerShell launcher (opens
+// SEB only when launch && code) branch on. The PS branches themselves are covered in
+// device/uic-seb-launcher.Tests.ps1 (Pester, Windows-only; not runnable here, no PowerShell in CI).
+test('launcher gate: SEB launches only for pending training', () => {
+  assert.equal(seb.shouldLaunchSeb('pending'), true);
+  for (const s of ['before-window', 'no-training', 'done', 'not-ready', 'error', 'invalid-token', 'not-tracked']) {
+    assert.equal(seb.shouldLaunchSeb(s), false, `${s} must not launch SEB`);
+  }
+});
+
+test('enroll-session decision: fresh code is minted only when launching (pending), never otherwise', { skip: !db }, async () => {
+  await wipe();
+  // pending -> a single-use code is minted and would be returned to the launcher.
+  const before = await prisma.seb_handoffs.count();
+  const launchPending = seb.shouldLaunchSeb('pending');
+  const code = launchPending ? (await seb.mintHandoff('k@usaindiacfo.com')).code : undefined;
+  assert.ok(code, 'pending must yield a code');
+  assert.equal(await prisma.seb_handoffs.count(), before + 1);
+  // any non-pending status -> no code, no handoff row created (desktop stays available).
+  for (const s of ['before-window', 'no-training', 'done', 'not-ready', 'error']) {
+    const n = await prisma.seb_handoffs.count();
+    const launch = seb.shouldLaunchSeb(s);
+    const c = launch ? (await seb.mintHandoff('k@usaindiacfo.com')).code : undefined;
+    assert.equal(c, undefined, `${s} must not mint a code`);
+    assert.equal(await prisma.seb_handoffs.count(), n, `${s} must not create a handoff`);
+  }
+});
+
 test('SEB quit URL resolves; dashboard setting overrides the env', { skip: !db }, async () => {
   await wipe();
   process.env.SEB_QUIT_URL = 'https://seo.usaindiacfo.us/seb/quit';
