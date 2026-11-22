@@ -4,6 +4,9 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-22
+- (ops) Device lock gate now reports a clear status (done, pending, invalid-token, before-window, not-tracked, error) alongside the lock flag. A backend failure is reported as "error" and no longer looks like a real training completion; the laptop still fails open. No change to what the device reads (the lock flag).
+
 ## 2026-11-21
 - (ops) Consent screen v2: the monitoring terms now state the lesson lock plainly (during work hours the company laptop stays on the training screen until the day's lesson/test is finished, then unlocks for the day; Sundays and holidays have none). The version bump means everyone re-accepts the clearer terms. device/uic-lock.ps1 enforces it on the device with an admin-password backup; it is a disclosed, company-device kiosk.
 - (ops) Device lock gate: the laptop watcher can now ask the dashboard (GET /api/worklog/gate with the person's work token) whether today's training is done. It locks only from 09:00 IST, and once the lesson/test is done it stays unlocked for the rest of the day (a reboot does not re-lock). device/uic-gate.ps1 polls this and holds a reversible Edge kiosk on the dashboard while locked, freeing the laptop when done. The admin is never locked; it fails open on a network error.
