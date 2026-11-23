@@ -19,7 +19,7 @@
 //   - does NOT touch the person's lessons, reads, real tests, points or level.
 import prismaClient from '../lib/prisma';
 import { gateForEmail } from '../lib/worklog';
-import { resolveSebQuitUrl, DEFAULT_SEB_QUIT_URL } from '../lib/seb';
+import { resolveSebQuitUrl } from '../lib/seb';
 import * as settings from '../lib/settings';
 import { lessonIdsOf } from '../lib/trainingContent';
 
@@ -36,10 +36,11 @@ const QA_QUESTIONS = [
   { id: 'qa-scope', q: 'This QA result is counted in official training scores.', options: ['False — it is a disposable QA test', 'True'], answer: 0, explain: 'QA tests are kept out of scores, attendance and Zoho sync.', kind: 'mcq' as const },
 ];
 
+// resolvedQuitUrl is what the app will actually give SEB right now, from the SAME runtime function the
+// app uses (lib/seb resolveSebQuitUrl: the seb_quit_url DB setting > SEB_QUIT_URL env > built-in default).
 async function quitUrlInfo() {
-  const raw = await settings.get('seb_quit_url');
   const resolved = await resolveSebQuitUrl();
-  return { resolvedQuitUrl: resolved, rawSetting: raw ?? null, envSet: Boolean(process.env.SEB_QUIT_URL), builtInDefault: DEFAULT_SEB_QUIT_URL, matchesExpected: resolved === EXPECTED_QUIT_URL };
+  return { resolvedQuitUrl: resolved, expected: EXPECTED_QUIT_URL, matchesExpected: resolved === EXPECTED_QUIT_URL };
 }
 
 async function quitUrl() {
@@ -105,8 +106,13 @@ async function main() {
   if (cmd === 'quit-url') { await quitUrl(); return; }
   if (cmd === 'set-quit-url') {
     if (!arg) { console.error('Usage: npx tsx scripts/qa-seb.ts set-quit-url <url>'); process.exit(1); }
+    let parsed: URL;
+    try { parsed = new URL(arg); } catch { console.error(`Not a valid URL: ${arg}`); process.exit(1); }
+    if (parsed.protocol !== 'https:') { console.error('The quit URL must be an https URL.'); process.exit(1); }
+    const old = await settings.get('seb_quit_url');
     await settings.set('seb_quit_url', arg);
-    console.log(`Set seb_quit_url to ${arg}.`);
+    console.log(`old seb_quit_url: ${old ?? '(none)'}`);
+    console.log(`new seb_quit_url: ${arg}`);
     await quitUrl();
     return;
   }
