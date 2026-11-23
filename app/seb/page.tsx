@@ -8,27 +8,50 @@ import { useCallback, useEffect, useState } from 'react';
 
 type Today = { status: string; locked: boolean; name: string | null; item: any; attendance: any; quitUrl?: string; error?: string };
 
+// Bounded requests: SEB is a kiosk, so a stalled request must never leave the screen on "Loading…"
+// forever. Every call aborts after its timeout and surfaces a clear error with Retry.
+const TODAY_TIMEOUT_MS = 12000;
+const CHECKIN_TIMEOUT_MS = 12000;
+const ACTION_TIMEOUT_MS = 20000;
+
+async function fetchWithTimeout(url: string, opts: RequestInit, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+  finally { clearTimeout(timer); }
+}
+
 export default function SebPage() {
   const [today, setToday] = useState<Today | null>(null);
   const [needCheckIn, setNeedCheckIn] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [written, setWritten] = useState<Record<string, string>>({});
 
+  // Load today's assignment. On a 401 (no session) show Check In; on an HTTP error, a non-JSON body, a
+  // timeout, or a network failure show a clear error with Retry instead of an endless "Loading…".
   const load = useCallback(async () => {
-    setMsg(null);
-    const r = await fetch('/api/seb/today');
-    if (r.status === 401) { setNeedCheckIn(true); setToday(null); return; }
-    const j = await r.json();
-    setNeedCheckIn(false);
-    setToday(j);
+    setMsg(null); setLoadError(null);
+    try {
+      const r = await fetchWithTimeout('/api/seb/today', {}, TODAY_TIMEOUT_MS);
+      if (r.status === 401) { setNeedCheckIn(true); setToday(null); return; }
+      if (!r.ok) { setLoadError(`Could not load training (HTTP ${r.status}). Please retry.`); return; }
+      const j = await r.json();
+      setNeedCheckIn(false);
+      setToday(j);
+    } catch (e: any) {
+      setLoadError(e?.name === 'AbortError' ? 'Loading timed out. Please retry.' : 'Could not reach the server. Please retry.');
+    }
   }, []);
 
   // On launch the Windows launcher opens /seb#code=<fresh single-use code> (from the enrollment
-  // exchange). Redeem it silently for the SEB session, scrub it from the address bar, then load. If no
-  // code and no session, the manual Check In screen is shown.
+  // exchange). Redeem it silently for the SEB session, scrub it from the address bar, then load. If
+  // redemption is slow or fails, the session may still have been created server-side, so we do NOT show
+  // an error here: load() then detects the session (200) or asks for a code (401). Normal repeat
+  // enrollment stays silent. If no code and no session, the manual Check In screen is shown.
   useEffect(() => {
     (async () => {
       try {
@@ -37,7 +60,9 @@ export default function SebPage() {
         if (m) {
           const c = decodeURIComponent(m[1]);
           try { history.replaceState(null, '', window.location.pathname); } catch { /* ignore */ }
-          await fetch('/api/seb/check-in', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: c }) }).catch(() => {});
+          try {
+            await fetchWithTimeout('/api/seb/check-in', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: c }) }, CHECKIN_TIMEOUT_MS);
+          } catch { /* redemption slow/failed: session may already exist; load() decides. */ }
         }
       } finally {
         await load();
@@ -56,17 +81,19 @@ export default function SebPage() {
   async function checkIn() {
     setBusy(true); setMsg(null);
     try {
-      const r = await fetch('/api/seb/check-in', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.trim() }) });
-      const j = await r.json();
-      if (!r.ok) { setMsg(j.error || 'Check in failed.'); return; }
+      const r = await fetchWithTimeout('/api/seb/check-in', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.trim() }) }, CHECKIN_TIMEOUT_MS);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setMsg(j.error || `Check in failed (HTTP ${r.status}).`); return; }
       await load();
+    } catch (e: any) {
+      setMsg(e?.name === 'AbortError' ? 'Check in timed out. Try again.' : 'Could not reach the server. Try again.');
     } finally { setBusy(false); }
   }
 
   async function punch() {
     setBusy(true); setMsg(null);
     try {
-      await fetch('/api/seb/punch', { method: 'POST' }).then((r) => r.json()).catch(() => ({}));
+      await fetchWithTimeout('/api/seb/punch', { method: 'POST' }, ACTION_TIMEOUT_MS).then((r) => r.json()).catch(() => ({}));
       await load();
     } finally { setBusy(false); }
   }
@@ -78,13 +105,16 @@ export default function SebPage() {
       const body = today.item.kind === 'lesson'
         ? { kind: 'lesson', lessonId: today.item.id }
         : { kind: 'test', testId: today.item.id, answers, written };
-      const r = await fetch('/api/seb/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const j = await r.json();
-      if (!r.ok) { setMsg(j.error || 'Could not save. Try again.'); return; }
+      const r = await fetchWithTimeout('/api/seb/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, ACTION_TIMEOUT_MS);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setMsg(j.error || `Could not save (HTTP ${r.status}). Try again.`); return; }
       if (j.done && j.quitUrl) { window.location.href = j.quitUrl; return; }
       if (j.done) { setMsg('Completed. (No quit URL is configured.)'); await load(); return; }
       setMsg('Saved, but today is not complete yet.');
       await load();
+    } catch (e: any) {
+      // The completion is only saved when the server confirms; a timeout here does not quit SEB.
+      setMsg(e?.name === 'AbortError' ? 'Saving timed out. Your work is not lost; try again.' : 'Could not reach the server. Try again.');
     } finally { setBusy(false); }
   }
 
@@ -99,6 +129,16 @@ export default function SebPage() {
         <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter check-in code" className="mt-4 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2" />
         {msg && <div className="mt-2 text-sm text-red-400">{msg}</div>}
         <button disabled={busy || !code.trim()} onClick={checkIn} className="mt-4 w-full rounded-lg bg-indigo-500 px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Checking in…' : 'Check In'}</button>
+      </div></div>
+    );
+  }
+
+  if (loadError && !today) {
+    return (
+      <div className={wrap}><div className={card}>
+        <h1 className="text-xl font-semibold">Could not load</h1>
+        <p className="mt-1 text-sm text-red-400">{loadError}</p>
+        <button disabled={busy} onClick={() => { setBusy(true); load().finally(() => setBusy(false)); }} className="mt-4 w-full rounded-lg bg-indigo-500 px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Retrying…' : 'Retry'}</button>
       </div></div>
     );
   }

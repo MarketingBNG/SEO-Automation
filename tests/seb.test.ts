@@ -209,6 +209,29 @@ test('enroll-session decision: fresh code is minted only when launching (pending
   }
 });
 
+// The today route bounds the attendance read so a slow or failing attendance lookup never stalls the
+// lesson/test. withTimeout is that mechanism: fast -> real value; slow -> fallback (timedOut); reject ->
+// fallback. This is what keeps SEB off an endless "Loading…" when one dependency hangs.
+test('withTimeout: fast promise returns its value', async () => {
+  const r = await seb.withTimeout(Promise.resolve({ status: 'confirmed' }), 1000, { status: 'unknown' });
+  assert.equal(r.timedOut, false);
+  assert.deepEqual(r.value, { status: 'confirmed' });
+});
+
+test('withTimeout: a slow promise falls back (attendance slow -> lesson still ships)', async () => {
+  const slow = new Promise((res) => setTimeout(() => res({ status: 'confirmed' }), 200));
+  const r = await seb.withTimeout(slow as Promise<any>, 20, { status: 'unknown' });
+  assert.equal(r.timedOut, true);
+  assert.deepEqual(r.value, { status: 'unknown' });
+});
+
+test('withTimeout: a rejecting promise falls back, no throw (attendance failure -> lesson still ships)', async () => {
+  const bad = Promise.reject(new Error('db down'));
+  const r = await seb.withTimeout(bad, 50, { status: 'unknown' });
+  assert.equal(r.timedOut, true);
+  assert.deepEqual(r.value, { status: 'unknown' });
+});
+
 test('SEB quit URL resolves; dashboard setting overrides the env', { skip: !db }, async () => {
   await wipe();
   process.env.SEB_QUIT_URL = 'https://seo.usaindiacfo.us/seb/quit';

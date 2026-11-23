@@ -20,6 +20,33 @@ export async function resolveSebQuitUrl(): Promise<string> {
 // (done) the normal desktop stays available and SEB is not opened.
 export const shouldLaunchSeb = (status: string) => status === 'pending';
 
+// A short request id and structured, secret-free timing logs for the SEB startup path. Never pass a
+// code, token or cookie value in `extra`: these lines go to the server log.
+export const newReqId = () => crypto.randomBytes(5).toString('hex');
+export function sebLog(route: string, reqId: string, phase: string, extra?: Record<string, string | number | boolean>): void {
+  const parts = [`[seb] ${route} rid=${reqId} ${phase}`];
+  if (extra) for (const [k, v] of Object.entries(extra)) parts.push(`${k}=${v}`);
+  // eslint-disable-next-line no-console
+  console.log(parts.join(' '));
+}
+
+// Race a promise against a timeout so one slow/failed dependency cannot stall the whole response. On
+// timeout the fallback is returned (the caller logs that it fell back); the slow promise is left to
+// settle on its own and its rejection is swallowed so it does not become an unhandled rejection.
+export async function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<{ value: T; timedOut: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<{ value: T; timedOut: boolean }>((resolve) => {
+    timer = setTimeout(() => resolve({ value: fallback, timedOut: true }), ms);
+  });
+  // A rejection resolves to the fallback too (slow OR failed), and never surfaces as unhandled.
+  const settled = p.then((value) => ({ value, timedOut: false })).catch(() => ({ value: fallback, timedOut: true }));
+  try {
+    return await Promise.race([settled, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export const SEB_COOKIE = 'seb_session';
 const HANDOFF_TTL_MS = 5 * 60 * 1000; // 5 minutes, single use
 const SESSION_TTL_MS = 10 * 60 * 60 * 1000; // a work day
