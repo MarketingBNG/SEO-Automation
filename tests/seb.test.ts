@@ -11,7 +11,7 @@ const { checkIn, attendanceStatus } = require('../lib/attendance') as typeof imp
 const seb = require('../lib/seb') as typeof import('../lib/seb');
 const { gateForEmail, gateDecision } = require('../lib/worklog') as typeof import('../lib/worklog');
 const { markRead, submitTest, playGame } = require('../lib/associateTraining') as typeof import('../lib/associateTraining');
-const { trainingGate } = require('../lib/trainingGate') as typeof import('../lib/trainingGate');
+const { trainingGate, allowedWhileLocked, gateRefusal } = require('../lib/trainingGate') as typeof import('../lib/trainingGate');
 const { enqueuePriorDays, processQueue } = require('../lib/timesheetSync') as typeof import('../lib/timesheetSync');
 const settings = require('../lib/settings') as typeof import('../lib/settings');
 const { sebTodayItem } = require('../lib/associateTrainingView') as typeof import('../lib/associateTrainingView');
@@ -259,6 +259,31 @@ test('Finish: a confirmed completion returns done:true and the exact quit URL (S
   const quitUrl = await seb.resolveSebQuitUrl();
   assert.equal(quitUrl, 'https://seo.usaindiacfo.us/seb/quit');
   assert.notEqual(quitUrl, '');
+});
+
+// ---- /seb-code: a locked trainee may still mint their own SEB code, nothing else ----
+test('gate exception is exactly /api/seb/handoff (pure)', () => {
+  assert.equal(allowedWhileLocked('/api/seb/handoff'), true);
+  // The exception is restricted: no other SEB route and no other dashboard write is unlocked by it.
+  assert.equal(allowedWhileLocked('/api/seb/admin'), false);
+  assert.equal(allowedWhileLocked('/api/seb/handoff/extra'), false);
+  assert.equal(allowedWhileLocked('/api/strategy/run'), false);
+});
+
+test('a locked trainee can POST /api/seb/handoff but no other write', { skip: !db }, async () => {
+  await wipe();
+  const email = 'lock@usaindiacfo.com';
+  const day = istDayNow();
+  await prisma.team_members.create({ data: { email, name: 'Lock', role: 'user', blocked: false } });
+  await prisma.training_profiles.create({ data: { email, name: 'Lock', level: 1, lesson_ids: '{}', active: true } });
+  // An open test today => the trainee is locked.
+  await prisma.training_tests.create({ data: { email, day, level: 1, questions: Q, total: 1, status: 'open', kind: 'daily', lesson_ids: ',0,', created_at: `${day} 02:00:00` } });
+  assert.equal((await trainingGate(email, 'user')).locked, true);
+  // The code-minting endpoint is allowed through even while locked...
+  assert.equal(await gateRefusal('POST', '/api/seb/handoff', email, 'user'), null);
+  // ...but every other dashboard write stays refused.
+  const refused = await gateRefusal('POST', '/api/strategy/run', email, 'user');
+  assert.ok(refused && refused.status === 403);
 });
 
 // ---- QA / disposable test (kind 'qa'): real finish flow, out of official records ----
