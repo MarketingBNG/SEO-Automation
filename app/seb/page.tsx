@@ -5,7 +5,18 @@
 // server to save completion and only navigates to the configured quit URL once the server confirms.
 // Google OAuth is never done here. No secret is in the URL.
 import { useCallback, useEffect, useState } from 'react';
-import { GameRound } from '@/components/training/game-round';
+import dynamic from 'next/dynamic';
+import { SEB_BUILD_TAG } from '@/lib/sebBuild';
+
+// The game UI is loaded only when a lesson is shown. Isolating it in its own chunk (ssr:false) means a
+// problem loading/evaluating the game can never block the whole /seb page from hydrating and running its
+// startup logic (which is what showed an endless "Loading…").
+const GameRound = dynamic(() => import('@/components/training/game-round').then((m) => m.GameRound), { ssr: false });
+
+// Rendered into the server HTML, so it shows ON THE DEVICE even if the client never hydrates: if SEB
+// shows this exact tag, the running build includes this code; an older tag or none means Coolify is still
+// serving an older build. Shared with /api/seb/version via lib/sebBuild.
+const BUILD_TAG = SEB_BUILD_TAG;
 
 type Today = { status: string; locked: boolean; name: string | null; item: any; attendance: any; quitUrl?: string; error?: string };
 
@@ -14,6 +25,9 @@ type Today = { status: string; locked: boolean; name: string | null; item: any; 
 const TODAY_TIMEOUT_MS = 12000;
 const CHECKIN_TIMEOUT_MS = 12000;
 const ACTION_TIMEOUT_MS = 20000;
+// Backstop: if nothing has resolved this long after mount (no lesson, no Check In screen, no error), show
+// the error/Retry screen anyway, so the page can never sit on "Loading…" forever while JS is running.
+const WATCHDOG_MS = 18000;
 
 async function fetchWithTimeout(url: string, opts: RequestInit, ms: number): Promise<Response> {
   const ctrl = new AbortController();
@@ -70,6 +84,16 @@ export default function SebPage() {
       }
     })();
   }, [load]);
+
+  // Watchdog: if startup never reaches a lesson, the Check In screen, or an error within WATCHDOG_MS,
+  // force the error/Retry screen. This covers any path where the startup chain neither resolves nor
+  // rejects, so "Loading…" is never permanent as long as the page's JS is running.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setLoadError((prev) => prev ?? 'Startup is taking too long. Please retry.');
+    }, WATCHDOG_MS);
+    return () => clearTimeout(t);
+  }, []);
 
   // On a no-training day (e.g. Sunday) quit SEB to the desktop. Read-only: nothing is marked complete
   // and no timesheet sync is triggered.
@@ -150,11 +174,22 @@ export default function SebPage() {
         <h1 className="text-xl font-semibold">Could not load</h1>
         <p className="mt-1 text-sm text-red-400">{loadError}</p>
         <button disabled={busy} onClick={() => { setBusy(true); load().finally(() => setBusy(false)); }} className="mt-4 w-full rounded-lg bg-indigo-500 px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Retrying…' : 'Retry'}</button>
+        <p className="mt-2 text-xs text-slate-400">Still stuck? <a href="/seb" className="underline">Reload the page</a>.</p>
+        <div className="mt-3 text-[10px] text-slate-500">build {BUILD_TAG}</div>
       </div></div>
     );
   }
 
-  if (!today) return <div className={wrap}><div className={card}>Loading…</div></div>;
+  if (!today) {
+    return (
+      <div className={wrap}><div className={card}>
+        <div>Loading…</div>
+        <p className="mt-2 text-xs text-slate-400">If this does not move, <a href="/seb" className="underline">tap here to reload</a>.</p>
+        <noscript><p className="mt-2 text-xs text-amber-400">JavaScript must be enabled in the SEB configuration for training to load.</p></noscript>
+        <div className="mt-3 text-[10px] text-slate-500">build {BUILD_TAG}</div>
+      </div></div>
+    );
+  }
 
   const att = today.attendance?.status;
   const attLine = (
