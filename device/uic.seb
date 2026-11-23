@@ -17,9 +17,11 @@
   <key>startURL</key>
   <string>__START_URL__</string>
 
-  <!-- Where SEB sends the browser when training is finished (the page navigates here; SEB then quits). -->
+  <!-- Where SEB sends the browser when training is finished (the page navigates here; SEB then quits).
+       This MUST match the dashboard's quit URL exactly (lib/seb.ts DEFAULT_SEB_QUIT_URL, or the
+       seb_quit_url setting if one is set). quitURLConfirm=false so there is no prompt on exit. -->
   <key>quitURL</key>
-  <string>https://seo.usaindiacfo.us/seb-quit</string>
+  <string>https://seo.usaindiacfo.us/seb/quit</string>
   <key>quitURLConfirm</key>
   <false/>
 

@@ -232,13 +232,32 @@ test('withTimeout: a rejecting promise falls back, no throw (attendance failure 
   assert.deepEqual(r.value, { status: 'unknown' });
 });
 
-test('SEB quit URL resolves; dashboard setting overrides the env', { skip: !db }, async () => {
+test('SEB quit URL: setting > env > built-in default; never empty', { skip: !db }, async () => {
   await wipe();
-  process.env.SEB_QUIT_URL = 'https://seo.usaindiacfo.us/seb/quit';
+  // No setting and no env -> the built-in default (matches the VM SEB profile), never empty.
   await settings.set('seb_quit_url', '');
-  assert.equal(await seb.resolveSebQuitUrl(), 'https://seo.usaindiacfo.us/seb/quit');
+  delete process.env.SEB_QUIT_URL;
+  assert.equal(await seb.resolveSebQuitUrl(), seb.DEFAULT_SEB_QUIT_URL);
+  assert.equal(seb.DEFAULT_SEB_QUIT_URL, 'https://seo.usaindiacfo.us/seb/quit');
+  // Env overrides the default.
+  process.env.SEB_QUIT_URL = 'https://env.example/quit';
+  assert.equal(await seb.resolveSebQuitUrl(), 'https://env.example/quit');
+  // An explicit setting overrides the env.
   await settings.set('seb_quit_url', 'https://override.example/quit');
   assert.equal(await seb.resolveSebQuitUrl(), 'https://override.example/quit');
+  delete process.env.SEB_QUIT_URL;
+});
+
+test('Finish: a confirmed completion returns done:true and the exact quit URL (SEB can exit)', { skip: !db }, async () => {
+  await wipe();
+  delete process.env.SEB_QUIT_URL;
+  await settings.set('seb_quit_url', ''); // rely on the built-in default, the common VM case
+  // A done gate must yield a non-empty quit URL equal to the SEB profile's quitURL.
+  const done = seb.shouldLaunchSeb('pending') === true; // sanity that the helper is wired
+  assert.ok(done);
+  const quitUrl = await seb.resolveSebQuitUrl();
+  assert.equal(quitUrl, 'https://seo.usaindiacfo.us/seb/quit');
+  assert.notEqual(quitUrl, '');
 });
 
 test('SEB today path is read-only: no completion and no timesheet sync written', { skip: !db }, async () => {

@@ -9,10 +9,19 @@ import { sqlNow } from './time';
 
 const prisma: any = prismaClient;
 
-// The SEB quit link: the dashboard setting seb_quit_url overrides the SEB_QUIT_URL env, else empty.
-// Read-only; used by both the no-training auto-quit and the Finished flow.
+// The exact quit URL baked into the VM's SEB profile (quitURL). SEB only terminates when the browser is
+// sent to THIS string, so the dashboard must hand back exactly this after a confirmed Finish. It is the
+// built-in fallback so a missing setting/env can never leave SEB open; it is not a secret.
+export const DEFAULT_SEB_QUIT_URL = 'https://seo.usaindiacfo.us/seb/quit';
+
+// The SEB quit link. Precedence: an explicit dashboard setting (seb_quit_url) overrides the SEB_QUIT_URL
+// env, which overrides the built-in default. Always returns a non-empty URL, so a confirmed Finish (and
+// the no-training auto-quit) always receives a quit URL. Read-only. To point SEB elsewhere, set the
+// seb_quit_url setting to the new profile's quitURL (it must match the .seb profile exactly).
 export async function resolveSebQuitUrl(): Promise<string> {
-  return String((await settings.get('seb_quit_url')) || process.env.SEB_QUIT_URL || '');
+  const setting = String((await settings.get('seb_quit_url')) || '').trim();
+  const env = String(process.env.SEB_QUIT_URL || '').trim();
+  return setting || env || DEFAULT_SEB_QUIT_URL;
 }
 
 // The launcher runs the gate before opening SEB and launches ONLY for pending training (which the gate
