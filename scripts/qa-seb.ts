@@ -1,9 +1,12 @@
 // Assign / clear a short, disposable QA test ("QA — SEB Automatic Exit") for ONE enrolled person, to
 // test the real /seb/finish -> quit flow without touching any official record.
 //
-//   npx tsx scripts/qa-seb.ts status <email>    gate + whether a QA test exists today (read-only)
-//   npx tsx scripts/qa-seb.ts assign <email>    create today's QA test (kind 'qa') for that person
-//   npx tsx scripts/qa-seb.ts clear  <email>    delete today's QA test for that person
+//   npx tsx scripts/qa-seb.ts status <email>     gate + QA test today + the SEB quit URL (read-only)
+//   npx tsx scripts/qa-seb.ts assign <email>     create today's QA test (kind 'qa') for that person
+//   npx tsx scripts/qa-seb.ts clear  <email>     delete today's QA test for that person
+//   npx tsx scripts/qa-seb.ts quit-url           print the resolved SEB quit URL (read-only)
+//   npx tsx scripts/qa-seb.ts set-quit-url <url> set the seb_quit_url setting (overrides env + default)
+//   npx tsx scripts/qa-seb.ts clear-quit-url     remove the setting so the built-in default is used
 //
 // Needs DATABASE_URL pointing at the same Postgres the dashboard uses (run it in the app's environment).
 // Run by an admin only. It is scoped to the one email you pass. The QA test:
@@ -16,9 +19,12 @@
 //   - does NOT touch the person's lessons, reads, real tests, points or level.
 import prismaClient from '../lib/prisma';
 import { gateForEmail } from '../lib/worklog';
+import { resolveSebQuitUrl, DEFAULT_SEB_QUIT_URL } from '../lib/seb';
+import * as settings from '../lib/settings';
 import { lessonIdsOf } from '../lib/trainingContent';
 
 const prisma: any = prismaClient;
+const EXPECTED_QUIT_URL = 'https://seo.usaindiacfo.us/seb/quit';
 const istDay = () => new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
 const QA_KIND = 'qa';
 const QA_TITLE = 'QA — SEB Automatic Exit';
@@ -29,6 +35,18 @@ const QA_QUESTIONS = [
   { id: 'qa-fail', q: 'If the save fails, what should SEB do?', options: ['Stay open on the test', 'Close anyway', 'Restart Windows'], answer: 0, explain: 'No quit URL is returned on a failed save, so SEB stays open.', kind: 'mcq' as const },
   { id: 'qa-scope', q: 'This QA result is counted in official training scores.', options: ['False — it is a disposable QA test', 'True'], answer: 0, explain: 'QA tests are kept out of scores, attendance and Zoho sync.', kind: 'mcq' as const },
 ];
+
+async function quitUrlInfo() {
+  const raw = await settings.get('seb_quit_url');
+  const resolved = await resolveSebQuitUrl();
+  return { resolvedQuitUrl: resolved, rawSetting: raw ?? null, envSet: Boolean(process.env.SEB_QUIT_URL), builtInDefault: DEFAULT_SEB_QUIT_URL, matchesExpected: resolved === EXPECTED_QUIT_URL };
+}
+
+async function quitUrl() {
+  const info = await quitUrlInfo();
+  console.log(JSON.stringify(info, null, 2));
+  if (!info.matchesExpected) console.log(`\nWARNING: the resolved quit URL is not ${EXPECTED_QUIT_URL}. SEB will not exit unless this matches the VM's SEB profile quitURL. Fix with: set-quit-url ${EXPECTED_QUIT_URL}  (or clear-quit-url to use the built-in default).`);
+}
 
 async function status(email: string) {
   const who = email.toLowerCase();
@@ -43,6 +61,7 @@ async function status(email: string) {
     profile: prof ? { active: prof.active, level: prof.level } : null,
     istDay: day, qaTestToday: qa ? { id: qa.id, status: qa.status, total: qa.total } : null,
     lessonReadRecords: reads, gate: { status: gate.status, locked: gate.locked },
+    sebQuitUrl: await quitUrlInfo(),
   }, null, 2));
   if (!prof) console.log('\nNote: no training profile for this email. The gate will not lock and /seb will not show a test.');
   if (prof && !prof.active) console.log('\nNote: training profile is INACTIVE, so the gate stays open. Activate it (admin > In training) for the QA test to show.');
@@ -82,12 +101,26 @@ async function clear(email: string) {
 }
 
 async function main() {
-  const [cmd, email] = process.argv.slice(2);
-  if (!cmd || !email) { console.error('Usage: npx tsx scripts/qa-seb.ts <status|assign|clear> <email>'); process.exit(1); }
-  if (cmd === 'status') await status(email);
-  else if (cmd === 'assign') await assign(email);
-  else if (cmd === 'clear') await clear(email);
-  else { console.error(`Unknown command "${cmd}". Use status | assign | clear.`); process.exit(1); }
+  const [cmd, arg] = process.argv.slice(2);
+  if (cmd === 'quit-url') { await quitUrl(); return; }
+  if (cmd === 'set-quit-url') {
+    if (!arg) { console.error('Usage: npx tsx scripts/qa-seb.ts set-quit-url <url>'); process.exit(1); }
+    await settings.set('seb_quit_url', arg);
+    console.log(`Set seb_quit_url to ${arg}.`);
+    await quitUrl();
+    return;
+  }
+  if (cmd === 'clear-quit-url') {
+    await prisma.settings.deleteMany({ where: { key: 'seb_quit_url' } });
+    console.log('Cleared the seb_quit_url setting; the built-in default now applies.');
+    await quitUrl();
+    return;
+  }
+  if (!cmd || !arg) { console.error('Usage: npx tsx scripts/qa-seb.ts <status|assign|clear> <email> | quit-url | set-quit-url <url> | clear-quit-url'); process.exit(1); }
+  if (cmd === 'status') await status(arg);
+  else if (cmd === 'assign') await assign(arg);
+  else if (cmd === 'clear') await clear(arg);
+  else { console.error(`Unknown command "${cmd}". Use status | assign | clear | quit-url | set-quit-url | clear-quit-url.`); process.exit(1); }
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
