@@ -5,6 +5,7 @@
 // server to save completion and only navigates to the configured quit URL once the server confirms.
 // Google OAuth is never done here. No secret is in the URL.
 import { useCallback, useEffect, useState } from 'react';
+import { GameRound } from '@/components/training/game-round';
 
 type Today = { status: string; locked: boolean; name: string | null; item: any; attendance: any; quitUrl?: string; error?: string };
 
@@ -98,6 +99,16 @@ export default function SebPage() {
     } finally { setBusy(false); }
   }
 
+  // Submit a lesson game through the SEB session. Returns the scored result for the shared GameRound to
+  // show. It does not complete the lesson or close SEB; the Finished button does that.
+  async function playGame(answers: any) {
+    if (!today?.item) throw new Error('No lesson.');
+    const r = await fetchWithTimeout('/api/seb/game', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lessonId: today.item.id, answers }) }, ACTION_TIMEOUT_MS);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `Could not submit the game (HTTP ${r.status}).`);
+    return j;
+  }
+
   async function finish() {
     if (!today?.item) return;
     setBusy(true); setMsg(null);
@@ -170,6 +181,16 @@ export default function SebPage() {
         <>
           <h1 className="text-xl font-semibold">{item.title}</h1>
           <div className="prose prose-invert mt-3 max-h-[60vh] overflow-auto text-sm" dangerouslySetInnerHTML={{ __html: item.content_html || '' }} />
+          {item.games && (
+            <details className="mt-4 rounded-lg border border-slate-700">
+              <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-slate-200">Play the game (optional)</summary>
+              <div className="border-t border-slate-700 p-3">
+                {/* Reuses the dashboard game UI and server scoring. Playing a game does not complete the
+                    lesson: use the Finished button below to save and close SEB. */}
+                <GameRound games={item.games} idKey={item.id} onSubmit={playGame} />
+              </div>
+            </details>
+          )}
           <button disabled={busy} onClick={finish} className="mt-5 w-full rounded-lg bg-emerald-500 px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Saving…' : 'I have read today’s lesson'}</button>
         </>
       ) : (

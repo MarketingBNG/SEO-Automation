@@ -89,7 +89,7 @@ async function personView(email: string, role: string, forViewer = false) {
   const reads = await prisma.training_reads.findMany({ where: { email, lesson_id: { in: ids } } });
   const opens = forViewer && ids.length ? await prisma.training_lesson_opens.findMany({ where: { email, lesson_id: { in: ids } } }) : [];
   const open = await prisma.training_tests.findMany({ where: { email, status: 'open' }, orderBy: [{ day: 'desc' }, { kind: 'asc' }] });
-  const results = await prisma.training_tests.findMany({ where: { email, status: { notIn: ['open', 'marking'] } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 30, select: { id: true, day: true, level: true, score: true, total: true, status: true, kind: true, opened_at: true, submitted_at: true, signals: true } });
+  const results = await prisma.training_tests.findMany({ where: { email, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 30, select: { id: true, day: true, level: true, score: true, total: true, status: true, kind: true, opened_at: true, submitted_at: true, signals: true } });
   const past = await prisma.training_lessons.findMany({ where: { audience: audienceFor(role), level: { lte: profile.level }, id: { notIn: ids } }, orderBy: [{ day: 'desc' }, { level: 'desc' }], take: 15 });
   const games = await prisma.training_games.findMany({ where: { email }, select: { day: true, lesson_id: true, points: true, max_points: true } });
   const streak = gameStreak(games.map((x) => x.day), istDay());
@@ -146,7 +146,7 @@ export async function addRemark(me: { email: string; role: string; name?: string
   if (only && !only.has(who)) throw Object.assign(new Error('That person is not on your team.'), { status: 403 });
   const profile = await prisma.training_profiles.findUnique({ where: { email: who } });
   if (!profile) throw Object.assign(new Error('Person not found.'), { status: 404 });
-  const tests = await prisma.training_tests.findMany({ where: { email: who, status: { notIn: ['open', 'marking'] } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 5, select: { score: true, total: true } });
+  const tests = await prisma.training_tests.findMany({ where: { email: who, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 5, select: { score: true, total: true } });
   const percent = tests.length ? Math.round(tests.reduce((a: number, t: any) => a + ((t.score || 0) / Math.max(1, t.total)) * 100, 0) / tests.length) : null;
   const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
   const hist = await prisma.training_level_history.findMany({ where: { email: who }, orderBy: { id: 'desc' }, take: 10, select: { from_level: true, to_level: true, created_at: true } });
@@ -245,7 +245,7 @@ export async function teamReport(only?: Set<string> | null): Promise<ReportRow[]
   const sched = await getSchedule();
   const out: ReportRow[] = [];
   for (const p of people) {
-    const tests = await prisma.training_tests.findMany({ where: { email: p.email, status: { notIn: ['open', 'marking'] } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 60 });
+    const tests = await prisma.training_tests.findMany({ where: { email: p.email, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 60 });
     const pcts = tests.map((t) => pct(t));
     const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
     const a5 = avg(pcts.slice(0, 5));

@@ -344,7 +344,7 @@ export async function setLevel(email: string, to: number, reason: string, actor 
 // Scores of the tests taken at the current level since the last level change, newest first.
 async function scoresSinceChange(email: string, level: number) {
   const change = await prisma.training_level_history.findFirst({ where: { email }, orderBy: { id: 'desc' }, select: { created_at: true } });
-  const tests = await prisma.training_tests.findMany({ where: { email, level, status: { in: ['done', 'missed'] }, ...(change ? { created_at: { gte: change.created_at } } : {}) }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 10, select: { score: true, total: true } });
+  const tests = await prisma.training_tests.findMany({ where: { email, level, status: { in: ['done', 'missed'] }, kind: { not: 'qa' }, ...(change ? { created_at: { gte: change.created_at } } : {}) }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 10, select: { score: true, total: true } });
   return tests.map((t) => Math.round(((t.score || 0) / Math.max(1, t.total)) * 100));
 }
 
@@ -437,6 +437,18 @@ export async function submitTest(email: string, testId: number, answers: Record<
   if (claim.count !== 1) throw Object.assign(new Error('This test is already finished'), { status: 409 });
   const today = istDay();
   const questions = testQuestions(t);
+  // A QA / disposable test (kind 'qa') runs the real submit + /seb/finish flow but is kept out of all
+  // official records: no misses, no level/streak change, no activity log, and it is excluded from every
+  // scoring aggregate (results, the team report, the adaptive level). MCQ only, so no AI-graded written
+  // answers (no paid calls). It still marks done so the gate opens and SEB quits.
+  if (t.kind === 'qa') {
+    let qaScore = 0;
+    for (const q of questions) if (q.kind !== 'written' && answers?.[q.id] !== undefined && Number(answers[q.id]) === q.answer) qaScore++;
+    await prisma.training_tests.update({ where: { id: t.id }, data: { status: 'done', score: qaScore, answers: JSON.stringify(answers || {}), submitted_at: sqlNow() } });
+    const { forgetGate } = await import('./trainingGate');
+    forgetGate(email);
+    return { score: qaScore, total: questions.length, percent: Math.round((qaScore / Math.max(1, questions.length)) * 100), levelUp: false, levelDown: false, kind: 'qa', qa: true, questions, answers, writtenGrades: {}, written: meta?.written || {} };
+  }
   let score = 0;
   const writtenGrades: Record<string, { score: number; reason: string }> = {};
   try {

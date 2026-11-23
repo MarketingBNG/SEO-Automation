@@ -10,7 +10,7 @@ const prisma = require('../lib/prisma').default;
 const { checkIn, attendanceStatus } = require('../lib/attendance') as typeof import('../lib/attendance');
 const seb = require('../lib/seb') as typeof import('../lib/seb');
 const { gateForEmail, gateDecision } = require('../lib/worklog') as typeof import('../lib/worklog');
-const { markRead, submitTest } = require('../lib/associateTraining') as typeof import('../lib/associateTraining');
+const { markRead, submitTest, playGame } = require('../lib/associateTraining') as typeof import('../lib/associateTraining');
 const { trainingGate } = require('../lib/trainingGate') as typeof import('../lib/trainingGate');
 const { enqueuePriorDays, processQueue } = require('../lib/timesheetSync') as typeof import('../lib/timesheetSync');
 const settings = require('../lib/settings') as typeof import('../lib/settings');
@@ -18,9 +18,10 @@ const { sebTodayItem } = require('../lib/associateTrainingView') as typeof impor
 const enroll = require('../lib/sebEnroll') as typeof import('../lib/sebEnroll');
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const istDayNow = () => new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
 const Q = '[{"id":"q1","q":"W?","options":["a","b","c","d"],"answer":0,"explain":"e"}]';
 async function wipe() {
-  for (const t of ['attendance_punches', 'seb_handoffs', 'seb_sessions', 'timesheet_sync_queue', 'work_attendance', 'training_reads', 'training_tests', 'training_lessons', 'training_profiles', 'team_members', 'settings']) {
+  for (const t of ['attendance_punches', 'seb_handoffs', 'seb_sessions', 'timesheet_sync_queue', 'work_attendance', 'training_reads', 'training_misses', 'training_games', 'training_tests', 'training_lessons', 'training_profiles', 'team_members', 'settings']) {
     await prisma.$executeRawUnsafe(`DELETE FROM ${t}`).catch(() => {});
   }
 }
@@ -258,6 +259,52 @@ test('Finish: a confirmed completion returns done:true and the exact quit URL (S
   const quitUrl = await seb.resolveSebQuitUrl();
   assert.equal(quitUrl, 'https://seo.usaindiacfo.us/seb/quit');
   assert.notEqual(quitUrl, '');
+});
+
+// ---- QA / disposable test (kind 'qa'): real finish flow, out of official records ----
+test('QA test: submit marks done and finishes the gate, with no score/level/misses impact', { skip: !db }, async () => {
+  await wipe();
+  const email = 'qa@usaindiacfo.com';
+  const day = istDayNow();
+  await prisma.team_members.create({ data: { email, name: 'QA', role: 'user', blocked: false } });
+  await prisma.training_profiles.create({ data: { email, name: 'QA', level: 2, streak: 3, points: 50, lesson_ids: '{}', active: true } });
+  const qs = JSON.stringify([
+    { id: 'a', q: '1?', options: ['x', 'y'], answer: 0, explain: '', kind: 'mcq' },
+    { id: 'b', q: '2?', options: ['x', 'y'], answer: 1, explain: '', kind: 'mcq' },
+  ]);
+  const t = await prisma.training_tests.create({ data: { email, day, level: 2, questions: qs, total: 2, status: 'open', kind: 'qa', lesson_ids: ',0,', created_at: `${day} 02:00:00` } });
+  // Before: the open QA test locks the gate (so /seb shows it as pending).
+  assert.equal((await trainingGate(email, 'user')).locked, true);
+  const r: any = await submitTest(email, t.id, { a: 0, b: 1 });
+  assert.equal(r.qa, true);
+  assert.equal(r.score, 2);
+  assert.equal((await prisma.training_tests.findUnique({ where: { id: t.id } })).status, 'done');
+  // After: the gate is finished (not locked) -> /seb/finish returns done -> SEB quits.
+  assert.equal((await trainingGate(email, 'user')).locked, false);
+  // Out of official records: profile level/streak/points unchanged and no misses recorded.
+  const p = await prisma.training_profiles.findUnique({ where: { email } });
+  assert.equal(p.level, 2); assert.equal(p.streak, 3); assert.equal(p.points, 50);
+  assert.equal(await prisma.training_misses.count({ where: { email } }), 0);
+});
+
+// ---- Games inside SEB: reuse the lesson scoring, scoped to the person's assigned lesson ----
+test('SEB game: scoring is awarded only for the person\'s own assigned lesson', { skip: !db }, async () => {
+  await wipe();
+  const email = 'g@usaindiacfo.com';
+  const day = istDayNow();
+  const mine = 9100; const notMine = 9200;
+  const extras = JSON.stringify({ terms: [{ term: 'A', definition: 'da' }, { term: 'B', definition: 'db' }, { term: 'C', definition: 'dc' }] });
+  await prisma.team_members.create({ data: { email, name: 'G', role: 'user', blocked: false } });
+  await prisma.training_profiles.create({ data: { email, name: 'G', level: 1, points: 0, lesson_ids: `{"technical":${mine}}`, active: true } });
+  await prisma.training_lessons.create({ data: { id: mine, day, level: 1, title: 'L', content_html: '<p>x</p>', questions: '[]', track: 'technical', audience: 'associate', extras, created_at: `${day} 02:00:00` } });
+  await prisma.training_lessons.create({ data: { id: notMine, day, level: 1, title: 'O', content_html: '<p>x</p>', questions: '[]', track: 'marketing', audience: 'associate', extras, created_at: `${day} 02:00:00` } });
+  // Own assigned lesson of today: the round counts (awarded), same scoring as the dashboard.
+  const r: any = await playGame(email, mine, {});
+  assert.equal(r.awarded, true);
+  // A lesson that is not assigned to this person: not awarded (the SEB route rejects it with 403; playGame
+  // treats it as practice). Either way a game never scores for a lesson that is not the person's own.
+  const r2: any = await playGame(email, notMine, {});
+  assert.equal(r2.awarded, false);
 });
 
 test('SEB today path is read-only: no completion and no timesheet sync written', { skip: !db }, async () => {

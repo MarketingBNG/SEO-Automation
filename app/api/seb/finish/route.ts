@@ -14,13 +14,15 @@ export async function POST(req: NextRequest) {
   const email = await sebSessionEmail(req.cookies.get(SEB_COOKIE)?.value);
   if (!email) return NextResponse.json({ error: 'No SEB session. Check in again.' }, { status: 401 });
   const body: any = (await req.json().catch(() => ({}))) || {};
+  let isQa = false;
   try {
     if (body.kind === 'lesson') {
       if (!body.lessonId) return NextResponse.json({ error: 'lessonId required' }, { status: 400 });
       await markRead(email, Number(body.lessonId));
     } else if (body.kind === 'test') {
       if (!body.testId) return NextResponse.json({ error: 'testId required' }, { status: 400 });
-      await submitTest(email, Number(body.testId), body.answers || {}, { log: body.log, signals: body.signals, written: body.written });
+      const r: any = await submitTest(email, Number(body.testId), body.answers || {}, { log: body.log, signals: body.signals, written: body.written });
+      isQa = Boolean(r?.qa);
     } else {
       return NextResponse.json({ error: 'kind must be lesson or test' }, { status: 400 });
     }
@@ -33,8 +35,8 @@ export async function POST(req: NextRequest) {
   const done = gate.status === 'done';
   // On confirmed Finished, enqueue the person's prior worked days for Zoho Projects sync. Fire-and-forget
   // and failure-tolerant: SEB exit and desktop access do not depend on the sync. The processor (cron)
-  // posts the hours later.
-  if (done) void enqueuePriorDays(email).catch(() => {});
+  // posts the hours later. A QA / disposable test never triggers a Zoho sync.
+  if (done && !isQa) void enqueuePriorDays(email).catch(() => {});
   const quitUrl = done ? await resolveSebQuitUrl() : '';
   return NextResponse.json({ status: gate.status, done, quitUrl });
 }
