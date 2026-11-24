@@ -28,7 +28,8 @@ param(
   [string]$SebInstallerUrl = "",
   [switch]$SkipSeb,
   [switch]$SkipWatcher,
-  [switch]$TestOnly
+  [switch]$TestOnly,
+  [switch]$SkipTest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -321,7 +322,7 @@ Set-WifiAutoConnect
 Install-Seb
 if (-not $SkipWatcher) { Register-LogonTask 'UIC Watcher'      (Join-Path $UIC 'uic-watcher.ps1') }
 if (-not $SkipSeb)     { Register-LogonTask 'UIC SEB Launcher' (Join-Path $UIC 'uic-seb-launcher.ps1') }
-Test-Launcher
+if (-not $SkipTest) { Test-Launcher } else { Log "SkipTest set: not opening SEB now (it will run at the next logon)." }
 
 Write-Host ""
 Write-Host "================= DONE - now, by hand (once) ================="
