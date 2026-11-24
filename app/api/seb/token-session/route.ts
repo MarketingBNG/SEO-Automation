@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getWorkToken } from '@/lib/workToken';
 import { emailForToken, gateForEmail } from '@/lib/worklog';
 import { mintHandoff, shouldLaunchSeb, sebLog, newReqId } from '@/lib/seb';
+import { isConnected as zohoPeopleConnected } from '@/lib/zohoPeople';
 import { methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
@@ -23,7 +24,10 @@ export async function POST(req: NextRequest) {
   const gate = await gateForEmail(email);
   const launch = shouldLaunchSeb(gate.status);
   const code = launch ? (await mintHandoff(email)).code : undefined;
-  sebLog('token-session', rid, 'done', { status: gate.status, launch });
-  return NextResponse.json({ ok: true, status: gate.status, launch, code });
+  // Whether this person has connected their Zoho People (so the device verify tool can report if the
+  // attendance Check In will work). No secret is returned.
+  const zohoConnected = await zohoPeopleConnected(email).catch(() => false);
+  sebLog('token-session', rid, 'done', { status: gate.status, launch, zoho: zohoConnected });
+  return NextResponse.json({ ok: true, status: gate.status, launch, code, zohoConnected });
 }
 export { methodNotAllowed as GET, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };
