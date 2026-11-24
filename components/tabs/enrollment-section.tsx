@@ -22,6 +22,7 @@ export function EnrollmentSection() {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('user');
   const [level, setLevel] = useState('1');
+  const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -48,8 +49,9 @@ export function EnrollmentSection() {
 
   async function enroll() {
     if (!email.trim()) return;
+    setNote(null);
     const ok = await post({ op: 'enroll', email: email.trim(), role, level: Number(level) || 1 }, 'enroll');
-    if (ok) { setEmail(''); setRole('user'); setLevel('1'); }
+    if (ok) { setNote(`Enrolled ${email.trim()}. Today's lesson/test is being prepared (a few minutes, if it is a training day after 09:00 IST and Live mode is on).`); setEmail(''); setRole('user'); setLevel('1'); }
   }
 
   async function remove(target: string) {
@@ -95,6 +97,7 @@ export function EnrollmentSection() {
         <Button onClick={enroll} disabled={busy === 'enroll' || !email.trim()}>{busy === 'enroll' ? 'Enrolling…' : 'Enroll'}</Button>
       </div>
       {!canRoles && <p className="-mt-2 text-xs text-muted-foreground">As a manager you can enroll people already on the team; adding a new person or changing a role is admin-only.</p>}
+      {note && <p className="text-sm text-emerald-600">{note}</p>}
       {err && <p className="text-sm text-red-600">{err}</p>}
 
       {/* Enrolled table */}

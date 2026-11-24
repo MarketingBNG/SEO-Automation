@@ -6,6 +6,7 @@ import { getMe } from '@/lib/auth';
 import { canDo } from '@/lib/access';
 import { canBlock, isRole, isTeam, OWNER_EMAIL, ROLES, type Role } from '@/lib/permissions';
 import { listEnrolled, ensureProfile, setActive, setLevel, unblock, removePerson, isCompanyEmail, clampLevel } from '@/lib/trainingEnroll';
+import { runTrainingDay } from '@/lib/associateTraining';
 import { methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
@@ -73,7 +74,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'The admin is not a trainee and cannot be enrolled.' }, { status: 400 });
     }
     const { created, profile } = await ensureProfile(email, { level: b.level, name: b.name || existing?.name || null, actor: me.name });
-    return NextResponse.json({ ok: true, created, level: profile.level, active: Boolean(profile.active) });
+    // A person enrolled after today's scheduled run would otherwise have no lessons until tomorrow (the
+    // day is generated once). Generate today's day now (idempotent: others already done are skipped; in
+    // Testing mode or with AI paused it queues and completes when AI is available). Fire-and-forget.
+    if (created) void runTrainingDay().catch(() => {});
+    return NextResponse.json({ ok: true, created, level: profile.level, active: Boolean(profile.active), generating: created });
   }
 
   // Remove a person entirely (typo/junk entry or someone who left): admin only, since it revokes sign-in.

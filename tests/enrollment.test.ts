@@ -8,6 +8,7 @@ process.env.NEXTAUTH_SECRET ||= 'test-secret';
 const prisma = require('../lib/prisma').default;
 const enroll = require('../lib/trainingEnroll') as typeof import('../lib/trainingEnroll');
 const settings = require('../lib/settings') as typeof import('../lib/settings');
+const { anyActiveTraineeMissingToday } = require('../lib/associateTraining') as typeof import('../lib/associateTraining');
 
 async function wipe() {
   for (const t of ['activity_log', 'training_profiles', 'team_members', 'settings']) {
@@ -73,6 +74,24 @@ test('removePerson deletes the team member, profile, token and SEB rows', { skip
   assert.equal(await prisma.training_profiles.count({ where: { email: who } }), 0);
   assert.equal(await prisma.work_tokens.count({ where: { email: who } }), 0);
   assert.equal(await prisma.seb_enrollments.count({ where: { email: who } }), 0);
+});
+
+test('catch-up: a newly enrolled active trainee is detected as missing today, then not after content exists', { skip: !db }, async () => {
+  for (const t of ['training_lessons', 'training_tests', 'training_profiles', 'team_members']) await prisma.$executeRawUnsafe(`DELETE FROM ${t}`).catch(() => {});
+  const day = '2099-01-15';
+  // No trainees at all -> nobody missing.
+  assert.equal(await anyActiveTraineeMissingToday(day), false);
+  // An active trainee with no content for the day -> missing (the scheduler tick will generate it).
+  await prisma.team_members.create({ data: { email: 'new@usaindiacfo.com', role: 'user', blocked: false } });
+  await prisma.training_profiles.create({ data: { email: 'new@usaindiacfo.com', level: 1, active: true, lesson_ids: '{}' } });
+  assert.equal(await anyActiveTraineeMissingToday(day), true);
+  // Give them a test for the day -> no longer missing.
+  await prisma.training_tests.create({ data: { email: 'new@usaindiacfo.com', day, level: 1, questions: '[]', total: 1, status: 'open' } });
+  assert.equal(await anyActiveTraineeMissingToday(day), false);
+  // A paused profile is not counted.
+  await prisma.training_profiles.update({ where: { email: 'new@usaindiacfo.com' }, data: { active: false } });
+  await prisma.training_tests.deleteMany({ where: { email: 'new@usaindiacfo.com' } });
+  assert.equal(await anyActiveTraineeMissingToday(day), false);
 });
 
 test('autoEnrollOnLogin: off by default, on only for qualifying non-admins', { skip: !db }, async () => {

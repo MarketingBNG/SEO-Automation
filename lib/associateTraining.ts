@@ -586,6 +586,25 @@ export async function runTrainingDay(now = new Date()) {
 
 // Called by the scheduler every 15 minutes: once a day from 08:00 IST (before the 09:00 lock), so the
 // day's lessons and tests are ready before a trainee's laptop locks.
+// Is any active trainee still without today's content (lesson for a lesson day, or a test for a test
+// day)? True right after someone is enrolled past today's run, so the next tick catches them up.
+export async function anyActiveTraineeMissingToday(day: string): Promise<boolean> {
+  const team = await prisma.team_members.findMany({ select: { email: true, role: true, blocked: true } });
+  const roleOf = new Map<string, any>(team.map((t: any) => [t.email.toLowerCase(), t]));
+  const people = (await prisma.training_profiles.findMany({ where: { active: true } })).filter((p: any) => {
+    const m = roleOf.get(p.email);
+    return m && !m.blocked && isTrainee(m.role);
+  });
+  for (const p of people) {
+    const ids = Object.values(lessonIdsOf(p)).filter((x): x is number => Boolean(x));
+    const hasLesson = ids.length ? (await prisma.training_lessons.count({ where: { id: { in: ids }, day } })) > 0 : false;
+    if (hasLesson) continue;
+    const hasTest = (await prisma.training_tests.count({ where: { email: p.email, day } })) > 0;
+    if (!hasTest) return true;
+  }
+  return false;
+}
+
 export async function trainingTick(now = new Date()) {
   if (istHour(now) < TRAINING_HOUR_IST) return;
   const day = istDay(now);
@@ -599,4 +618,15 @@ export async function trainingTick(now = new Date()) {
   }).catch((e) => {
     if (!(e instanceof AnotherRunGoing)) console.error('Training day failed:', e.message);
   });
+
+  // Catch-up: the day's run runs once, so anyone enrolled AFTER it (admin page, auto-enroll on login, or
+  // the script) would otherwise wait until tomorrow. If any active trainee has no content for today,
+  // generate it this tick, so a newly set-up person gets their training within ~15 minutes. runTrainingDay
+  // is idempotent (people already done are skipped) and has its own lock, and once everyone has today's
+  // content this does nothing. In Testing mode or with AI paused it queues and completes when AI is back.
+  try {
+    if (await anyActiveTraineeMissingToday(day)) await runTrainingDay(now);
+  } catch (e: any) {
+    if (!(e instanceof AnotherRunGoing)) console.error('Training catch-up failed:', e?.message);
+  }
 }
