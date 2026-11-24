@@ -63,6 +63,56 @@ export async function exchangeCode(code: string, email: string) {
 
 export const isConnected = (email: string) => hasTokens(provider(email));
 
+// Non-secret diagnostics for the OAuth connect: shows exactly what the server would send to Zoho, so a
+// redirect-uri or data-center mismatch (the usual cause of Zoho's "An error occurred" after Accept) is
+// visible without reading env or the API console. No secret, token or code is ever returned.
+const hostOf = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
+const dcOf = (host: string) => { const m = /\.zoho\.([a-z.]+)$/.exec(host || ''); return m ? m[1] : (host ? 'unknown' : ''); };
+const maskId = (id: string) => (id ? id.slice(0, 10) + (id.length > 10 ? '…' : '') : '');
+
+export function diagnostics() {
+  const clientId = process.env.ZOHO_CLIENT_ID || '';
+  const accountsUrl = (process.env.ZOHO_ACCOUNTS_URL || '').replace(/\/+$/, '');
+  const redirectUri = process.env.ZOHO_PEOPLE_REDIRECT_URI || '';
+  const peopleApi = API;
+  const nextauth = (process.env.NEXTAUTH_URL || '').replace(/\/+$/, '');
+  const expectedRedirectUri = nextauth ? `${nextauth}/api/zoho-people/oauth-callback` : '';
+  const accountsHost = hostOf(accountsUrl);
+  const peopleHost = hostOf(peopleApi);
+  const redirectHost = hostOf(redirectUri);
+  const accountsDc = dcOf(accountsHost);
+  const peopleDc = dcOf(peopleHost);
+
+  const issues: string[] = [];
+  if (!clientId) issues.push('ZOHO_CLIENT_ID is not set.');
+  if (!process.env.ZOHO_CLIENT_SECRET) issues.push('ZOHO_CLIENT_SECRET is not set.');
+  if (!accountsUrl) issues.push('ZOHO_ACCOUNTS_URL is not set.');
+  if (!redirectUri) issues.push('ZOHO_PEOPLE_REDIRECT_URI is not set.');
+  if (expectedRedirectUri && redirectUri && redirectUri !== expectedRedirectUri) {
+    issues.push(`ZOHO_PEOPLE_REDIRECT_URI (${redirectUri}) does not equal this dashboard's callback (${expectedRedirectUri}). It must ALSO be registered in the Zoho app EXACTLY, character for character.`);
+  }
+  if (accountsDc && peopleDc && accountsDc !== peopleDc) {
+    issues.push(`Data-center mismatch: accounts is .${accountsDc} but the People API is .${peopleDc}. They must be the same region, and the Zoho app must be created in that region's API console.`);
+  }
+  if (redirectHost && accountsHost && hostOf(nextauth) && redirectHost !== hostOf(nextauth)) {
+    issues.push(`The redirect URI host (${redirectHost}) is not this dashboard's host (${hostOf(nextauth)}).`);
+  }
+
+  let authorizeUrl = '';
+  try { authorizeUrl = authUrl(); } catch { /* cfg incomplete; issues above explain */ }
+
+  return {
+    accountsHost, accountsDc, peopleApiHost: peopleHost, peopleDc,
+    redirectUri, redirectUriHost: redirectHost,
+    expectedRedirectUri, redirectMatchesDashboard: Boolean(expectedRedirectUri) && redirectUri === expectedRedirectUri,
+    regionConsistent: Boolean(accountsDc) && accountsDc === peopleDc,
+    scope: SCOPES, clientIdMasked: maskId(clientId), clientSecretPresent: Boolean(process.env.ZOHO_CLIENT_SECRET),
+    authorizeUrl, // the real authorize URL (no state); eyeball redirect_uri / scope / host against the Zoho app
+    issues,
+    hint: 'Zoho shows "An error occurred" after Accept almost always because redirect_uri is not registered EXACTLY in the app, or the app/account/accounts-URL are in different data centers (.com vs .in). Fix those two and reconnect.',
+  };
+}
+
 async function accessToken(email: string): Promise<string> {
   const p = provider(email);
   const tokens: any = await readTokens(p);
