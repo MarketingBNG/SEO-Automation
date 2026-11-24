@@ -52,6 +52,11 @@ export function EnrollmentSection() {
     if (ok) { setEmail(''); setRole('user'); setLevel('1'); }
   }
 
+  async function remove(target: string) {
+    if (typeof window !== 'undefined' && !window.confirm(`Remove ${target} completely? This deletes their team membership, training profile and data, device token and SEB/Zoho connection. The audit log is kept. This cannot be undone.`)) return;
+    await post({ op: 'remove', email: target }, target);
+  }
+
   if (err && !data) {
     return (
       <section className="grid gap-3">
@@ -129,6 +134,7 @@ export function EnrollmentSection() {
                     {r.enrolled && r.active && <Button size="sm" variant="outline" disabled={busy === r.email} onClick={() => post({ op: 'pause', email: r.email }, r.email)}>Pause</Button>}
                     {r.enrolled && !r.active && <Button size="sm" variant="outline" disabled={busy === r.email} onClick={() => post({ op: 'activate', email: r.email }, r.email)}>Activate</Button>}
                     {r.blocked && <Button size="sm" variant="outline" disabled={busy === r.email} onClick={() => post({ op: 'unblock', email: r.email }, r.email)}>Unblock</Button>}
+                    {canRoles && <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" disabled={busy === r.email} onClick={() => remove(r.email)}>Remove</Button>}
                   </div>
                 </td>
               </tr>

@@ -77,6 +77,36 @@ export async function unblock(email: string, actor: string): Promise<void> {
   if (r.count) await activity.log('training.enroll_changed', { details: `${who}: unblocked`, actor });
 }
 
+// Remove a person completely (for a typo/junk entry, or someone who left): their team membership (so
+// they can no longer sign in), training profile and data, device/work token, SEB enrollment/sessions, and
+// their Zoho People/Projects connection. The audit log is kept. Each delete is independent so a missing
+// row never aborts the rest. Admin-only; enforced in the API route. Never call for an admin/owner.
+export async function removePerson(email: string, actor: string): Promise<{ removed: string[] }> {
+  const who = email.toLowerCase();
+  const removed: string[] = [];
+  const del = async (label: string, fn: () => Promise<{ count: number }>) => {
+    try { const r = await fn(); if (r?.count) removed.push(`${label}:${r.count}`); } catch { /* table/column may not exist in older DBs */ }
+  };
+  await del('team_member', () => prisma.team_members.deleteMany({ where: { email: who } }));
+  await del('profile', () => prisma.training_profiles.deleteMany({ where: { email: who } }));
+  await del('work_token', () => prisma.work_tokens.deleteMany({ where: { email: who } }));
+  await del('seb_enrollments', () => prisma.seb_enrollments.deleteMany({ where: { email: who } }));
+  await del('seb_sessions', () => prisma.seb_sessions.deleteMany({ where: { email: who } }));
+  await del('seb_handoffs', () => prisma.seb_handoffs.deleteMany({ where: { email: who } }));
+  await del('attendance_punches', () => prisma.attendance_punches.deleteMany({ where: { email: who } }));
+  await del('work_attendance', () => prisma.work_attendance.deleteMany({ where: { email: who } }));
+  await del('timesheet_sync_queue', () => prisma.timesheet_sync_queue.deleteMany({ where: { email: who } }));
+  await del('training_reads', () => prisma.training_reads.deleteMany({ where: { email: who } }));
+  await del('training_tests', () => prisma.training_tests.deleteMany({ where: { email: who } }));
+  await del('training_games', () => prisma.training_games.deleteMany({ where: { email: who } }));
+  await del('training_misses', () => prisma.training_misses.deleteMany({ where: { email: who } }));
+  await del('training_remarks', () => prisma.training_remarks.deleteMany({ where: { email: who } }));
+  await del('training_level_history', () => prisma.training_level_history.deleteMany({ where: { email: who } }));
+  await del('tokens', () => prisma.oauth_tokens.deleteMany({ where: { provider: { in: [`zoho_people:${who}`, `zoho_projects:${who}`] } } }));
+  await activity.log('team.removed', { details: `${who}: removed from team/training (${removed.join(', ') || 'nothing found'})`, actor });
+  return { removed };
+}
+
 // Optional auto-enroll on first login (behind a setting, default off). Called from the NextAuth jwt
 // callback on initial sign-in. Only a non-admin, qualifying-role, company-email person with no profile is
 // enrolled at level 1. It never changes roles and never enrolls the admin.

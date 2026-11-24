@@ -60,6 +60,21 @@ test('setActive / setLevel / unblock', { skip: !db }, async () => {
   assert.equal((await prisma.team_members.findUnique({ where: { email: 'u@usaindiacfo.com' } })).blocked, false);
 });
 
+test('removePerson deletes the team member, profile, token and SEB rows', { skip: !db }, async () => {
+  for (const t of ['team_members', 'training_profiles', 'work_tokens', 'seb_enrollments']) await prisma.$executeRawUnsafe(`DELETE FROM ${t}`).catch(() => {});
+  const who = 'rahul.sharm@usaindiacfo.com'; // the typo entry
+  await prisma.team_members.create({ data: { email: who, role: 'user', blocked: false } });
+  await prisma.training_profiles.create({ data: { email: who, level: 1, active: true } });
+  await prisma.work_tokens.create({ data: { email: who, token: 'tkn-typo-123' } }).catch(() => {});
+  await prisma.seb_enrollments.create({ data: { id: 'e-typo', email: who, windows_user: 'S-1', secret_hash: 'h' } }).catch(() => {});
+  const r = await enroll.removePerson(who, 'admin');
+  assert.ok(r.removed.length >= 2);
+  assert.equal(await prisma.team_members.count({ where: { email: who } }), 0);
+  assert.equal(await prisma.training_profiles.count({ where: { email: who } }), 0);
+  assert.equal(await prisma.work_tokens.count({ where: { email: who } }), 0);
+  assert.equal(await prisma.seb_enrollments.count({ where: { email: who } }), 0);
+});
+
 test('autoEnrollOnLogin: off by default, on only for qualifying non-admins', { skip: !db }, async () => {
   await wipe();
   // Off by default -> nothing created.

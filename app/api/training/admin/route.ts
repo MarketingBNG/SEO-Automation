@@ -5,7 +5,7 @@ import * as settings from '@/lib/settings';
 import { getMe } from '@/lib/auth';
 import { canDo } from '@/lib/access';
 import { canBlock, isRole, isTeam, OWNER_EMAIL, ROLES, type Role } from '@/lib/permissions';
-import { listEnrolled, ensureProfile, setActive, setLevel, unblock, isCompanyEmail, clampLevel } from '@/lib/trainingEnroll';
+import { listEnrolled, ensureProfile, setActive, setLevel, unblock, removePerson, isCompanyEmail, clampLevel } from '@/lib/trainingEnroll';
 import { methodNotAllowed } from '../../_lib/http';
 
 export const runtime = 'nodejs';
@@ -74,6 +74,15 @@ export async function POST(req: NextRequest) {
     }
     const { created, profile } = await ensureProfile(email, { level: b.level, name: b.name || existing?.name || null, actor: me.name });
     return NextResponse.json({ ok: true, created, level: profile.level, active: Boolean(profile.active) });
+  }
+
+  // Remove a person entirely (typo/junk entry or someone who left): admin only, since it revokes sign-in.
+  if (op === 'remove') {
+    if (!(await canDo(me, 'team.roles'))) return NextResponse.json({ error: 'Only an admin can remove a person.' }, { status: 403 });
+    if (email === me.email.toLowerCase()) return NextResponse.json({ error: 'You cannot remove yourself.' }, { status: 400 });
+    if (email === OWNER_EMAIL || existing?.role === 'admin') return NextResponse.json({ error: 'An admin/owner cannot be removed here.' }, { status: 400 });
+    const r = await removePerson(email, me.name);
+    return NextResponse.json({ ok: true, removed: r.removed });
   }
 
   // From here the person must be an existing non-admin team member.
