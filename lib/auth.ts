@@ -52,12 +52,18 @@ export const authOptions: NextAuthOptions = {
         const { default: prisma } = await import('./prisma');
         await prisma.activity_log.create({ data: { action: 'auth.signed_in', details: 'Signed in with Google', actor: token.name || token.email, actor_email: token.email.toLowerCase(), source: 'dashboard' } }).catch(() => {});
       }
+      const firstSignIn = Boolean(account && token.email);
       if (token.email) {
         const { memberFor } = await import('./team');
         const m = await memberFor(token.email, token.name).catch(() => null);
         if (m) {
           token.role = m.role;
           token.blocked = m.blocked;
+          // Optional auto-enroll on first login (behind a setting, default off): a qualifying non-admin
+          // gets a training profile automatically. Best-effort; never blocks sign-in.
+          if (firstSignIn) {
+            await import('./trainingEnroll').then((e) => e.autoEnrollOnLogin(String(token.email), (token.name as string) || null, m.role)).catch(() => {});
+          }
           // Pages and actions this person may use (role access plus their own grants).
           const { accessFor } = await import('./access');
           const a = await accessFor(m.email, m.role).catch(() => null);

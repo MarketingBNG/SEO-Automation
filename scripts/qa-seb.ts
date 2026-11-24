@@ -2,6 +2,7 @@
 // test the real /seb/finish -> quit flow without touching any official record.
 //
 //   npx tsx scripts/qa-seb.ts status <email>     gate + QA test today + the SEB quit URL (read-only)
+//   npx tsx scripts/qa-seb.ts enroll <email> [n] enroll into training (same logic as the admin page)
 //   npx tsx scripts/qa-seb.ts assign <email>     create today's QA test (kind 'qa') for that person
 //   npx tsx scripts/qa-seb.ts clear  <email>     delete today's QA test for that person
 //   npx tsx scripts/qa-seb.ts quit-url           print the resolved SEB quit URL (read-only)
@@ -21,7 +22,7 @@ import prismaClient from '../lib/prisma';
 import { gateForEmail } from '../lib/worklog';
 import { resolveSebQuitUrl } from '../lib/seb';
 import * as settings from '../lib/settings';
-import { lessonIdsOf } from '../lib/trainingContent';
+import { ensureProfile, isCompanyEmail } from '../lib/trainingEnroll';
 
 const prisma: any = prismaClient;
 const EXPECTED_QUIT_URL = 'https://seo.usaindiacfo.us/seb/quit';
@@ -92,6 +93,20 @@ async function assign(email: string) {
   await status(who);
 }
 
+// Backup for the dashboard admin page: enroll a person into training. Ensures a team_members row (so they
+// can sign in) and creates their training_profiles row via the SAME ensureProfile the UI uses.
+async function enroll(email: string, levelArg?: string) {
+  const who = email.toLowerCase();
+  if (!isCompanyEmail(who)) { console.error(`Refusing: ${who} is not a company email.`); process.exit(1); }
+  const existing = await prisma.team_members.findUnique({ where: { email: who } });
+  if (!existing) await prisma.team_members.create({ data: { email: who, role: 'user', blocked: false } });
+  else if (existing.role === 'admin') { console.error('The admin is not a trainee and cannot be enrolled.'); process.exit(1); }
+  const level = levelArg ? Number(levelArg) : 1;
+  const { created, profile } = await ensureProfile(who, { level, name: existing?.name || null, actor: 'qa-seb.ts' });
+  console.log(`${created ? 'Enrolled' : 'Already enrolled'} ${who} at level ${profile.level}.`);
+  await status(who);
+}
+
 async function clear(email: string) {
   const who = email.toLowerCase();
   const day = istDay();
@@ -124,9 +139,10 @@ async function main() {
   }
   if (!cmd || !arg) { console.error('Usage: npx tsx scripts/qa-seb.ts <status|assign|clear> <email> | quit-url | set-quit-url <url> | clear-quit-url'); process.exit(1); }
   if (cmd === 'status') await status(arg);
+  else if (cmd === 'enroll') await enroll(arg, process.argv.slice(2)[2]);
   else if (cmd === 'assign') await assign(arg);
   else if (cmd === 'clear') await clear(arg);
-  else { console.error(`Unknown command "${cmd}". Use status | assign | clear | quit-url | set-quit-url | clear-quit-url.`); process.exit(1); }
+  else { console.error(`Unknown command "${cmd}". Use status | enroll | assign | clear | quit-url | set-quit-url | clear-quit-url.`); process.exit(1); }
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

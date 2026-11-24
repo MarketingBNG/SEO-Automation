@@ -148,6 +148,7 @@ export function actionFor(method: string, path: string): Action | null {
     if (/^\/api\/seranking\/research$/.test(p)) return 'content.work';
     if (/^\/api\/(performance|ga4|gsc|seranking|clarity|blog-analytics|zoho\/leads|zoho\/pipeline|zoho\/business)/.test(p)) return 'reports.view';
     if (/^\/api\/(ai-credits|agent)/.test(p)) return 'credits.view';
+    if (/^\/api\/training\/admin/.test(p)) return 'team.view';
     if (/^\/api\/team/.test(p)) return 'team.view';
     // Client meeting notes (Meeting insights page).
     if (/^\/api\/client-insights/.test(p)) return 'reports.view';
@@ -202,6 +203,8 @@ export function actionFor(method: string, path: string): Action | null {
   if (/^\/api\/(ai-credits|agent)/.test(p)) return 'credits.change';
   if (/^\/api\/team\/access/.test(p)) return 'team.roles';
   if (/^\/api\/team/.test(p)) return 'team.view'; // finer checks (roles, who can be blocked) in the route
+  // Training enrollment (admin and managers); the route enforces the finer rules (who may add/role/block).
+  if (/^\/api\/training\/admin/.test(p)) return 'team.view';
   if (/^\/api\/(settings|gsc|ga4|gbp|zoho|site\/test|fireflies|bing|surfer\/test|serphouse\/test|seranking\/test)/.test(p)) return 'settings.change';
   return 'content.work';
 }

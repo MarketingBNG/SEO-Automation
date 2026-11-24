@@ -1,6 +1,7 @@
 'use client';
 
 import { useRole } from '@/hooks/use-role';
+import { EnrollmentSection } from '@/components/tabs/enrollment-section';
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { fmtIst } from '@/lib/time';
@@ -102,6 +103,7 @@ function ConnCard({
 export default function SettingsTab() {
   const canChange = useRole().can('settings.change');
   const isAdmin = useRole().role === 'admin';
+  const myRole = useRole().role;
   const [status, setStatus] = useState<string | null>(null);
 
   // Connection status for each connector, checked automatically when Settings opens. Each check
@@ -518,7 +520,11 @@ export default function SettingsTab() {
   const sum = (o: any) => Object.values(o || {}).reduce((a: any, b: any) => a + b, 0) as number;
 
   return (
-    // Only the admin changes settings; everyone else sees them read-only (the server enforces it too).
+    <div className="grid gap-10">
+      {/* Enrollment is for admins and managers; it is OUTSIDE the settings fieldset so a manager (who
+          cannot change settings) can still use it. The server enforces the real authority. */}
+      {(myRole === 'admin' || myRole === 'manager') && <EnrollmentSection />}
+    {/* Only the admin changes settings; everyone else sees them read-only (the server enforces it too). */}
     <fieldset disabled={!canChange} className="grid gap-10">
       {!canChange && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
@@ -1163,5 +1169,6 @@ export default function SettingsTab() {
         </ConnCard>
       </Section>
     </fieldset>
+    </div>
   );
 }

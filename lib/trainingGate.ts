@@ -97,7 +97,7 @@ async function computeGate(email: string, day: string): Promise<Gate> {
 // own single-use code from /seb-code to open that very training in SEB. The exception is exactly this one
 // endpoint: every other dashboard write stays locked, and the route itself still requires a Google
 // session and mints the code only for the signed-in person's own account.
-export const allowedWhileLocked = (path: string) => /^\/api\/associate-training(\/|$)/.test(path) || /^\/api\/consent(\/|$)/.test(path) || /^\/api\/auth(\/|$)/.test(path) || path === '/api/seb/handoff';
+export const allowedWhileLocked = (path: string) => /^\/api\/associate-training(\/|$)/.test(path) || /^\/api\/consent(\/|$)/.test(path) || /^\/api\/auth(\/|$)/.test(path) || path === '/api/seb/handoff' || /^\/api\/training\/admin(\/|$)/.test(path);
 
 // proxy.ts: the refusal for an API write by a person whose training today is not finished, or null.
 // Reads stay open (the page shows the lock); the training's own routes stay open.
