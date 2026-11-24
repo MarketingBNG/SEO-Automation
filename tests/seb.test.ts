@@ -9,7 +9,7 @@ process.env.NEXTAUTH_SECRET ||= 'test-secret';
 const prisma = require('../lib/prisma').default;
 const { checkIn, attendanceStatus } = require('../lib/attendance') as typeof import('../lib/attendance');
 const seb = require('../lib/seb') as typeof import('../lib/seb');
-const { gateForEmail, gateDecision } = require('../lib/worklog') as typeof import('../lib/worklog');
+const { gateForEmail, gateDecision, ensureWorkToken, emailForToken } = require('../lib/worklog') as typeof import('../lib/worklog');
 const { markRead, submitTest, playGame } = require('../lib/associateTraining') as typeof import('../lib/associateTraining');
 const { trainingGate, allowedWhileLocked, gateRefusal } = require('../lib/trainingGate') as typeof import('../lib/trainingGate');
 const { enqueuePriorDays, processQueue } = require('../lib/timesheetSync') as typeof import('../lib/timesheetSync');
@@ -259,6 +259,23 @@ test('Finish: a confirmed completion returns done:true and the exact quit URL (S
   const quitUrl = await seb.resolveSebQuitUrl();
   assert.equal(quitUrl, 'https://seo.usaindiacfo.us/seb/quit');
   assert.notEqual(quitUrl, '');
+});
+
+// ---- token-session: the device work token identifies the person; no code is ever typed ----
+test('SEB token-session: the work token resolves to the person; an unknown token does not', { skip: !db }, async () => {
+  await wipe();
+  const email = 'dev@usaindiacfo.com';
+  await prisma.team_members.create({ data: { email, name: 'Dev', role: 'user', blocked: false } });
+  const token = await ensureWorkToken(email);
+  assert.ok(token && token.length > 10);
+  // The same token the activity watcher uses resolves to this person (so SEB needs no code).
+  assert.equal(await emailForToken(token), email);
+  // Round-trips to the same token (one per person), and an unknown token is rejected.
+  assert.equal(await ensureWorkToken(email), token);
+  assert.equal(await emailForToken('not-a-real-token'), null);
+  // Launch decision is the same gate contract: only "pending" opens SEB.
+  assert.equal(seb.shouldLaunchSeb('pending'), true);
+  for (const s of ['before-window', 'no-training', 'done', 'not-ready', 'error']) assert.equal(seb.shouldLaunchSeb(s), false);
 });
 
 // ---- /seb-code: a locked trainee may still mint their own SEB code, nothing else ----

@@ -40,7 +40,6 @@ export default function SebPage() {
   const [today, setToday] = useState<Today | null>(null);
   const [needCheckIn, setNeedCheckIn] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, number>>({});
@@ -103,18 +102,6 @@ export default function SebPage() {
     }
   }, [today]);
 
-  async function checkIn() {
-    setBusy(true); setMsg(null);
-    try {
-      const r = await fetchWithTimeout('/api/seb/check-in', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.trim() }) }, CHECKIN_TIMEOUT_MS);
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) { setMsg(j.error || `Check in failed (HTTP ${r.status}).`); return; }
-      await load();
-    } catch (e: any) {
-      setMsg(e?.name === 'AbortError' ? 'Check in timed out. Try again.' : 'Could not reach the server. Try again.');
-    } finally { setBusy(false); }
-  }
-
   async function punch() {
     setBusy(true); setMsg(null);
     try {
@@ -167,13 +154,14 @@ export default function SebPage() {
   const card = 'w-full max-w-2xl rounded-2xl bg-slate-800 p-6 shadow-xl';
 
   if (needCheckIn) {
+    // No code is asked for. The launcher verifies the device by its work token and opens SEB with a
+    // session. If there is no session here, the device is not set up (or the token is wrong).
     return (
       <div className={wrap}><div className={card}>
-        <h1 className="text-xl font-semibold">Check In</h1>
-        <p className="mt-1 text-sm text-slate-300">Open your regular browser, go to the SEB code page, and enter the code shown there.</p>
-        <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Enter check-in code" className="mt-4 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2" />
-        {msg && <div className="mt-2 text-sm text-red-400">{msg}</div>}
-        <button disabled={busy || !code.trim()} onClick={checkIn} className="mt-4 w-full rounded-lg bg-indigo-500 px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Checking in…' : 'Check In'}</button>
+        <h1 className="text-xl font-semibold">Device not set up</h1>
+        <p className="mt-1 text-sm text-slate-300">This device is not linked for training yet. Ask your admin to run the SEB setup with this device’s token. You do not need to enter a code.</p>
+        <button disabled={busy} onClick={() => { setBusy(true); load().finally(() => setBusy(false)); }} className="mt-4 w-full rounded-lg bg-indigo-500 px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Checking…' : 'Try again'}</button>
+        <div className="mt-3 text-[10px] text-slate-500">build {BUILD_TAG}</div>
       </div></div>
     );
   }
