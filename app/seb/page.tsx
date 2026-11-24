@@ -118,8 +118,18 @@ export default function SebPage() {
   async function punch() {
     setBusy(true); setMsg(null);
     try {
-      await fetchWithTimeout('/api/seb/punch', { method: 'POST' }, ACTION_TIMEOUT_MS).then((r) => r.json()).catch(() => ({}));
+      const j = await fetchWithTimeout('/api/seb/punch', { method: 'POST' }, ACTION_TIMEOUT_MS).then((r) => r.json()).catch(() => ({}));
+      const a = j?.attendance;
+      // Surface the outcome so a check-in that cannot complete says WHY (the button no longer looks dead).
+      if (a?.status === 'confirmed') setMsg('Checked in.');
+      else if (a?.status === 'in_progress' || a?.status === 'pending') setMsg('Check in is being recorded. Tap again in a moment to confirm.');
+      else if (a?.status === 'not-connected') setMsg(a.reason || 'Connect Zoho People once from your regular browser, then check in.');
+      else if (a?.reason) setMsg(`Could not check in: ${a.reason}`);
+      else if (a?.status && a.status !== 'none') setMsg(`Check in: ${a.status}`);
+      else setMsg('Could not check in. Try again.');
       await load();
+    } catch (e: any) {
+      setMsg(e?.name === 'AbortError' ? 'Check in timed out. Try again.' : 'Could not reach the server. Try again.');
     } finally { setBusy(false); }
   }
 
@@ -199,7 +209,7 @@ export default function SebPage() {
     </div>
   );
 
-  const info = (t: string) => <div className={wrap}><div className={card}>{attLine}<h1 className="text-xl font-semibold">{t}</h1></div></div>;
+  const info = (t: string) => <div className={wrap}><div className={card}>{attLine}<h1 className="text-xl font-semibold">{t}</h1>{msg && <div className="mt-2 text-sm text-amber-400">{msg}</div>}</div></div>;
   if (today.status === 'before-window') return info('Training opens at 9:00 AM IST.');
   if (today.status === 'done') return info('Today’s training is complete. You may quit.');
   if (today.status === 'not-ready') return info('Today’s training is being prepared. Please wait a moment and refresh.');
