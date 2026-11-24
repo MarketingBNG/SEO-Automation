@@ -1,26 +1,24 @@
 // Per-employee Zoho People connection and attendance check-in. Each person connects their own Zoho
 // People once (OAuth, token under provider "zoho_people:<email>"). The dashboard then records a check-in
-// on their behalf without opening Zoho. Reuses the existing Zoho OAuth app credentials but with the
-// People attendance scope and its own redirect URI.
+// on their behalf without opening Zoho.
 //
-// NOT tested against a live Zoho People account. The attendance endpoint shape and the exact scope must
-// be confirmed on a real account, and attendance via API may require a specific Zoho People plan (see
-// REQUIRED_ACCESS below). These functions are injected into lib/attendance as deps, so all the
-// idempotency/retry/reconcile logic is tested with a mock; only the raw HTTP here needs a live check.
+// Multi-data-center: Zoho accounts live in different data centers (.com US, .in India, .eu, ...). On the
+// OAuth callback Zoho tells us which one issued the code via the `accounts-server` query param. We use
+// THAT server for the token exchange and store its data center, then use the same DC for token refresh
+// and for the People API. This is why an "invalid code" happens when the token exchange is sent to the
+// wrong DC: we now follow Zoho's own accounts-server instead of guessing.
 import { readTokens, writeTokens, hasTokens } from './tokenStore';
 import type { PunchDeps } from './attendance';
 
-// This organisation's Zoho is the US data center (.com). Pin Zoho People to .com so a stale ".in" env
-// var or the old ".in" default can never send the consent screen or the attendance API to the wrong
-// region, which is the usual cause of "An error occurred" after Accept. Only People is pinned here; Zoho
-// Projects (which shares ZOHO_ACCOUNTS_URL) is left untouched.
-const toUs = (u: string) => String(u || '').replace(/\.zoho\.in(\b|\/|$)/i, '.zoho.com$1');
-const API = toUs(process.env.ZOHO_PEOPLE_API_URL || 'https://people.zoho.com').replace(/\/+$/, '');
-// Scope needed to add an attendance entry via API. Confirm the exact scope and plan on a real account.
 const SCOPES = 'ZOHOPEOPLE.attendance.ALL';
 const provider = (email: string) => `zoho_people:${email.toLowerCase()}`;
 
-// What the admin must confirm on the Zoho side before the live pilot (surfaced by the status route).
+const hostOf = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
+const dcTld = (host: string) => { const m = /\.zoho\.([a-z.]+)$/i.exec(host || ''); return m ? m[1].toLowerCase() : ''; };
+// Only accept an accounts server that is really a Zoho accounts host (no SSRF to an arbitrary URL).
+const isZohoAccounts = (u: string) => /^https:\/\/accounts\.zoho\.[a-z.]+\/?$/i.test(String(u || ''));
+const accountsDefault = () => (process.env.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.com').replace(/\/+$/, '');
+
 export const REQUIRED_ACCESS = {
   module: 'Zoho People, Attendance',
   scope: SCOPES,
@@ -31,14 +29,11 @@ export const REQUIRED_ACCESS = {
 function cfg() {
   const clientId = process.env.ZOHO_CLIENT_ID;
   const clientSecret = process.env.ZOHO_CLIENT_SECRET;
-  // Default to the US accounts domain and pin any ".in" to ".com": this org's Zoho is US, so People never
-  // needs the env var set and a stale ".in" cannot break the connect.
-  const accountsUrl = toUs(process.env.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.com');
   const redirectUri = process.env.ZOHO_PEOPLE_REDIRECT_URI;
   if (!clientId || !clientSecret || !redirectUri) {
     throw new Error('ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET or ZOHO_PEOPLE_REDIRECT_URI is not set.');
   }
-  return { clientId, clientSecret, accountsUrl: accountsUrl.replace(/\/+$/, ''), redirectUri };
+  return { clientId, clientSecret, accountsUrl: accountsDefault(), redirectUri };
 }
 
 export function authUrl() {
@@ -53,9 +48,12 @@ export function authUrl() {
   return url.toString();
 }
 
-export async function exchangeCode(code: string, email: string) {
-  const { clientId, clientSecret, accountsUrl, redirectUri } = cfg();
-  const res = await fetch(`${accountsUrl}/oauth/v2/token`, {
+// accountsServer: the `accounts-server` query param Zoho added to the callback (the DC that issued the
+// code). We exchange the code THERE, and remember that DC for refresh and the People API.
+export async function exchangeCode(code: string, email: string, accountsServer?: string) {
+  const { clientId, clientSecret, redirectUri } = cfg();
+  const accUrl = (accountsServer && isZohoAccounts(accountsServer)) ? accountsServer.replace(/\/+$/, '') : accountsDefault();
+  const res = await fetch(`${accUrl}/oauth/v2/token`, {
     signal: AbortSignal.timeout(30000),
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -64,60 +62,57 @@ export async function exchangeCode(code: string, email: string) {
   const tokens: any = await res.json();
   if (!res.ok || tokens.error || !tokens.refresh_token) throw new Error(`Zoho People connect failed: ${JSON.stringify(tokens)}`);
   tokens.obtained_at = Date.now();
+  tokens.dc_accounts = accUrl;                 // where to refresh the token
+  tokens.dc = dcTld(hostOf(accUrl)) || 'com';  // which data center (com / in / eu ...) for the People API
   await writeTokens(provider(email), tokens);
-  return { ok: true };
+  return { ok: true, dc: tokens.dc };
 }
 
 export const isConnected = (email: string) => hasTokens(provider(email));
 
-// Non-secret diagnostics for the OAuth connect: shows exactly what the server would send to Zoho, so a
-// redirect-uri or data-center mismatch (the usual cause of Zoho's "An error occurred" after Accept) is
-// visible without reading env or the API console. No secret, token or code is ever returned.
-const hostOf = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
-const dcOf = (host: string) => { const m = /\.zoho\.([a-z.]+)$/.exec(host || ''); return m ? m[1] : (host ? 'unknown' : ''); };
+// The People API host for this person, from the data center captured at connect time (fallbacks: the
+// ZOHO_PEOPLE_API_URL env, then .com).
+async function peopleApiHost(email: string): Promise<string> {
+  const tokens: any = await readTokens(provider(email));
+  if (tokens?.dc) return `https://people.zoho.${tokens.dc}`;
+  return (process.env.ZOHO_PEOPLE_API_URL || 'https://people.zoho.com').replace(/\/+$/, '');
+}
+
 const maskId = (id: string) => (id ? id.slice(0, 10) + (id.length > 10 ? '…' : '') : '');
 
+// Non-secret diagnostics for the OAuth connect. No secret, token or code is ever returned.
 export function diagnostics() {
   const clientId = process.env.ZOHO_CLIENT_ID || '';
-  // The effective accounts URL People will actually use: US default, with any ".in" pinned to ".com".
-  const accountsUrl = toUs(process.env.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.com').replace(/\/+$/, '');
+  const accountsUrl = accountsDefault();
   const redirectUri = process.env.ZOHO_PEOPLE_REDIRECT_URI || '';
-  const peopleApi = API;
   const nextauth = (process.env.NEXTAUTH_URL || '').replace(/\/+$/, '');
   const expectedRedirectUri = nextauth ? `${nextauth}/api/zoho-people/oauth-callback` : '';
   const accountsHost = hostOf(accountsUrl);
-  const peopleHost = hostOf(peopleApi);
   const redirectHost = hostOf(redirectUri);
-  const accountsDc = dcOf(accountsHost);
-  const peopleDc = dcOf(peopleHost);
 
   const issues: string[] = [];
   if (!clientId) issues.push('ZOHO_CLIENT_ID is not set.');
   if (!process.env.ZOHO_CLIENT_SECRET) issues.push('ZOHO_CLIENT_SECRET is not set.');
-  if (!accountsUrl) issues.push('ZOHO_ACCOUNTS_URL is not set.');
   if (!redirectUri) issues.push('ZOHO_PEOPLE_REDIRECT_URI is not set.');
   if (expectedRedirectUri && redirectUri && redirectUri !== expectedRedirectUri) {
     issues.push(`ZOHO_PEOPLE_REDIRECT_URI (${redirectUri}) does not equal this dashboard's callback (${expectedRedirectUri}). It must ALSO be registered in the Zoho app EXACTLY, character for character.`);
   }
-  if (accountsDc && peopleDc && accountsDc !== peopleDc) {
-    issues.push(`Data-center mismatch: accounts is .${accountsDc} but the People API is .${peopleDc}. They must be the same region, and the Zoho app must be created in that region's API console.`);
-  }
-  if (redirectHost && accountsHost && hostOf(nextauth) && redirectHost !== hostOf(nextauth)) {
+  if (redirectHost && hostOf(nextauth) && redirectHost !== hostOf(nextauth)) {
     issues.push(`The redirect URI host (${redirectHost}) is not this dashboard's host (${hostOf(nextauth)}).`);
   }
 
   let authorizeUrl = '';
-  try { authorizeUrl = authUrl(); } catch { /* cfg incomplete; issues above explain */ }
+  try { authorizeUrl = authUrl(); } catch { /* cfg incomplete */ }
 
   return {
-    accountsHost, accountsDc, peopleApiHost: peopleHost, peopleDc,
+    accountsHost, accountsDc: dcTld(accountsHost),
     redirectUri, redirectUriHost: redirectHost,
     expectedRedirectUri, redirectMatchesDashboard: Boolean(expectedRedirectUri) && redirectUri === expectedRedirectUri,
-    regionConsistent: Boolean(accountsDc) && accountsDc === peopleDc,
     scope: SCOPES, clientIdMasked: maskId(clientId), clientSecretPresent: Boolean(process.env.ZOHO_CLIENT_SECRET),
-    authorizeUrl, // the real authorize URL (no state); eyeball redirect_uri / scope / host against the Zoho app
+    authorizeUrl,
+    multiDc: 'The token exchange follows Zoho\'s accounts-server param, so the account\'s real DC is used automatically; the redirect URI must still be registered in the Zoho app EXACTLY.',
     issues,
-    hint: 'Zoho shows "An error occurred" after Accept almost always because redirect_uri is not registered EXACTLY in the app, or the app/account/accounts-URL are in different data centers (.com vs .in). Fix those two and reconnect.',
+    hint: 'If connect fails with "invalid code", the account is in a different Zoho DC than the token exchange used - now handled by accounts-server. If "An error occurred" on the consent page, the redirect URI is not registered exactly in the Zoho app.',
   };
 }
 
@@ -127,8 +122,9 @@ async function accessToken(email: string): Promise<string> {
   if (!tokens) throw new Error('This person has not connected their Zoho People yet.');
   const ageSeconds = (Date.now() - (tokens.obtained_at || 0)) / 1000;
   if (ageSeconds > (tokens.expires_in || 3600) - 120) {
-    const { clientId, clientSecret, accountsUrl } = cfg();
-    const res = await fetch(`${accountsUrl}/oauth/v2/token`, {
+    const { clientId, clientSecret } = cfg();
+    const accUrl = (tokens.dc_accounts && isZohoAccounts(tokens.dc_accounts)) ? tokens.dc_accounts : accountsDefault();
+    const res = await fetch(`${accUrl}/oauth/v2/token`, {
       signal: AbortSignal.timeout(30000),
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -149,7 +145,8 @@ const toDDMMYYYY = (day: string) => { const [y, m, d] = day.split('-'); return `
 // Record a check-in in Zoho People. Short timeout so the idempotent layer can reconcile on timeout.
 async function punchIn(email: string, day: string): Promise<{ zohoId: string }> {
   const token = await accessToken(email);
-  const url = new URL(`${API}/people/api/attendance`);
+  const api = await peopleApiHost(email);
+  const url = new URL(`${api}/people/api/attendance`);
   const params = { dateFormat: 'dd-MM-yyyy', checkIn: `${toDDMMYYYY(day)} 09:00:00`, emailId: email.toLowerCase() };
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const res = await fetch(url.toString(), {
@@ -166,7 +163,8 @@ async function punchIn(email: string, day: string): Promise<{ zohoId: string }> 
 // Does Zoho People already have today's check-in for this person? (reconcile after a timeout)
 async function findPunch(email: string, day: string): Promise<{ zohoId: string } | null> {
   const token = await accessToken(email);
-  const url = new URL(`${API}/people/api/attendance/getUserReport`);
+  const api = await peopleApiHost(email);
+  const url = new URL(`${api}/people/api/attendance/getUserReport`);
   const params = { dateFormat: 'dd-MM-yyyy', sdate: toDDMMYYYY(day), edate: toDDMMYYYY(day), emailId: email.toLowerCase() };
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const res = await fetch(url.toString(), { signal: AbortSignal.timeout(15000), headers: { Authorization: `Zoho-oauthtoken ${token}` } });

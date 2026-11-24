@@ -22,7 +22,10 @@ export async function GET(req: NextRequest) {
   const me = await getMe();
   if (!me) return page('<h2>Sign in first</h2><p>Sign in to the dashboard in this browser, then connect again.</p>', 401);
   try {
-    await exchangeCode(code, me.email);
+    // Zoho adds `accounts-server` (the data center that issued the code) to the callback. Exchange the
+    // code there, not at a guessed DC, so a .com-vs-.in mismatch cannot cause "invalid code".
+    const accountsServer = req.nextUrl.searchParams.get('accounts-server') || undefined;
+    await exchangeCode(code, me.email, accountsServer);
     const home = (process.env.NEXTAUTH_URL || '').replace(/\/+$/, '') || '';
     return new Response(null, { status: 302, headers: { Location: `${home}/?zoho_people=connected`, 'Set-Cookie': clearStateCookie } });
   } catch (err: any) {
