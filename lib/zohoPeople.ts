@@ -10,7 +10,12 @@
 import { readTokens, writeTokens, hasTokens } from './tokenStore';
 import type { PunchDeps } from './attendance';
 
-const API = (process.env.ZOHO_PEOPLE_API_URL || 'https://people.zoho.in').replace(/\/+$/, '');
+// This organisation's Zoho is the US data center (.com). Pin Zoho People to .com so a stale ".in" env
+// var or the old ".in" default can never send the consent screen or the attendance API to the wrong
+// region, which is the usual cause of "An error occurred" after Accept. Only People is pinned here; Zoho
+// Projects (which shares ZOHO_ACCOUNTS_URL) is left untouched.
+const toUs = (u: string) => String(u || '').replace(/\.zoho\.in(\b|\/|$)/i, '.zoho.com$1');
+const API = toUs(process.env.ZOHO_PEOPLE_API_URL || 'https://people.zoho.com').replace(/\/+$/, '');
 // Scope needed to add an attendance entry via API. Confirm the exact scope and plan on a real account.
 const SCOPES = 'ZOHOPEOPLE.attendance.ALL';
 const provider = (email: string) => `zoho_people:${email.toLowerCase()}`;
@@ -26,10 +31,12 @@ export const REQUIRED_ACCESS = {
 function cfg() {
   const clientId = process.env.ZOHO_CLIENT_ID;
   const clientSecret = process.env.ZOHO_CLIENT_SECRET;
-  const accountsUrl = process.env.ZOHO_ACCOUNTS_URL;
+  // Default to the US accounts domain and pin any ".in" to ".com": this org's Zoho is US, so People never
+  // needs the env var set and a stale ".in" cannot break the connect.
+  const accountsUrl = toUs(process.env.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.com');
   const redirectUri = process.env.ZOHO_PEOPLE_REDIRECT_URI;
-  if (!clientId || !clientSecret || !accountsUrl || !redirectUri) {
-    throw new Error('ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_ACCOUNTS_URL or ZOHO_PEOPLE_REDIRECT_URI is not set.');
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error('ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET or ZOHO_PEOPLE_REDIRECT_URI is not set.');
   }
   return { clientId, clientSecret, accountsUrl: accountsUrl.replace(/\/+$/, ''), redirectUri };
 }
@@ -72,7 +79,8 @@ const maskId = (id: string) => (id ? id.slice(0, 10) + (id.length > 10 ? '…' :
 
 export function diagnostics() {
   const clientId = process.env.ZOHO_CLIENT_ID || '';
-  const accountsUrl = (process.env.ZOHO_ACCOUNTS_URL || '').replace(/\/+$/, '');
+  // The effective accounts URL People will actually use: US default, with any ".in" pinned to ".com".
+  const accountsUrl = toUs(process.env.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.com').replace(/\/+$/, '');
   const redirectUri = process.env.ZOHO_PEOPLE_REDIRECT_URI || '';
   const peopleApi = API;
   const nextauth = (process.env.NEXTAUTH_URL || '').replace(/\/+$/, '');
