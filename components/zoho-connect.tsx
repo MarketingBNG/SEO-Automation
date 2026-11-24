@@ -1,21 +1,28 @@
 'use client';
 
-// One-time "Connect your Zoho" banners for tracked people (everyone except the admin). Two things:
+// Zoho connection status for tracked people (everyone except the admin). Shows BOTH connections with a
+// clear green "Connected" when active, and a "Connect" button when not:
 //  - Zoho Projects: the person's daily hours go to their team's Zoho timesheet.
 //  - Zoho People: the person's daily attendance Check In (from SEB) is recorded.
-// Each banner shows until that one is connected. The admin never sees these.
+// The admin never sees this.
 import { useEffect, useState } from 'react';
 import { buttonVariants } from '@/components/ui/button';
 import { useRole } from '@/hooks/use-role';
 
-function Banner({ title, desc, href, label }: { title: string; desc: string; href: string; label: string }) {
+function Row({ name, connected, href }: { name: string; connected: boolean | null; href: string }) {
+  if (connected === null) return null; // still checking
   return (
-    <div className="mx-auto mb-4 flex max-w-5xl flex-col gap-2 rounded-lg border border-primary/40 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="text-sm">
-        <div className="font-medium">{title}</div>
-        <div className="text-muted-foreground">{desc}</div>
-      </div>
-      <a href={href} className={`${buttonVariants()} shrink-0`}>{label}</a>
+    <div className="flex items-center gap-2">
+      <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-500'}`} aria-hidden />
+      <span className="font-medium">{name}</span>
+      {connected ? (
+        <span className="font-medium text-emerald-600">Connected</span>
+      ) : (
+        <>
+          <span className="text-amber-600">Not connected</span>
+          <a href={href} className={`${buttonVariants({ size: 'sm' })} ml-1`}>Connect</a>
+        </>
+      )}
     </div>
   );
 }
@@ -33,26 +40,15 @@ export function ZohoConnect() {
     return () => { on = false; };
   }, [loaded, role]);
 
-  if (role === 'admin') return null;
+  if (role === 'admin' || (projects === null && people === null)) return null;
 
   return (
-    <>
-      {projects === false && (
-        <Banner
-          title="Connect your Zoho (timesheet)"
-          desc="This lets your work hours go to your Zoho timesheet automatically. You only do this once."
-          href="/api/zoho-projects/auth-url"
-          label="Connect Zoho"
-        />
-      )}
-      {people === false && (
-        <Banner
-          title="Connect Zoho People (attendance)"
-          desc="This records your daily Check In. You only do this once, here in your normal browser."
-          href="/api/zoho-people/auth-url"
-          label="Connect Zoho People"
-        />
-      )}
-    </>
+    <div className="mx-auto mb-4 max-w-5xl rounded-lg border bg-card p-3">
+      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Zoho connections</div>
+      <div className="flex flex-col gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-8">
+        <Row name="Zoho People (attendance)" connected={people} href="/api/zoho-people/auth-url" />
+        <Row name="Zoho Projects (timesheet)" connected={projects} href="/api/zoho-projects/auth-url" />
+      </div>
+    </div>
   );
 }
