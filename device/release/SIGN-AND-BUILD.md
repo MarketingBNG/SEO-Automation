@@ -48,7 +48,9 @@ This is a free internal certificate. It costs nothing and works on company lapto
    ```
    `Status` must be `Valid`.
 
-## C. Once per laptop: trust the certificate
+## C. Once per laptop: trust the certificate (now automatic)
+The installer now does this itself: when the laptop does not trust the certificate yet, setup asks Windows for admin approval and trusts it, before any prompt. The manual options below are only needed if you prefer to pre-trust laptops (for example by Group Policy).
+
 **Option 1, by hand (Administrator PowerShell).** Copy `trust-company-cert.ps1` and `USAIndiaCFO-CodeSigning.cer` to the laptop, then run:
 ```powershell
 powershell -NoProfile -ExecutionPolicy RemoteSigned -File .\trust-company-cert.ps1 -Thumbprint <THUMBPRINT>

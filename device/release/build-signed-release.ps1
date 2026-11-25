@@ -28,6 +28,17 @@ function Sign([string]$path) {
   Write-Host "Signed  $path" -ForegroundColor Green
 }
 
+# 0. The setup pins the certificate thumbprint; it must match the one we sign with, and the public .cer
+#    must be present (the installer ships it so each laptop trusts it during setup).
+$pinned = (Select-String -LiteralPath (Join-Path $PSScriptRoot 'USAIndiaCFO-Setup.ps1') -Pattern "^\`$companyCertThumbprint = '([0-9A-F]{40})'").Matches.Groups[1].Value
+if ($pinned -ne $Thumbprint) { throw "USAIndiaCFO-Setup.ps1 pins certificate $pinned but you are signing with $Thumbprint. Update `$companyCertThumbprint in the setup first." }
+$cerFile = Join-Path $PSScriptRoot 'cert-output\USAIndiaCFO-CodeSigning.cer'
+if (!(Test-Path $cerFile)) {
+  [void](New-Item -ItemType Directory -Force -Path (Split-Path $cerFile))
+  Export-Certificate -Cert $cert -FilePath $cerFile | Out-Null
+  Write-Host "Exported public certificate to $cerFile"
+}
+
 # 1. Extract the embedded runtime scripts exactly as the setup would write them.
 $setup = Join-Path $PSScriptRoot 'USAIndiaCFO-Setup.ps1'
 $existingSig = Get-AuthenticodeSignature $setup
@@ -44,7 +55,7 @@ foreach ($name in @{ launcherSource = 'UIC-Launch.ps1'; watcherSource = 'UIC-Act
 }
 
 # 2. Sign the scripts.
-foreach ($f in 'UIC-Launch.ps1', 'UIC-ActivityWatch-Bridge.ps1', 'USAIndiaCFO-Setup.ps1') { Sign (Join-Path $PSScriptRoot $f) }
+foreach ($f in 'UIC-Launch.ps1', 'UIC-ActivityWatch-Bridge.ps1', 'trust-company-cert.ps1', 'USAIndiaCFO-Setup.ps1') { Sign (Join-Path $PSScriptRoot $f) }
 
 # 3. Build and sign the installer (optional: needs Inno Setup 6).
 $exe = Join-Path $PSScriptRoot 'Output\USAIndiaCFO-Training-Setup.exe'
@@ -62,7 +73,7 @@ if (Test-Path $Iscc) {
 }
 
 # 4. Hash list for the Seqrite admin.
-$files = @('USAIndiaCFO-Setup.ps1', 'UIC-Launch.ps1', 'UIC-ActivityWatch-Bridge.ps1') | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$files = @('USAIndiaCFO-Setup.ps1', 'UIC-Launch.ps1', 'UIC-ActivityWatch-Bridge.ps1', 'trust-company-cert.ps1') | ForEach-Object { Join-Path $PSScriptRoot $_ }
 if (Test-Path $exe) { $files += $exe }
 $lines = @("Publisher: $($cert.Subject)", "Thumbprint: $Thumbprint", "Built: $(Get-Date -Format 'yyyy-MM-dd HH:mm')", '')
 foreach ($f in $files) { $lines += '{0}  {1}' -f (Get-FileHash $f -Algorithm SHA256).Hash, (Split-Path -Leaf $f) }

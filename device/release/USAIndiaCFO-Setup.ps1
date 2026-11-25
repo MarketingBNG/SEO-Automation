@@ -613,6 +613,27 @@ function Assert-Script([string]$source) {
   if ($errors.Count) { throw $errors[0].Message }
 }
 
+# The company code-signing certificate the signed release is checked against. build-signed-release.ps1
+# refuses to build if this does not match the certificate it signs with.
+$companyCertThumbprint = '1990F7044C7686F9B2769958976B6378C615F847'
+
+# Signed release: make sure this laptop trusts the company certificate BEFORE any prompt that uses a
+# one-time code. If not trusted yet, run the shipped trust-company-cert.ps1 once with admin approval
+# (Windows asks for the admin password). Unsigned dev copies (no .cer next to this file) skip this.
+function Ensure-CompanyTrust {
+  $cer = Join-Path $PSScriptRoot 'USAIndiaCFO-CodeSigning.cer'
+  $trustScript = Join-Path $PSScriptRoot 'trust-company-cert.ps1'
+  if (!(Test-Path -LiteralPath $cer -PathType Leaf)) { return }
+  $isTrusted = { (Test-Path "Cert:\LocalMachine\Root\$companyCertThumbprint") -and (Test-Path "Cert:\LocalMachine\TrustedPublisher\$companyCertThumbprint") }
+  if (& $isTrusted) { Write-Host 'PASS: Company certificate is trusted on this laptop.'; return }
+  if (!(Test-Path -LiteralPath $trustScript -PathType Leaf)) { throw 'trust-company-cert.ps1 is missing from the installer. Rebuild the installer.' }
+  Write-Host 'This laptop does not trust the USAIndiaCFO company certificate yet. Windows will now ask for admin approval to trust it.'
+  $trustArgs = "-NoProfile -ExecutionPolicy RemoteSigned -File `"$trustScript`" -Thumbprint $companyCertThumbprint -CerPath `"$cer`""
+  $p = Start-Process -FilePath $shell -Verb RunAs -ArgumentList $trustArgs -Wait -PassThru
+  if ($p.ExitCode -ne 0 -or -not (& $isTrusted)) { throw 'The company certificate could not be trusted. Ask the admin to approve the Windows prompt, then run the installer again.' }
+  Write-Host 'PASS: Company certificate is now trusted on this laptop.'
+}
+
 function Read-PrivateText([string]$prompt) {
   $secure = Read-Host $prompt -AsSecureString
   $pointer = [Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($secure)
@@ -784,6 +805,7 @@ if ($consentReply.Trim() -ine 'yes') {
   return
 }
 
+Ensure-CompanyTrust
 Assert-Script $launcherSource
 Assert-Script $watcherSource
 Add-Type -AssemblyName System.Security

@@ -47,6 +47,9 @@ Source: "USAIndiaCFO-Setup.ps1"; DestDir: "{app}"; Flags: ignoreversion
 ; Signed runtime scripts produced by build-signed-release.ps1; the setup installs these signed copies.
 Source: "UIC-Launch.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "UIC-ActivityWatch-Bridge.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; Company certificate (public part) + trust script: the setup trusts the certificate itself, with admin approval.
+Source: "trust-company-cert.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "cert-output\USAIndiaCFO-CodeSigning.cer"; DestDir: "{app}"; Flags: ignoreversion
 Source: "USAIndiaCFO-Setup-Guide.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]
