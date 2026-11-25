@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-25
+- (ops) Added POST /api/seb/device-enroll for the one-step Windows setup: the employee work token (from Device setup) identifies the person and the endpoint returns a revocable SEB enrollment bound to that Windows user, so the setup no longer needs a one-time code typed from /seb-code. Unknown token = 401; token and secret are never logged.
 - (ops) Fixed the SEB attendance Check In not recording in Zoho People. The check-in was sent with dateFormat "dd-MM-yyyy" while the value also carried a time, so Zoho rejected it; Zoho failures returned inside "response" (often with HTTP 200) were also not detected. It now sends "dd-MM-yyyy HH:mm:ss" with the actual IST time the person pressed Check In, and recognises Zoho error shapes so a failure shows its reason. Added a signed one-time installer package (device/release) that wraps the proven pilot setup script unchanged.
 
 ## 2026-11-24

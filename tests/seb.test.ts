@@ -422,3 +422,21 @@ test('uncertain Zoho (timeout): reconcile -> done if the day got logged, no dupl
   await processQueue(deps);
   assert.equal(posts, 1, 'did not post again');
 });
+
+// ---- device-enroll: work token -> SEB enrollment, no code ----
+test('device-enroll: a valid work token creates an enrollment that exchanges for the same person', { skip: !db }, async () => {
+  await wipe();
+  const email = 'devenroll@usaindiacfo.com';
+  await prisma.team_members.create({ data: { email, name: 'D', role: 'user', blocked: false } });
+  const token = await ensureWorkToken(email);
+  const { POST } = require('../app/api/seb/device-enroll/route');
+  const call = (b: any) => POST({ json: async () => b } as any);
+  assert.equal((await call({ deviceToken: token })).status, 400);
+  assert.equal((await call({ deviceToken: 'bogus', windowsUser: 'S-1-5-21-1' })).status, 401);
+  const r = await call({ deviceToken: token, windowsUser: 'S-1-5-21-1', label: 'PC1' });
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.ok(j.enrollment.id && j.enrollment.secret);
+  assert.equal(await enroll.exchangeEnrollment(j.enrollment.id, j.enrollment.secret, 'S-1-5-21-1'), email);
+  assert.equal(await enroll.exchangeEnrollment(j.enrollment.id, j.enrollment.secret, 'S-1-5-21-OTHER'), null);
+});
