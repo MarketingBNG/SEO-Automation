@@ -4,6 +4,9 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-25
+- (ops) Fixed the SEB attendance Check In not recording in Zoho People. The check-in was sent with dateFormat "dd-MM-yyyy" while the value also carried a time, so Zoho rejected it; Zoho failures returned inside "response" (often with HTTP 200) were also not detected. It now sends "dd-MM-yyyy HH:mm:ss" with the actual IST time the person pressed Check In, and recognises Zoho error shapes so a failure shows its reason. Added a signed one-time installer package (device/release) that wraps the proven pilot setup script unchanged.
+
 ## 2026-11-24
 - (ops) Fixed the Zoho People connect "invalid code" error. Zoho accounts live in different data centers (.com, .in, .eu, ...) and on the OAuth callback Zoho says which one issued the code via the accounts-server param; we were exchanging the code at a guessed/forced data center instead, which fails with "invalid code" when they differ. The callback now exchanges the code at Zoho's accounts-server, stores that data center, and uses the same one for token refresh and the People attendance API. Removed the forced ".com" pin (the DC is now taken from Zoho itself), so it works whether the account is US or India. The redirect URI must still be registered in the Zoho app exactly.
 - (ops) The dashboard now shows a "Zoho connections" status strip (non-admins) with a green "Connected" next to each of Zoho People (attendance) and Zoho Projects (timesheet), and a Connect button when one is not connected - so a person can see at a glance which is active, instead of a banner that only appeared when disconnected.

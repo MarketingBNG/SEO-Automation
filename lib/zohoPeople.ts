@@ -142,12 +142,32 @@ async function accessToken(email: string): Promise<string> {
 // day YYYY-MM-DD -> dd-MM-yyyy (Zoho People's common date format). Confirm against the real API.
 const toDDMMYYYY = (day: string) => { const [y, m, d] = day.split('-'); return `${d}-${m}-${y}`; };
 
+// "dd-MM-yyyy HH:mm:ss" for the check-in: the current IST time when the punch is for today, else 09:00.
+export function checkInValue(day: string, now = new Date()): string {
+  const ist = new Date(now.getTime() + 5.5 * 3600000);
+  const today = ist.toISOString().slice(0, 10);
+  const time = day === today ? ist.toISOString().slice(11, 19) : '09:00:00';
+  return `${toDDMMYYYY(day)} ${time}`;
+}
+
+// Zoho People reports failures in several shapes, often with HTTP 200: { error }, { errors },
+// { response: { status: 1, errors } }, or { response: { result: [{ ...error }] } }.
+export function zohoFailed(j: any): boolean {
+  if (!j || typeof j !== 'object') return true;
+  if (j.error || j.errors) return true;
+  const r = j.response;
+  if (r && (r.errors || r.status === 1 || r.status === '1' || r.status === 'failure')) return true;
+  return false;
+}
+
 // Record a check-in in Zoho People. Short timeout so the idempotent layer can reconcile on timeout.
 async function punchIn(email: string, day: string): Promise<{ zohoId: string }> {
   const token = await accessToken(email);
   const api = await peopleApiHost(email);
   const url = new URL(`${api}/people/api/attendance`);
-  const params = { dateFormat: 'dd-MM-yyyy', checkIn: `${toDDMMYYYY(day)} 09:00:00`, emailId: email.toLowerCase() };
+  // dateFormat must describe the WHOLE checkIn value (date AND time), otherwise Zoho rejects it. The time
+  // is the moment the person pressed Check In (IST), not a fixed 09:00.
+  const params = { dateFormat: 'dd-MM-yyyy HH:mm:ss', checkIn: checkInValue(day), emailId: email.toLowerCase() };
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const res = await fetch(url.toString(), {
     signal: AbortSignal.timeout(15000),
@@ -155,7 +175,7 @@ async function punchIn(email: string, day: string): Promise<{ zohoId: string }> 
     headers: { Authorization: `Zoho-oauthtoken ${token}` },
   });
   const j: any = await res.json().catch(() => ({}));
-  if (!res.ok || j.error || j.errors) throw new Error(`Zoho People check-in failed: ${JSON.stringify(j).slice(0, 300)}`);
+  if (!res.ok || zohoFailed(j)) throw new Error(`Zoho People check-in failed: ${JSON.stringify(j).slice(0, 300)}`);
   const id = j?.result?.id || j?.response?.result?.id || j?.id || `${email}:${day}`;
   return { zohoId: String(id) };
 }
