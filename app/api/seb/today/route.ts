@@ -42,8 +42,9 @@ export async function GET(req: NextRequest) {
 
   // On a no-training day (e.g. Sunday) the SEB page quits to the desktop. This is read-only: it does
   // not mark training complete and does not enqueue a timesheet sync. The quit URL is given only for
-  // no-training so the page cannot quit while training is pending.
-  const quitUrl = gate.status === 'no-training' ? await resolveSebQuitUrl() : '';
+  // no-training or done, so the page cannot quit while training is pending.
+  // Also once today is done, so a SEB left open (e.g. the Finish reply timed out) still closes.
+  const quitUrl = gate.status === 'no-training' || gate.status === 'done' ? await resolveSebQuitUrl() : '';
   sebLog('today', rid, 'done', { ms: Date.now() - t0, status: gate.status });
   return NextResponse.json({ status: gate.status, locked: gate.locked, name: member?.name || null, item, attendance, quitUrl });
 }

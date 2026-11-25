@@ -25,6 +25,8 @@ type Today = { status: string; locked: boolean; name: string | null; item: any; 
 const TODAY_TIMEOUT_MS = 12000;
 const CHECKIN_TIMEOUT_MS = 12000;
 const ACTION_TIMEOUT_MS = 20000;
+// Submitting a test can take longer: written answers are graded by the AI on the server.
+const SUBMIT_TIMEOUT_MS = 120000;
 // Backstop: if nothing has resolved this long after mount (no lesson, no Check In screen, no error), show
 // the error/Retry screen anyway, so the page can never sit on "Loading…" forever while JS is running.
 const WATCHDOG_MS = 18000;
@@ -94,10 +96,11 @@ export default function SebPage() {
     return () => clearTimeout(t);
   }, []);
 
-  // On a no-training day (e.g. Sunday) quit SEB to the desktop. Read-only: nothing is marked complete
-  // and no timesheet sync is triggered.
+  // On a no-training day (e.g. Sunday), or once today's training is already done (e.g. the Finish reply
+  // was lost to a timeout but the server saved it), quit SEB to the desktop. Read-only: nothing is
+  // marked complete here and no timesheet sync is triggered.
   useEffect(() => {
-    if (today && today.status === 'no-training' && today.quitUrl) {
+    if (today && (today.status === 'no-training' || today.status === 'done') && today.quitUrl) {
       window.location.href = today.quitUrl;
     }
   }, [today]);
@@ -136,8 +139,9 @@ export default function SebPage() {
     try {
       const body = today.item.kind === 'lesson'
         ? { kind: 'lesson', lessonId: today.item.id }
-        : { kind: 'test', testId: today.item.id, answers, written };
-      const r = await fetchWithTimeout('/api/seb/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, ACTION_TIMEOUT_MS);
+        // The server grades written answers from { text } (same shape the dashboard sends).
+        : { kind: 'test', testId: today.item.id, answers, written: Object.fromEntries(Object.entries(written).map(([id, text]) => [id, { text }])) };
+      const r = await fetchWithTimeout('/api/seb/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, today.item.kind === 'test' ? SUBMIT_TIMEOUT_MS : ACTION_TIMEOUT_MS);
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { setMsg(j.error || `Could not save (HTTP ${r.status}). Try again.`); return; }
       if (j.done && j.quitUrl) { window.location.href = j.quitUrl; return; }
@@ -146,7 +150,9 @@ export default function SebPage() {
       await load();
     } catch (e: any) {
       // The completion is only saved when the server confirms; a timeout here does not quit SEB.
-      setMsg(e?.name === 'AbortError' ? 'Saving timed out. Your work is not lost; try again.' : 'Could not reach the server. Try again.');
+      // A timeout may still have saved on the server: reload, and a day that is now done quits SEB.
+      setMsg(e?.name === 'AbortError' ? 'Saving is taking long. Checking whether it was saved…' : 'Could not reach the server. Try again.');
+      if (e?.name === 'AbortError') await load();
     } finally { setBusy(false); }
   }
 
@@ -199,7 +205,7 @@ export default function SebPage() {
 
   const info = (t: string) => <div className={wrap}><div className={card}>{attLine}<h1 className="text-xl font-semibold">{t}</h1>{msg && <div className="mt-2 text-sm text-amber-400">{msg}</div>}</div></div>;
   if (today.status === 'before-window') return info('Training opens at 9:00 AM IST.');
-  if (today.status === 'done') return info('Today’s training is complete. You may quit.');
+  if (today.status === 'done') return info(today.quitUrl ? 'Today’s training is complete. Closing Safe Exam Browser…' : 'Today’s training is complete. You may quit.');
   if (today.status === 'not-ready') return info('Today’s training is being prepared. Please wait a moment and refresh.');
   if (today.status === 'no-training') return info(today.quitUrl ? 'No training today. Returning to the desktop…' : 'No training scheduled today.');
   if (today.status === 'error') return info('Could not load training. Please try again shortly.');
@@ -248,7 +254,15 @@ export default function SebPage() {
               </div>
             ))}
           </div>
-          <button disabled={busy} onClick={finish} className="mt-5 w-full rounded-lg bg-emerald-500 px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Submitting…' : 'Finish test'}</button>
+          {(() => {
+            // Finish only when every question is answered (an option picked, or text typed).
+            const left = (item.questions || []).filter((q: any) => (q.kind === 'written' ? !String(written[q.id] || '').trim() : answers[q.id] === undefined)).length;
+            return (
+              <>
+                <button disabled={busy || left > 0} onClick={finish} className="mt-5 w-full rounded-lg bg-emerald-500 px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Submitting… (grading can take up to a minute)' : left > 0 ? `Answer all questions to finish (${left} left)` : 'Finish test'}</button>
+              </>
+            );
+          })()}
         </>
       )}
       {msg && <div className="mt-2 text-sm text-amber-400">{msg}</div>}
