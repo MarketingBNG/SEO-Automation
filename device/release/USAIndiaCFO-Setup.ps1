@@ -42,6 +42,15 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Always run as 64-bit PowerShell on 64-bit Windows. A 32-bit host (for example a 32-bit installer)
+# sees $env:ProgramFiles as "Program Files (x86)" and cannot find the installed SEB.
+if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+  $native = Join-Path $env:SystemRoot 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
+  $relaunch = @('-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', $PSCommandPath)
+  foreach ($p in $PSBoundParameters.GetEnumerator()) { $relaunch += @("-$($p.Key)", [string]$p.Value) }
+  & $native @relaunch
+  exit $LASTEXITCODE
+}
 $dashboard = 'https://seo.usaindiacfo.us'
 $bundleUrl = 'https://github.com/SafeExamBrowser/seb-win-refactoring/releases/download/v3.10.3/SEB_3.10.3.960_SetupBundle.exe'
 $bundleHash = '716B25F77ADA22BFFDD223E147C3F21042D130C006347E35BD9BE2C91E51730B'
