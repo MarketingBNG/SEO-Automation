@@ -35,7 +35,6 @@ OutputBaseFilename=USAIndiaCFO-Training-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesAllowed=x64compatible
 Uninstallable=yes
 UninstallDisplayName={#AppName}
 ; Signed with the company certificate: build-signed-release.ps1 defines "uicsign" (sign-file.ps1) when it
@@ -51,16 +50,25 @@ Source: "UIC-ActivityWatch-Bridge.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "USAIndiaCFO-Setup-Guide.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]
-; {sysnative} = the 64-bit PowerShell. Inno Setup is 32-bit, so plain "powershell.exe" would start the 32-bit
-; one, where $env:ProgramFiles is "Program Files (x86)" and the setup cannot find the installed SEB.
+; PsPath = the native PowerShell: 64-bit on 64-bit Windows (Inno is 32-bit, and 32-bit PowerShell would look
+; for SEB under "Program Files (x86)"), the normal one on 32-bit Windows (training without ActivityWatch).
 ; First a read-only Check, then the real Install. Visible window so the prompts can be answered.
-Filename: "{sysnative}\WindowsPowerShell\v1.0\powershell.exe"; \
+Filename: "{code:PsPath}"; \
   Parameters: "-NoProfile -ExecutionPolicy RemoteSigned -File ""{app}\USAIndiaCFO-Setup.ps1"" -Mode Check"; \
   StatusMsg: "Checking this PC..."; Flags: waituntilterminated
-Filename: "{sysnative}\WindowsPowerShell\v1.0\powershell.exe"; \
+Filename: "{code:PsPath}"; \
   Parameters: "-NoProfile -ExecutionPolicy RemoteSigned -NoExit -File ""{app}\USAIndiaCFO-Setup.ps1"" -Mode Install"; \
   StatusMsg: "Installing training (answer the prompts in the window)..."; Flags: waituntilterminated
 
 [UninstallRun]
 ; Removes the scheduled training launcher and reporting bridge for this user (the script's own Remove mode).
-Filename: "{sysnative}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy RemoteSigned -File ""{app}\USAIndiaCFO-Setup.ps1"" -Mode Remove"; Flags: waituntilterminated; RunOnceId: "UICRemove"
+Filename: "{code:PsPath}"; Parameters: "-NoProfile -ExecutionPolicy RemoteSigned -File ""{app}\USAIndiaCFO-Setup.ps1"" -Mode Remove"; Flags: waituntilterminated; RunOnceId: "UICRemove"
+
+[Code]
+function PsPath(Param: String): String;
+begin
+  if IsWin64 then
+    Result := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe')
+  else
+    Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+end;

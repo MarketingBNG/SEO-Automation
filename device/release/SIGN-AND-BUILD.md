@@ -68,6 +68,10 @@ Send the Seqrite admin `SEQRITE-HASHES.txt` and `USAIndiaCFO-CodeSigning.cer`.
 Seqrite menu names differ by edition and version. If the admin cannot find a publisher option, ask Seqrite support: *"How do I trust a code-signing certificate (publisher) for Behavior Detection in our EPS version?"*
 
 ## E. On each employee laptop: install
+One installer for every laptop. It detects the Windows type by itself:
+- **64-bit Windows:** full setup (training, Safe Exam Browser, Check In, ActivityWatch for the Zoho timesheet).
+- **32-bit Windows:** training, Safe Exam Browser and Check In only. ActivityWatch has no 32-bit version, so that laptop's timesheet is not filled automatically.
+
 1. Sign in to the **employee's own Windows account** (not the admin account).
 2. Run `USAIndiaCFO-Training-Setup.exe`. Windows shows publisher **USAIndiaCFO Internal Code Signing**.
 3. Answer the prompts in the window: consent, work token, SEB recovery password, and the one-time enrollment code from the dashboard's `/seb-code` page.

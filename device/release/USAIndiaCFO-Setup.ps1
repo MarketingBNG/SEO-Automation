@@ -466,6 +466,10 @@ $sebTask = "UIC SEB Training $sid"
 $watcherTask = "UIC ActivityWatch Bridge $sid"
 $legacyWatcherTask = "UIC Activity Watcher $sid"
 $taskNames = @($sebTask, $watcherTask)
+# 32-bit Windows: ActivityWatch has no 32-bit release, so install training/SEB/check-in only (no
+# activity bridge, so no automatic Zoho timesheet for this laptop).
+$noActivityWatch = -not [Environment]::Is64BitOperatingSystem
+if ($noActivityWatch) { $taskNames = @($sebTask) }
 $base = Join-Path $env:LOCALAPPDATA 'UIC'
 $installDir = Join-Path $base 'training'
 $credentialPath = Join-Path $base 'seb-enroll.bin'
@@ -724,6 +728,7 @@ if ($Mode -eq 'Check') {
       $parsedWatcher.Task.Triggers.CalendarTrigger) { throw 'The scheduled task checks failed.' }
   $edition = Get-ItemPropertyValue 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name EditionID
   Write-Host "Windows edition: $edition"
+  if ($noActivityWatch) { Write-Host '32-bit Windows: training + SEB + Check In only (no ActivityWatch, no automatic timesheet).' } else { Write-Host '64-bit Windows: full setup (training, SEB, Check In, ActivityWatch timesheet).' }
   Write-Host 'PASS: Launcher and watcher syntax, quit profile, and per-user task definitions.'
   if ($InstallerPath) {
     Assert-VendorBundle $InstallerPath
@@ -761,8 +766,8 @@ if ([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0 -or $identity.Nam
 }
 
 $existing = @($taskNames | Where-Object { Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue })
-if ($existing.Count -eq 2 -and (Test-Path -LiteralPath $tokenPath) -and (Test-Path -LiteralPath $profile) -and
-    (Test-Path -LiteralPath $credentialPath) -and (Test-Path -LiteralPath $launcher) -and (Test-Path -LiteralPath $watcher)) {
+if ($existing.Count -eq $taskNames.Count -and ($noActivityWatch -or (Test-Path -LiteralPath $tokenPath)) -and (Test-Path -LiteralPath $profile) -and
+    (Test-Path -LiteralPath $credentialPath) -and (Test-Path -LiteralPath $launcher) -and ($noActivityWatch -or (Test-Path -LiteralPath $watcher))) {
   Write-Host 'Training and the activity watcher are already configured for this Windows user.'
   return
 }
@@ -804,7 +809,11 @@ finally {
 }
 
 Ensure-Seb
-Ensure-ActivityWatch
+if ($noActivityWatch) {
+  Write-Warning '32-bit Windows: ActivityWatch has no 32-bit version. Installing training, SEB and Check In only; this laptop will not report activity for the Zoho timesheet.'
+} else {
+  Ensure-ActivityWatch
+}
 
 $newCredential = !(Test-Path -LiteralPath $credentialPath -PathType Leaf)
 if ($newCredential) {
@@ -845,13 +854,16 @@ try {
       [IO.File]::WriteAllText($pair[0], $pair[1])
     }
   }
-  & $shell -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File $watcher -Check
-  if ($LASTEXITCODE -ne 0) { throw 'ActivityWatch app-only data check failed.' }
+  if (-not $noActivityWatch) {
+    & $shell -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File $watcher -Check
+    if ($LASTEXITCODE -ne 0) { throw 'ActivityWatch app-only data check failed.' }
+  }
   [IO.File]::WriteAllText($profile, $profileSource.Replace('__ADMIN_QUIT_HASH__', $quitHash))
-  [IO.File]::WriteAllBytes($tokenPath, $protectedToken)
   if ($newCredential) {
     [IO.File]::WriteAllText($credentialPath, $protectedEnrollment)
   }
+  if (-not $noActivityWatch) {
+  [IO.File]::WriteAllBytes($tokenPath, $protectedToken)
   [void](Register-ScheduledTask -TaskName $watcherTask -Xml $watcherXml)
   $createdTasks.Add($watcherTask)
   Start-ScheduledTask -TaskName $watcherTask
@@ -868,6 +880,7 @@ try {
     }
     Start-Sleep -Seconds 1
   } while ($true)
+  }
   [void](Register-ScheduledTask -TaskName $sebTask -Xml $sebXml)
   $createdTasks.Add($sebTask)
 } catch {
@@ -880,6 +893,11 @@ try {
   throw
 }
 
-Write-Host 'Setup registered the watcher and training tasks for this employee.'
-Write-Host 'ActivityWatch bridge started. Training checks at the next sign-in and daily at 09:00 IST.'
+if ($noActivityWatch) {
+  Write-Host 'Setup registered the training task for this employee (32-bit Windows: no activity watcher, no automatic timesheet).'
+  Write-Host 'Training checks at the next sign-in and daily at 09:00 IST.'
+} else {
+  Write-Host 'Setup registered the watcher and training tasks for this employee.'
+  Write-Host 'ActivityWatch bridge started. Training checks at the next sign-in and daily at 09:00 IST.'
+}
 Write-Host 'Save your work and restart once to verify this Windows account starts the expected components.'
