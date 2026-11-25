@@ -14,9 +14,10 @@
 param(
   [string]$Subject = 'CN=USAIndiaCFO Internal Code Signing, O=USAIndiaCFO',
   [int]$Years = 5,
-  [string]$OutDir = (Join-Path $PSScriptRoot 'cert-output')
+  [string]$OutDir
 )
 $ErrorActionPreference = 'Stop'
+if (-not $OutDir) { $OutDir = Join-Path $(if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }) 'cert-output' }
 
 $existing = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Where-Object { $_.Subject -eq $Subject -and $_.NotAfter -gt (Get-Date) }
 if ($existing) {

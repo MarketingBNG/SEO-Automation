@@ -10,10 +10,16 @@
 #>
 param(
   [Parameter(Mandatory)][string]$Thumbprint,
-  [string]$CerPath = (Join-Path $PSScriptRoot 'USAIndiaCFO-CodeSigning.cer'),
+  [string]$CerPath,
   [switch]$Remove
 )
 $ErrorActionPreference = 'Stop'
+# Default: the .cer next to this script (resolved here; $PSScriptRoot can be empty in a param default).
+if (-not $CerPath) {
+  $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+  $CerPath = Join-Path $here 'USAIndiaCFO-CodeSigning.cer'
+}
+if (-not (Test-Path -LiteralPath $CerPath)) { throw "Certificate file not found: $CerPath" }
 $Thumbprint = ($Thumbprint -replace '\s', '').ToUpperInvariant()
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
