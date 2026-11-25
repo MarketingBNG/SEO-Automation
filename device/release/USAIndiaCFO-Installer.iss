@@ -12,11 +12,9 @@
 ;  the script itself asks Windows for admin only for the official SEB install.
 ;
 ;  BUILD + SIGN (Windows, once per release) - see SIGN-AND-BUILD.md:
-;    1. Sign USAIndiaCFO-Setup.ps1 with the company code-signing certificate
-;       (sign-release.ps1 does this).
-;    2. Inno Setup: Tools > Configure Sign Tools > add "uicsign" (see .md),
-;       then Compile this file. Output: Output\USAIndiaCFO-Training-Setup.exe
-;    3. Give the SIGNED .exe's publisher/hash to the Seqrite admin to trust.
+;    powershell -File .\build-signed-release.ps1 -Thumbprint <THUMBPRINT>
+;    It signs the scripts, compiles this file, signs the .exe and writes
+;    SEQRITE-HASHES.txt for the Seqrite admin.
 ; =============================================================================
 
 #define AppName "USAIndiaCFO Training Setup"
@@ -39,12 +37,16 @@ SolidCompression=yes
 WizardStyle=modern
 Uninstallable=yes
 UninstallDisplayName={#AppName}
-; After configuring the sign tool (SIGN-AND-BUILD.md), uncomment both lines:
-; SignTool=uicsign
-; SignedUninstaller=yes
+; Signed with the company certificate: build-signed-release.ps1 defines "uicsign" (sign-file.ps1) when it
+; runs the compiler. To compile unsigned from the Inno IDE, comment these two lines out.
+SignTool=uicsign
+SignedUninstaller=yes
 
 [Files]
 Source: "USAIndiaCFO-Setup.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; Signed runtime scripts produced by build-signed-release.ps1; the setup installs these signed copies.
+Source: "UIC-Launch.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "UIC-ActivityWatch-Bridge.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "USAIndiaCFO-Setup-Guide.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]

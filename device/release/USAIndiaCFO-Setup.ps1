@@ -819,8 +819,23 @@ if ($newCredential) {
 $createdTasks = [Collections.Generic.List[string]]::new()
 try {
   [void][IO.Directory]::CreateDirectory($installDir)
-  [IO.File]::WriteAllText($launcher, $launcherSource)
-  [IO.File]::WriteAllText($watcher, $watcherSource)
+  # Signed release: build-signed-release.ps1 ships Authenticode-signed copies of these two scripts next
+  # to this file (same content as the sources above). Install those so Windows and Seqrite see the
+  # company signature; otherwise (unsigned dev copy) write the embedded sources as before.
+  foreach ($pair in @(@($launcher, $launcherSource), @($watcher, $watcherSource))) {
+    $signedCopy = Join-Path $PSScriptRoot (Split-Path -Leaf $pair[0])
+    if (Test-Path -LiteralPath $signedCopy -PathType Leaf) {
+      $sig = Get-AuthenticodeSignature -LiteralPath $signedCopy
+      if ($sig.Status -ne 'Valid') { throw "$(Split-Path -Leaf $signedCopy) signature is $($sig.Status). Install the company certificate first (trust-company-cert.ps1)." }
+      $body = ([IO.File]::ReadAllText($signedCopy) -split '\r?\n# SIG # Begin signature block')[0]
+      if (($body -replace '\r\n', "`n").TrimEnd() -ne ($pair[1] -replace '\r\n', "`n").TrimEnd()) {
+        throw "$(Split-Path -Leaf $signedCopy) does not match this setup version. Rebuild with build-signed-release.ps1."
+      }
+      Copy-Item -LiteralPath $signedCopy -Destination $pair[0] -Force
+    } else {
+      [IO.File]::WriteAllText($pair[0], $pair[1])
+    }
+  }
   & $shell -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File $watcher -Check
   if ($LASTEXITCODE -ne 0) { throw 'ActivityWatch app-only data check failed.' }
   [IO.File]::WriteAllText($profile, $profileSource.Replace('__ADMIN_QUIT_HASH__', $quitHash))
