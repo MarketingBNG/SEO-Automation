@@ -37,3 +37,12 @@ test('twelve levels in four bands, everyone can reach Expert', () => {
   assert.ok(TECH_CURRICULUM.Basic.includes(topicFor('technical', '2026-11-26', 1)));
   assert.ok(TECH_CURRICULUM.Expert.includes(topicFor('technical', '2026-11-26', 11)));
 });
+
+test('restart week: one test on Saturday 28 Nov, lessons on the other days; two a week from 30 Nov', async () => {
+  const { isTestDayFor, isLessonDayFor, testDatesForWeek } = await import('../lib/trainingSchedule');
+  const s = { on: true, patternStart: '2026-11-30', surpriseStart: '2026-12-07', grandStart: '2026-12-01' };
+  for (const d of ['2026-11-26', '2026-11-27']) assert.ok(!isTestDayFor('a@x.com', d, s) && isLessonDayFor('a@x.com', d, s), d);
+  assert.ok(isTestDayFor('a@x.com', '2026-11-28', s) && !isLessonDayFor('a@x.com', '2026-11-28', s));
+  assert.deepEqual(testDatesForWeek('a@x.com', '2026-11-26', s), ['2026-11-28']);
+  assert.equal(testDatesForWeek('a@x.com', '2026-12-02', s).length, 2);
+});

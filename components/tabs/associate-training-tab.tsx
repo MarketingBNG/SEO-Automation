@@ -834,7 +834,7 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
                     <td className="py-1.5">{fmtDay(r.day)}</td>
                     <td>{r.kind === 'surprise' ? 'Surprise' : 'Daily'}</td>
                     <td>{r.level}</td>
-                    <td>{r.status === 'missed' ? 'Not taken' : `${r.score}/${r.total} (${r.percent}%)`}{r.notAttempted > 0 && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">Incomplete · {r.notAttempted} not attempted</span>}</td>
+                    <td>{r.status === 'missed' ? 'Not taken' : `${r.score}/${r.total} (${r.percent}%)`}{r.practice && <span className="ml-1 rounded bg-slate-500/15 px-1.5 py-0.5 text-xs text-muted-foreground">practice, not counted</span>}{r.notAttempted > 0 && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">Incomplete · {r.notAttempted} not attempted</span>}</td>
                     {readOnly && <td className="text-muted-foreground">{r.status === 'done' ? fmtDur(r.tookMs) ?? '—' : '—'}</td>}
                     {readOnly && <td>{flagged(r.signals) ? <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:text-red-400">check</span> : ''}</td>}
                     <td className="text-right">

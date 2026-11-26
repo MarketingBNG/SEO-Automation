@@ -3,6 +3,7 @@
 // per person marks, trend, level history, strengths and weak topics per track, streaks, surprise
 // tests (sortable on the page, downloadable as CSV). Shared by GET /api/associate-training and the
 // assistant's training_status. Taking a test stays on the page.
+import { TRAINING_FRESH_START } from './trainingSchedule';
 import prismaClient from '@/lib/prisma';
 import * as settings from '@/lib/settings';
 import { istDay } from '@/lib/topics';
@@ -111,7 +112,7 @@ async function personView(email: string, role: string, forViewer = false) {
     tests: open.map((t) => ({ id: t.id, day: t.day, kind: t.kind, total: t.total, questions: hidden(testQuestions(t)) })),
     test: open[0] ? { id: open[0].id, day: open[0].day, kind: open[0].kind, total: open[0].total, questions: hidden(testQuestions(open[0])) } : null,
     // A person does not see their own results; only the admin and managers do.
-    results: forViewer ? results.map((r) => ({ id: r.id, day: r.day, level: r.level, score: r.score, total: r.total, status: r.status, kind: r.kind, percent: pct(r), tookMs: tookMs(r.opened_at, r.submitted_at), signals: json(r.signals, null), notAttempted: r.status === 'done' ? notAttempted(r) : 0 })) : [],
+    results: forViewer ? results.map((r) => ({ id: r.id, day: r.day, level: r.level, score: r.score, total: r.total, status: r.status, kind: r.kind, percent: pct(r), tookMs: tookMs(r.opened_at, r.submitted_at), signals: json(r.signals, null), notAttempted: r.status === 'done' ? notAttempted(r) : 0, practice: r.day < TRAINING_FRESH_START })) : [],
     pastLessons: past.map((l) => ({ id: l.id, day: l.day, level: l.level, track: l.track, trackLabel: TRACK_LABEL[l.track as Track] || l.track, title: l.title, content_html: l.content_html, sources: json(l.sources, []) })),
     dueAgain: await prisma.training_misses.count({ where: { email, cleared: false } }),
     levelHistory: forViewer ? await prisma.training_level_history.findMany({ where: { email }, orderBy: { id: 'desc' }, take: 20 }) : [],
@@ -154,7 +155,7 @@ export async function addRemark(me: { email: string; role: string; name?: string
   if (only && !only.has(who)) throw Object.assign(new Error('That person is not on your team.'), { status: 403 });
   const profile = await prisma.training_profiles.findUnique({ where: { email: who } });
   if (!profile) throw Object.assign(new Error('Person not found.'), { status: 404 });
-  const tests = await prisma.training_tests.findMany({ where: { email: who, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 5, select: { score: true, total: true } });
+  const tests = await prisma.training_tests.findMany({ where: { email: who, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' }, day: { gte: TRAINING_FRESH_START } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 5, select: { score: true, total: true } });
   const percent = tests.length ? Math.round(tests.reduce((a: number, t: any) => a + ((t.score || 0) / Math.max(1, t.total)) * 100, 0) / tests.length) : null;
   const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 19).replace('T', ' ');
   const hist = await prisma.training_level_history.findMany({ where: { email: who }, orderBy: { id: 'desc' }, take: 10, select: { from_level: true, to_level: true, created_at: true } });
@@ -253,7 +254,7 @@ export async function teamReport(only?: Set<string> | null): Promise<ReportRow[]
   const sched = await getSchedule();
   const out: ReportRow[] = [];
   for (const p of people) {
-    const tests = await prisma.training_tests.findMany({ where: { email: p.email, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 60 });
+    const tests = await prisma.training_tests.findMany({ where: { email: p.email, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' }, day: { gte: TRAINING_FRESH_START } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 60 });
     const pcts = tests.map((t) => pct(t));
     const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
     const a5 = avg(pcts.slice(0, 5));

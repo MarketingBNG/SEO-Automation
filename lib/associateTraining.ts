@@ -23,7 +23,7 @@ import { onceADay, waitsForAi, AnotherRunGoing } from './onceADay';
 import { sqlNow } from './time';
 import { LEVELS, TRACKS, audienceFor, isTrainee, lessonIdsOf, buildGames, cleanVideos, lessonPrompt, questionsFor, writtenFor, scoreGame, systemPrompt, topicFor, type Audience, type GameAnswers, type Track } from './trainingContent';
 import { getCatalogue, serviceForDay } from './uicCatalogue';
-import { getSchedule, isTestDayFor, isLessonDayFor, isGrandTestDay } from './trainingSchedule';
+import { getSchedule, isTestDayFor, isLessonDayFor, isGrandTestDay, TRAINING_FRESH_START } from './trainingSchedule';
 
 // Untyped on purpose: the Prisma query types of these many queries push the build's type check past
 // its memory limit (see lib/assistant/tabTools.ts). The tests cover the queries.
@@ -367,7 +367,7 @@ export async function setLevel(email: string, to: number, reason: string, actor 
 // Scores of the tests taken at the current level since the last level change, newest first.
 async function scoresSinceChange(email: string, level: number) {
   const change = await prisma.training_level_history.findFirst({ where: { email }, orderBy: { id: 'desc' }, select: { created_at: true } });
-  const tests = await prisma.training_tests.findMany({ where: { email, level, status: { in: ['done', 'missed'] }, kind: { not: 'qa' }, ...(change ? { created_at: { gte: change.created_at } } : {}) }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 10, select: { score: true, total: true } });
+  const tests = await prisma.training_tests.findMany({ where: { email, level, status: { in: ['done', 'missed'] }, kind: { not: 'qa' }, day: { gte: TRAINING_FRESH_START }, ...(change ? { created_at: { gte: change.created_at } } : {}) }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 10, select: { score: true, total: true } });
   return tests.map((t) => Math.round(((t.score || 0) / Math.max(1, t.total)) * 100));
 }
 

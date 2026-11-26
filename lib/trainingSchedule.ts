@@ -21,6 +21,11 @@ export const DEFAULT_SURPRISE_START = '2026-12-07'; // the Monday after
 // Lessons only until this day, whatever the setting says (the owner asked for a full study week before
 // any test). Tests start from this Monday at the earliest.
 export const LESSONS_ONLY_UNTIL = '2026-11-30';
+// A fresh start: tests before this day were practice under the old curriculum. They stay on record
+// (marked "practice") but no longer count toward scores, averages, trends or levels.
+export const TRAINING_FRESH_START = '2026-11-27';
+// One test for everyone in the restart week (before the twice-a-week rhythm begins on LESSONS_ONLY_UNTIL).
+export const EXTRA_TEST_DAYS = ['2026-11-28'];
 export const DEFAULT_GRAND_START = '2026-12-01'; // next month: the monthly grand test starts then
 const LESSON_DOW = [1, 2, 4, 5]; // Mon, Tue, Thu, Fri (used only for the old shared helpers)
 const TEST_DOW = [3, 6]; // Wed, Sat (week 1, and the old shared helpers)
@@ -100,6 +105,7 @@ export function testWeekdaysFor(email: string, day: string, s: Schedule, secret 
 export function isTestDayFor(email: string, day: string, s: Schedule, secret?: string): boolean {
   if (!s.on) return true;
   if (dow(day) === 0) return false;
+  if (EXTRA_TEST_DAYS.includes(day)) return true;
   if (day < s.patternStart) return false;
   return testWeekdaysFor(email, day, s, secret).includes(dow(day));
 }
