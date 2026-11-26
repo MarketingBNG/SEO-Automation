@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getMe } from '@/lib/auth';
-import { getRoleAccess, resetRoleAccess, setRoleAccess } from '@/lib/access';
+import { forgetLiveAccess, getRoleAccess, resetRoleAccess, setRoleAccess } from '@/lib/access';
 import { ACTIONS, ACTION_LABEL, PAGES, ROLES, isRole, roleAccess, type Action } from '@/lib/permissions';
 import { methodNotAllowed } from '../../_lib/http';
 
@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
       await setRoleAccess(b.role, { pages, actions });
       await activity.log('team.access_changed', { details: `${b.role}: ${pages.length} pages, ${actions.length} actions`, actor: me.name });
     }
+    forgetLiveAccess();
     return NextResponse.json({ ok: true, note: 'Applies within a minute, when each person’s session refreshes.' });
   }
 
@@ -57,6 +58,7 @@ export async function POST(req: NextRequest) {
     if (hours !== null && (!Number.isFinite(hours) || hours <= 0 || hours > 24 * 365)) return NextResponse.json({ error: 'Hours must be a number above 0 (or leave it empty for always).' }, { status: 400 });
     const expires = hours === null ? null : sql(Date.now() + hours * 3600000);
     for (const k of keys) await prisma.access_grants.create({ data: { email, grant_key: k, expires_at: expires, granted_by: me.name } });
+    forgetLiveAccess(email);
     await activity.log('team.access_granted', { details: `${email}: ${keys.join(', ')} ${expires ? `until ${expires} UTC` : 'always'}`, actor: me.name });
     return NextResponse.json({ ok: true });
   }
@@ -65,6 +67,7 @@ export async function POST(req: NextRequest) {
     const g = await prisma.access_grants.findUnique({ where: { id: Number(b.id) } });
     if (!g) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     await prisma.access_grants.delete({ where: { id: g.id } });
+    forgetLiveAccess(g.email);
     await activity.log('team.access_revoked', { details: `${g.email}: ${g.grant_key}`, actor: me.name });
     return NextResponse.json({ ok: true });
   }
