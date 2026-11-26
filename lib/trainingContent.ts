@@ -240,7 +240,7 @@ ${a.audience === 'manager' ? MANAGER_MKT : ''}`;
   return `${head}
 ${body}
 
-The lesson: about ${words} words, no more. Use <h3>, <p>, <ul><li>, <strong>.
+The lesson: about ${words} words, no more. Write it mostly as POINTERS, so it is quick to read and easy to remember: under each <h3>, short bullet points (<ul><li>, one idea per point, at most about 20 words each), a one-line <p> only where a point needs an introduction, and <strong> on the key term, form or number in a point. No long paragraphs.
 Then write ${n} questions.
 ${QUESTION_RULES}
 ${writtenSpec(writtenFor(a.track, a.level))}

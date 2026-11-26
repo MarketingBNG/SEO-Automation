@@ -53,6 +53,14 @@ export const tookMs = (a?: string | null, b?: string | null) => {
   return x !== null && y !== null && y >= x ? y - x : null;
 };
 
+// Questions left unanswered in a submitted test (no option picked, or nothing typed).
+export function notAttempted(t: { questions: string; answers?: string | null; written?: string | null }): number {
+  const qs: any[] = json(t.questions, []) || [];
+  const a: Record<string, any> = json(t.answers || '{}', {}) || {};
+  const w: Record<string, any> = json(t.written || '{}', {}) || {};
+  return qs.filter((q) => (q.kind === 'written' ? !String(w[q.id]?.text || '').trim() : a[q.id] === undefined || a[q.id] === null)).length;
+}
+
 function lessonOut(l: any, read?: string | null, openedAt?: string | null) {
   const extras = json(l.extras, {});
   return {
@@ -89,7 +97,7 @@ async function personView(email: string, role: string, forViewer = false) {
   const reads = await prisma.training_reads.findMany({ where: { email, lesson_id: { in: ids } } });
   const opens = forViewer && ids.length ? await prisma.training_lesson_opens.findMany({ where: { email, lesson_id: { in: ids } } }) : [];
   const open = await prisma.training_tests.findMany({ where: { email, status: 'open' }, orderBy: [{ day: 'desc' }, { kind: 'asc' }] });
-  const results = await prisma.training_tests.findMany({ where: { email, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 30, select: { id: true, day: true, level: true, score: true, total: true, status: true, kind: true, opened_at: true, submitted_at: true, signals: true } });
+  const results = await prisma.training_tests.findMany({ where: { email, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 30, select: { id: true, day: true, level: true, score: true, total: true, status: true, kind: true, opened_at: true, submitted_at: true, signals: true, questions: true, answers: true, written: true } });
   const past = await prisma.training_lessons.findMany({ where: { audience: audienceFor(role), level: { lte: profile.level }, id: { notIn: ids } }, orderBy: [{ day: 'desc' }, { level: 'desc' }], take: 15 });
   const games = await prisma.training_games.findMany({ where: { email }, select: { day: true, lesson_id: true, points: true, max_points: true } });
   const streak = gameStreak(games.map((x) => x.day), istDay());
@@ -103,7 +111,7 @@ async function personView(email: string, role: string, forViewer = false) {
     tests: open.map((t) => ({ id: t.id, day: t.day, kind: t.kind, total: t.total, questions: hidden(testQuestions(t)) })),
     test: open[0] ? { id: open[0].id, day: open[0].day, kind: open[0].kind, total: open[0].total, questions: hidden(testQuestions(open[0])) } : null,
     // A person does not see their own results; only the admin and managers do.
-    results: forViewer ? results.map((r) => ({ id: r.id, day: r.day, level: r.level, score: r.score, total: r.total, status: r.status, kind: r.kind, percent: pct(r), tookMs: tookMs(r.opened_at, r.submitted_at), signals: json(r.signals, null) })) : [],
+    results: forViewer ? results.map((r) => ({ id: r.id, day: r.day, level: r.level, score: r.score, total: r.total, status: r.status, kind: r.kind, percent: pct(r), tookMs: tookMs(r.opened_at, r.submitted_at), signals: json(r.signals, null), notAttempted: r.status === 'done' ? notAttempted(r) : 0 })) : [],
     pastLessons: past.map((l) => ({ id: l.id, day: l.day, level: l.level, track: l.track, trackLabel: TRACK_LABEL[l.track as Track] || l.track, title: l.title, content_html: l.content_html, sources: json(l.sources, []) })),
     dueAgain: await prisma.training_misses.count({ where: { email, cleared: false } }),
     levelHistory: forViewer ? await prisma.training_level_history.findMany({ where: { email }, orderBy: { id: 'desc' }, take: 20 }) : [],

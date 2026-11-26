@@ -260,6 +260,13 @@ export default function SebPage() {
             return (
               <>
                 <button disabled={busy || left > 0} onClick={finish} className="mt-5 w-full rounded-lg bg-emerald-500 px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Submitting… (grading can take up to a minute)' : left > 0 ? `Answer all questions to finish (${left} left)` : 'Finish test'}</button>
+                {left > 0 && !busy && (
+                  // Moving on without answering is allowed, but the test is recorded as incomplete and the
+                  // unanswered questions show as "not attempted" to the admin.
+                  <button onClick={() => { if (window.confirm(`${left} question(s) are not answered. They will be recorded as NOT ATTEMPTED and the test will show as incomplete. Submit anyway?`)) void finish(); }} className="mt-2 w-full rounded-lg border border-amber-500/60 px-4 py-2 text-sm text-amber-300">
+                    Submit without answering ({left} not attempted)
+                  </button>
+                )}
               </>
             );
           })()}

@@ -240,8 +240,20 @@ function Review({ test, meta }: { test: any; meta?: boolean }) {
   // Typed answers and their AI grades (the result object carries objects; the review endpoint strings).
   const wGrades = typeof test.written_grades === 'string' ? safeParse(test.written_grades) : test.writtenGrades || null;
   const wAns = typeof test.written === 'string' ? safeParse(test.written) : test.written || null;
+  // Questions left unanswered (no option picked, nothing typed): listed first so the reviewer sees them.
+  const skipped = test.questions
+    .map((q: any, i: number) => ({ q, i }))
+    .filter(({ q }: any) => (q.kind === 'written' ? !String(wAns?.[q.id]?.text || '').trim() : test.answers?.[q.id] === undefined || test.answers?.[q.id] === null));
   return (
     <div className="space-y-3">
+      {skipped.length > 0 && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-sm">
+          <div className="font-medium text-amber-800 dark:text-amber-300">Incomplete: {skipped.length} of {test.questions.length} questions not attempted</div>
+          <ul className="mt-1 list-disc pl-5 text-xs">
+            {skipped.map(({ q, i }: any) => <li key={q.id}>Q{i + 1}. {q.q}</li>)}
+          </ul>
+        </div>
+      )}
       {meta && (
         <div className={`rounded-md border p-2 text-xs ${isFlag ? 'border-red-500/50 bg-red-500/10' : 'bg-muted'}`}>
           <div>Time taken: {time || 'unknown'}</div>
@@ -283,7 +295,7 @@ function Review({ test, meta }: { test: any; meta?: boolean }) {
               {i + 1}. {q.q}
             </div>
             <div className="mt-1 pl-6">
-              {!right && <div className="text-red-600">{meta ? 'Their' : 'Your'} answer: {picked !== undefined ? q.options[picked] : 'not answered'}</div>}
+              {!right && (picked !== undefined && picked !== null ? <div className="text-red-600">{meta ? 'Their' : 'Your'} answer: {q.options[picked]}</div> : <div className="font-medium text-amber-700 dark:text-amber-400">Not attempted</div>)}
               <div className="text-emerald-700 dark:text-emerald-400">Right answer: {q.options[q.answer]}</div>
               {meta && picks.length > 1 && (
                 <div className="text-xs text-amber-700 dark:text-amber-400">Changed answer: {picks.map((p) => q.options[p.o] ?? '?').join(' → ')}</div>
@@ -822,7 +834,7 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
                     <td className="py-1.5">{fmtDay(r.day)}</td>
                     <td>{r.kind === 'surprise' ? 'Surprise' : 'Daily'}</td>
                     <td>{r.level}</td>
-                    <td>{r.status === 'missed' ? 'Not taken' : `${r.score}/${r.total} (${r.percent}%)`}</td>
+                    <td>{r.status === 'missed' ? 'Not taken' : `${r.score}/${r.total} (${r.percent}%)`}{r.notAttempted > 0 && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">Incomplete · {r.notAttempted} not attempted</span>}</td>
                     {readOnly && <td className="text-muted-foreground">{r.status === 'done' ? fmtDur(r.tookMs) ?? '—' : '—'}</td>}
                     {readOnly && <td>{flagged(r.signals) ? <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:text-red-400">check</span> : ''}</td>}
                     <td className="text-right">
@@ -988,68 +1000,89 @@ function TeamReport({ data, person, setPerson, admin, openReview }: { data: any;
           )}
         </CardAction>
       </CardHeader>
-      <CardContent className="overflow-x-auto">
+      <CardContent className="space-y-4 overflow-x-auto">
         {rows.length === 0 ? (
           <div className="text-sm text-muted-foreground">Nobody is in the training yet. Everyone on the Team list except the admin joins at the next daily run.</div>
         ) : (
-          <table className="w-full min-w-[56rem] text-sm">
-            <thead className="text-left text-muted-foreground">
-              <tr>
-                {th('name', 'Person')}
-                {th('level', 'Level')}
-                {th('tests', 'Tests')}
-                {th('average', 'Average (last 5)')}
-                {th('trend', 'Trend')}
-                <th className="pr-2">Over time</th>
-                <th className="pr-2">Technical / Know UIC / Marketing</th>
-                {th('streak', 'Test streak')}
-                {th('points', 'Game points')}
-                <th className="pr-2">Surprise</th>
-                <th>In training</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r: any) => (
-                <tr key={r.email} className={`border-t align-top ${person === r.email ? 'bg-muted' : ''}`}>
-                  <td className="py-1.5 pr-2">
-                    <button className="text-left underline" onClick={() => setPerson(person === r.email ? '' : r.email)}>{r.name || r.email}</button>
-                    <div className="text-xs text-muted-foreground">{r.role}</div>
-                    {r.strengths.length > 0 && <div className="text-xs text-emerald-700 dark:text-emerald-400">Strong: {r.strengths.join(', ')}</div>}
-                    {r.weak.length > 0 && <div className="text-xs text-red-600">Weak: {r.weak.join(', ')}</div>}
-                  </td>
-                  <td className="pr-2">
-                    {data.canManage ? (
-                      <select className="rounded border bg-background px-1" value={r.level} onChange={(e) => admin('level', { email: r.email, level: Number(e.target.value) })}>
-                        {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
-                      </select>
-                    ) : (
-                      r.level
-                    )}
-                    {r.levels.length > 0 && <div className="text-xs text-muted-foreground">{r.levels.slice(-3).map((l: any) => `${l.from}→${l.to}`).join(', ')}</div>}
-                  </td>
-                  <td className="pr-2">{r.tests}</td>
-                  <td className="pr-2">
-                    {r.average === null ? '-' : `${r.average}%`}
-                    {r.last && r.last.status === 'done' && (
-                      <button className="block text-xs underline" onClick={() => openReview(r.last.id)}>last: {r.last.percent}%</button>
-                    )}
-                  </td>
-                  <td className={`pr-2 ${r.trend > 0 ? 'text-emerald-600' : r.trend < 0 ? 'text-red-600' : ''}`}>{r.trend === null ? '-' : `${r.trend > 0 ? '+' : ''}${r.trend}`}</td>
-                  <td className="pr-2"><Sparkline series={r.series.map((s: any) => s.percent)} /></td>
-                  <td className="pr-2">{['technical', 'uic', 'marketing'].map((t) => (r.tracks[t] === null ? '-' : `${r.tracks[t]}%`)).join(' / ')}</td>
-                  <td className="pr-2">{r.streak}</td>
-                  <td className="pr-2">{r.points}{r.badge ? <div className="text-xs text-amber-700 dark:text-amber-300">{r.badge}</div> : null}</td>
-                  <td className="pr-2 text-xs">{r.surprise.length ? r.surprise.slice(0, 4).map((s: any) => `${s.day.slice(5)}: ${s.status === 'missed' ? 'missed' : `${s.percent}%`}`).join(', ') : '-'}</td>
-                  <td>{data.canManage ? <input type="checkbox" checked={r.active} onChange={(e) => admin('active', { email: r.email, active: e.target.checked })} aria-label="In training" /> : r.active ? 'Yes' : 'Paused'}</td>
+          <>
+            {/* At a glance: who is in, the team average, who needs attention. */}
+            {(() => {
+              const active = rows.filter((r: any) => r.active);
+              const avgs = active.map((r: any) => r.average).filter((x: any) => x !== null);
+              const teamAvg = avgs.length ? Math.round(avgs.reduce((x: number, y: number) => x + y, 0) / avgs.length) : null;
+              const attention = active.filter((r: any) => (r.average !== null && r.average < data.thresholds.down) || r.trend < 0);
+              const tile = 'rounded-lg border p-3';
+              return (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className={tile}><div className="text-xs text-muted-foreground">In training</div><div className="text-xl font-semibold">{active.length}<span className="text-sm font-normal text-muted-foreground"> / {rows.length}</span></div></div>
+                  <div className={tile}><div className="text-xs text-muted-foreground">Team average</div><div className="text-xl font-semibold">{teamAvg === null ? '-' : `${teamAvg}%`}</div></div>
+                  <div className={tile}><div className="text-xs text-muted-foreground">Levels</div><div className="text-sm">{LEVEL_BAND_NAMES.map((b, i) => { const n = active.filter((r: any) => bandIndex(r.level) === i).length; return n ? `${b} ${n}` : null; }).filter(Boolean).join(' · ') || '-'}</div></div>
+                  <div className={`${tile} ${attention.length ? 'border-amber-500/50 bg-amber-500/10' : ''}`}><div className="text-xs text-muted-foreground">Needs attention</div><div className="text-sm font-medium">{attention.length ? attention.map((r: any) => r.name || r.email).join(', ') : 'Nobody'}</div></div>
+                </div>
+              );
+            })()}
+            <table className="w-full min-w-[48rem] text-sm">
+              <thead className="text-left text-xs text-muted-foreground">
+                <tr>
+                  {th('name', 'Person')}
+                  {th('level', 'Level')}
+                  {th('average', 'Score (last 5)')}
+                  {th('trend', 'Trend')}
+                  <th className="pr-2">Technical · Know UIC · Marketing</th>
+                  {th('tests', 'Tests')}
+                  <th>In training</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((r: any) => (
+                  <tr key={r.email} className={`border-t align-top ${person === r.email ? 'bg-muted' : ''}`}>
+                    <td className="py-2 pr-2">
+                      <button className="text-left font-medium underline" onClick={() => setPerson(person === r.email ? '' : r.email)}>{r.name || r.email}</button>
+                      <div className="text-xs text-muted-foreground">{r.role}</div>
+                      {r.strengths.length > 0 && <div className="text-xs text-emerald-700 dark:text-emerald-400">Strong: {r.strengths.join(', ')}</div>}
+                      {r.weak.length > 0 && <div className="text-xs text-red-600">Weak: {r.weak.join(', ')}</div>}
+                    </td>
+                    <td className="pr-2">
+                      {data.canManage ? (
+                        <select className="rounded border bg-background px-1" value={r.level} onChange={(e) => admin('level', { email: r.email, level: Number(e.target.value) })}>
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n} · {LEVEL_BAND_NAMES[bandIndex(n)]}</option>)}
+                        </select>
+                      ) : (
+                        <span>{r.level} · {LEVEL_BAND_NAMES[bandIndex(r.level)]}</span>
+                      )}
+                      {r.levels.length > 0 && <div className="text-xs text-muted-foreground">recent: {r.levels.slice(-2).map((l: any) => `${l.from}→${l.to}`).join(', ')}</div>}
+                    </td>
+                    <td className="pr-2">
+                      <span className={`font-medium ${r.average === null ? '' : r.average >= data.thresholds.up ? 'text-emerald-600' : r.average < data.thresholds.down ? 'text-red-600' : ''}`}>{r.average === null ? '-' : `${r.average}%`}</span>
+                      {r.last && r.last.status === 'done' && (
+                        <button className="block text-xs underline" onClick={() => openReview(r.last.id)}>open last test ({r.last.percent}%)</button>
+                      )}
+                      {r.last && r.last.status === 'missed' && <div className="text-xs text-red-600">last test missed</div>}
+                    </td>
+                    <td className="pr-2">
+                      <div className={r.trend > 0 ? 'text-emerald-600' : r.trend < 0 ? 'text-red-600' : ''}>{r.trend === null ? '-' : `${r.trend > 0 ? '▲ +' : r.trend < 0 ? '▼ ' : ''}${r.trend}`}</div>
+                      <Sparkline series={r.series.map((x: any) => x.percent)} />
+                    </td>
+                    <td className="pr-2">{['technical', 'uic', 'marketing'].map((t) => (r.tracks[t] === null ? '-' : `${r.tracks[t]}%`)).join(' · ')}</td>
+                    <td className="pr-2">
+                      {r.tests}
+                      <div className="text-xs text-muted-foreground">streak {r.streak} · {r.points} pts{r.badge ? ` · ${r.badge}` : ''}</div>
+                    </td>
+                    <td>{data.canManage ? <input type="checkbox" checked={r.active} onChange={(e) => admin('active', { email: r.email, active: e.target.checked })} aria-label="In training" /> : r.active ? 'Yes' : 'Paused'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </CardContent>
     </Card>
   );
 }
+
+// The four bands of the 12 levels (lib/trainingContent LEVEL_BANDS).
+const LEVEL_BAND_NAMES = ['Basic', 'Intermediate', 'Advanced', 'Expert'];
+const bandIndex = (level: number) => Math.min(3, Math.max(0, Math.floor(((level || 1) - 1) / 3)));
 
 export default function AssociateTrainingTab() {
   const [data, setData] = useState<any>(null);

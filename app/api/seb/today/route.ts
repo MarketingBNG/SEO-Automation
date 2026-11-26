@@ -3,6 +3,7 @@ import prismaClient from '@/lib/prisma';
 import { sebSessionEmail, SEB_COOKIE, resolveSebQuitUrl, sebLog, newReqId, withTimeout } from '@/lib/seb';
 import { gateForEmail } from '@/lib/worklog';
 import { sebTodayItem } from '@/lib/associateTrainingView';
+import { markLessonOpen, startTest } from '@/lib/associateTraining';
 import { attendanceStatus } from '@/lib/attendance';
 import { methodNotAllowed } from '../../_lib/http';
 
@@ -30,6 +31,10 @@ export async function GET(req: NextRequest) {
   if (gate.status === 'pending') {
     const tItem = Date.now();
     item = await sebTodayItem(email, member?.role || 'user').catch((e: any) => { sebLog('today', rid, 'item-error', { msg: String(e?.message || e) }); return null; });
+    // Time tracking: the first time SEB shows a lesson or a test is its start time (kept once), so the
+    // report shows how long the lesson took to read and the test to finish.
+    if (item?.kind === 'lesson' && item.id) await markLessonOpen(email, Number(item.id)).catch(() => {});
+    if (item?.kind === 'test' && item.id) await startTest(email, Number(item.id)).catch(() => {});
     sebLog('today', rid, 'item', { ms: Date.now() - tItem, has: Boolean(item), kind: item?.kind || 'none' });
   }
 
