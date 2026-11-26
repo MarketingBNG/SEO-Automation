@@ -290,6 +290,7 @@ function withCache(systemPrompt, conversation) {
 // In Testing mode (lib/aiQueue.ts) the request waits for Claude Code instead of the API, and
 // automatic work does not start.
 const QUEUED_WHEN_AUTOMATIC = new Set(['team-training']);
+const settingValue = async (k: string) => { try { return String((await (await import('./settings')).get(k)) ?? ''); } catch { return ''; } };
 async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
   const ctx = replayScope();
   const { onActivity, idleMs, ...rest } = opts;
@@ -303,8 +304,14 @@ async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
   // Testing mode too: reading its result costs nothing, and it would otherwise be dropped after 7 days
   // and paid for again. Only that: a turn that needs a further part waits (collectOnly).
   const testing = (await aiMode()) === 'testing';
+  // Training lessons always run on the Claude Code subscription (the queue, answered by the hourly
+  // scheduled run), in Live mode too, so training never uses API credits while blogs keep using the API
+  // at once. Setting training_via_subscription = 'off' sends them back to the API.
+  const viaSubscription = QUEUED_WHEN_AUTOMATIC.has(String(opts.feature || '')) && (await settingValue('training_via_subscription')) !== 'off';
   if (testing && opts.batch && isAutomatic() && (await pendingBatchId(batchParamsFor(systemPrompt, [...userMessages], opts)))) {
     result = await callClaudeLive(systemPrompt, userMessages, signal, { ...opts, collectOnly: true });
+  } else if (viaSubscription) {
+    result = await askQueue(hash, systemPrompt, userMessages, signal, opts);
   } else if (testing) {
     // Automatic work does not start in Testing mode, except the daily training lessons: they wait in
     // the queue for the scheduled Claude Code run (subscription), so training keeps coming every day.
