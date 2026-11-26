@@ -40,7 +40,7 @@ export async function trainingGate(email: string, role: string, day = istDay()):
   const e = String(email || '').toLowerCase();
   if (!e || !isTrainee(role)) return OPEN;
   const hit = cache.get(e);
-  if (hit && hit.day === day && Date.now() - hit.at < 30_000) return hit.value;
+  if (hit && hit.day === day && Date.now() - hit.at < 10_000) return hit.value; // short: other processes (scripts/cluster.mjs) may have changed it
   // A backend failure is reported (error: true), not cached, and not silently treated as "nothing to
   // do": a caller that acts on the gate can tell it apart from a real completion.
   const value = await computeGate(e, day).catch(() => ({ ...OPEN, error: true }));
