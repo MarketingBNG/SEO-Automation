@@ -8,6 +8,7 @@
 // Levels move with recent scores (adaptiveLevel). After the test, a short game round is built from
 // the same lesson. Admins only watch. Lessons are made once per day, track, level and audience and
 // shared by everyone there, so AI calls stay few.
+import { aiMode } from './aiQueue';
 import crypto from 'crypto';
 import prismaClient from './prisma';
 import { goalBlock } from './goal';
@@ -32,7 +33,7 @@ export { LEVELS, audienceFor, isTrainee, lessonIdsOf };
 // Lessons and tests are generated at this hour IST, one hour BEFORE the 09:00 device lock window
 // (lib/worklog GATE_LOCK_HOUR_IST), so a trainee's training is ready before their laptop locks at 09:00.
 export const TRAINING_HOUR_IST = 8;
-export const MAX_LEVEL = 5;
+export const MAX_LEVEL = 12; // 4 bands x 3 levels (lib/trainingContent LEVEL_BANDS)
 // Adaptive levels: over the last WINDOW tests at this level (missed ones count as 0), an average of
 // UP_AVG% or more without a falling trend moves the person up; under DOWN_AVG% moves them down.
 export const UP_AVG = 80;
@@ -40,12 +41,34 @@ export const DOWN_AVG = 50;
 export const WINDOW = 3;
 export const PASS_PERCENT = UP_AVG;
 const REPEAT_AFTER_DAYS = 2;
-const MAX_REPEATS_PER_TEST = 5;
+const MAX_REPEATS_PER_TEST = 3;
+// A daily test asks at most this many questions (15 to 20 is the target), of which at most
+// MAX_WRITTEN_PER_TEST are typed answers (each is graded, the only AI cost of a test).
+export const MAX_TEST_QUESTIONS = 18;
+const MAX_WRITTEN_PER_TEST = 2;
 const SURPRISE_QUESTIONS = 8;
 const GRAND_QUESTIONS = 20; // the monthly grand test is the biggest
 
 // kind 'written' is a typed-answer question: options is empty, answer is -1, and model + points are
 // the correct answer and the points a full answer needs, used by the AI to grade the typed reply.
+// Keep a daily test to MAX_TEST_QUESTIONS: up to MAX_WRITTEN_PER_TEST typed answers, the due repeats,
+// then the new multiple-choice questions spread evenly over the lessons (round-robin, so every lesson
+// is asked about). Pure, so it is tested without the database.
+export function capTest(fresh: Question[], repeats: Question[], max = MAX_TEST_QUESTIONS): Question[] {
+  const written = fresh.filter((q) => q.kind === 'written').slice(0, MAX_WRITTEN_PER_TEST);
+  const reps = repeats.slice(0, Math.max(0, max - written.length));
+  const room = Math.max(0, max - written.length - reps.length);
+  const byTopic = new Map<string, Question[]>();
+  for (const q of fresh.filter((x) => x.kind !== 'written')) {
+    const k = `${q.track || ''}|${q.topic || ''}`;
+    byTopic.set(k, [...(byTopic.get(k) || []), q]);
+  }
+  const mcq: Question[] = [];
+  const lists = [...byTopic.values()];
+  for (let i = 0; mcq.length < room && lists.some((l) => i < l.length); i++) for (const l of lists) if (i < l.length && mcq.length < room) mcq.push(l[i]);
+  return [...mcq, ...written, ...reps];
+}
+
 export type Question = { id: string; q: string; options: string[]; answer: number; explain: string; source?: string; track?: Track; topic?: string; repeat?: boolean; kind?: 'mcq' | 'written'; model?: string; points?: string[] };
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
@@ -245,7 +268,7 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
     const misses = await prisma.training_misses.findMany({ where: { email, cleared: false, due_day: { lte: day } }, orderBy: { due_day: 'asc' }, take: MAX_REPEATS_PER_TEST });
     const repeats: Question[] = misses.map((m) => ({ ...(JSON.parse(m.question) as Question), repeat: true }));
     const seen = new Set(fresh.map((q) => q.id));
-    const questions = [...fresh, ...repeats.filter((q) => !seen.has(q.id))];
+    const questions = capTest(fresh, repeats.filter((q) => !seen.has(q.id)));
     if (questions.length) {
       await prisma.training_tests.create({ data: { email, day, level: p.level, kind: 'daily', lesson_id: tested[0] || null, lesson_ids: tested.length ? `,${tested.join(',')},` : ',', questions: JSON.stringify(questions), total: questions.length } }).catch(() => {});
     }
@@ -353,12 +376,26 @@ export type TestMeta = { log?: unknown; signals?: unknown; written?: Record<stri
 
 // The AI grades one typed answer against the model answer and key points. Returns a 0, 0.5 or 1 score
 // and a one-line reason. On any failure it returns 0 with a note so the admin can review by hand.
+const GRADING_MODEL = process.env.TRAINING_GRADING_MODEL || 'claude-haiku-5-5';
+// No-AI grading: the share of key points whose main words appear in the typed answer.
+export function gradeByKeyPoints(q: Question, answer: string): { score: number; reason: string } {
+  const words = (t: string) => (t.toLowerCase().match(/[a-z0-9-]{4,}/g) || []);
+  const said = new Set(words(answer));
+  const points = (q.points || []).filter(Boolean);
+  if (!points.length) return { score: answer.trim().length > 40 ? 0.5 : 0, reason: 'Checked without AI (no key points): please review by hand.' };
+  const hit = points.filter((p) => { const w = words(p); return w.length && w.filter((x) => said.has(x)).length / w.length >= 0.5; }).length;
+  const share = hit / points.length;
+  return { score: share >= 0.75 ? 1 : share >= 0.4 ? 0.5 : 0, reason: `Checked without AI: ${hit} of ${points.length} key points found.` };
+}
 async function gradeWritten(q: Question, answer: string, ask = callClaude): Promise<{ score: number; reason: string }> {
   if (!answer.trim()) return { score: 0, reason: 'No answer written.' };
   const sys = `You grade a trainee's typed answer at USAIndiaCFO (US-India tax and compliance) against a model answer and its key points. Be strict but fair: reward a correct answer in the trainee's own words, do not reward vague answers or text copied from the question. Reply ONLY JSON between ===JSON=== and ===END===: {"score": 0 | 0.5 | 1, "reason": "one short line, and note clear spelling or grammar problems if any"}. 1 = the key points are covered and correct; 0.5 = partly correct or missing a key point; 0 = wrong, empty or off-topic.`;
   const user = `Question: ${q.q}\nModel answer: ${q.model || ''}\nKey points a full answer needs: ${(q.points || []).join('; ')}\nTrainee's typed answer: ${answer.slice(0, 2000)}`;
   try {
-    const { text } = (await ask(sys, [{ role: 'user', content: user }], undefined, { maxUses: 1, effort: 'low', feature: 'training-grading' })) as { text: string };
+    // Testing mode would send this to the Claude Code queue and the test submit (SEB Finish) would wait
+    // for it; grade by key points instead, with no AI call. Live: a small, cheap model is enough.
+    if (ask === callClaude && (await aiMode()) === 'testing') return gradeByKeyPoints(q, answer);
+    const { text } = (await ask(sys, [{ role: 'user', content: user }], undefined, { maxUses: 1, effort: 'low', model: GRADING_MODEL, feature: 'training-grading' })) as { text: string };
     const j = parseJson(text) || {};
     const raw = Number(j.score);
     const s = [0, 0.5, 1].includes(raw) ? raw : raw >= 0.75 ? 1 : raw >= 0.25 ? 0.5 : 0;

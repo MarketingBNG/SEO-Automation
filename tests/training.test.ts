@@ -38,9 +38,9 @@ const LESSON_EXTRAS = {
 
 test('levels ask more questions as they go up, and the tracks are three', async () => {
   const { LEVELS, questionsFor, TRACKS } = await content();
-  assert.deepEqual([1, 2, 3, 4, 5].map((l) => LEVELS[l].questions), [5, 6, 8, 10, 12]);
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((l) => LEVELS[l].questions), [4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8]);
   assert.deepEqual(TRACKS, ['technical', 'uic', 'marketing']);
-  assert.ok(questionsFor('marketing', 5) < questionsFor('technical', 5) && questionsFor('uic', 1) >= 3);
+  assert.ok(questionsFor('marketing', 12) < questionsFor('technical', 12) && questionsFor('uic', 1) >= 3);
 });
 
 test('the prompts carry the curriculum, the marketing use, Know UIC and the official-source rule', async () => {
@@ -52,8 +52,8 @@ test('the prompts carry the curriculum, the marketing use, Know UIC and the offi
   assert.match(sys, /incometax\.gov\.in/);
   assert.match(sys, /rbi\.org\.in/);
   const tech = lessonPrompt({ day: '2026-11-20', level: 1, track: 'technical', audience: 'associate', earlier: [] });
-  for (const w of ['FBAR', 'FATCA/Form 8938', 'ITIN', 'EIN', 'SSN', '1040/1040-NR', 'W-8BEN/W-8BEN-E/W-9', 'Form 5472', 'LLC vs C-Corp', 'PFIC', 'DTAA and Form 67', 'ROR/RNOR/NRI', 'Schedule FA', 'FEMA/ODI/FDI/LRS', 'Form 15CA/15CB', 'TDS', 'GST', 'PAN', 'Income-tax Act 2025', 'transfer pricing']) assert.ok(tech.includes(w), w);
-  assert.ok(tech.includes(LEVELS[1].depth) && /Definitions/.test(tech));
+  for (const w of ['US taxation to CPA level', 'What it is', 'Deadlines, government fees and penalties', 'Recently changed', 'Example', 'Using it in marketing and offers']) assert.ok(tech.includes(w), w);
+  assert.ok(tech.includes(LEVELS[1].depth) && /Basic/.test(tech));
   assert.match(tech, /Scenario-based multiple choice/);
   assert.match(tech, /ONE correct/);
   assert.match(tech, /plausible/);
@@ -124,7 +124,7 @@ test('levels adapt: up on a high average without a falling trend, down after rep
   assert.equal(adaptiveLevel(2, [90, 85, 80]).level, 3);
   assert.match(adaptiveLevel(2, [90, 85, 80]).reason!, /80% moves up/);
   assert.equal(adaptiveLevel(2, [70, 95, 100]).level, 2, 'a falling trend does not move up');
-  assert.equal(adaptiveLevel(5, [100, 100, 100]).level, 5);
+  assert.equal(adaptiveLevel(12, [100, 100, 100]).level, 12);
   assert.equal(adaptiveLevel(3, [40, 30, 50]).level, 2);
   assert.equal(adaptiveLevel(3, [40, 30]).level, 3, 'down needs three tests');
   assert.equal(adaptiveLevel(1, [0, 0, 0]).level, 1);
@@ -253,7 +253,7 @@ test('the daily gate: locks pages and API writes until lessons are read and test
     assert.equal(gate.unread.length, 3);
     assert.equal(gate.openTests.filter((t) => t.kind === 'daily').length, 1);
     const testRow = await prisma.training_tests.findFirst({ where: { email: assoc, day, kind: 'daily' } });
-    assert.equal(testRow.total, 5 + 3 + 3, 'questions from the three lessons of yesterday');
+    assert.equal(testRow.total, 4 + 3 + 3, 'questions from the three lessons of yesterday');
 
     // The proxy refuses API writes outside the training, keeps reads and the training itself open.
     const refused = await gateRefusal('POST', '/api/drafts/5', assoc, 'user', day);

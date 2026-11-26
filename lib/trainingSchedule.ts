@@ -16,8 +16,11 @@
 // test every day (the old behaviour; this is what the DB tests use).
 import crypto from 'crypto';
 
-export const DEFAULT_PATTERN_START = '2026-11-23'; // Monday
-export const DEFAULT_SURPRISE_START = '2026-11-30'; // the Monday after
+export const DEFAULT_PATTERN_START = '2026-11-30'; // Monday
+export const DEFAULT_SURPRISE_START = '2026-12-07'; // the Monday after
+// Lessons only until this day, whatever the setting says (the owner asked for a full study week before
+// any test). Tests start from this Monday at the earliest.
+export const LESSONS_ONLY_UNTIL = '2026-11-30';
 export const DEFAULT_GRAND_START = '2026-12-01'; // next month: the monthly grand test starts then
 const LESSON_DOW = [1, 2, 4, 5]; // Mon, Tue, Thu, Fri (used only for the old shared helpers)
 const TEST_DOW = [3, 6]; // Wed, Sat (week 1, and the old shared helpers)
@@ -38,7 +41,8 @@ export async function getSchedule(): Promise<Schedule> {
   const patternStart = String((await settings.get('training_pattern_start')) ?? DEFAULT_PATTERN_START).trim();
   const surpriseStart = String((await settings.get('training_surprise_start')) ?? DEFAULT_SURPRISE_START).trim();
   const grandStart = String((await settings.get('training_grand_start')) ?? DEFAULT_GRAND_START).trim();
-  return { on: Boolean(patternStart), patternStart, surpriseStart, grandStart };
+  const on = Boolean(patternStart);
+  return { on, patternStart: on && patternStart < LESSONS_ONLY_UNTIL ? LESSONS_ONLY_UNTIL : patternStart, surpriseStart, grandStart };
 }
 
 // --- The old shared helpers (kept for the gate's "is this a working day" check and existing tests).

@@ -149,6 +149,7 @@ Topic checklist: a US company for an Indian founder or Indian company. Verify ea
 2. H1: the same topic as the title. It may be longer and more descriptive.
 3. Byline block: author and reviewer from the brief with their credentials, then "Published: <date>" and "Last updated: <date>". Never invent a name, credential or date. If the brief does not supply them, write [AUTHOR NAME, CREDENTIAL] and [REVIEWER NAME, CREDENTIAL]. These placeholders block publishing until the approver fills them. Never fill them yourself.
 4. Answer-first opening: 40-60 words that directly answer the title's question. Include the key number, deadline, form or rule, and name the jurisdiction. No throat-clearing.
+4a. Why it matters to the reader: right after the answer, 2-3 sentences that give the reader a reason to keep reading, as a short, concrete situation, for example "Consider an Indian founder whose Delaware C-Corp skipped Form 5472 in its first year: the IRS penalty notice arrives before the first customer does." Rules: it is an illustrative situation, never a named or real person, company or result; any figure in it (a penalty, a fee, a deadline) is from an official source and appears in the facts register; it stays inside the 150 words before the first H2 (Gate 7); never open with the scenario, the answer comes first.
 5. Scope: within the first 150 words, state the jurisdiction(s), governing law and period, for example "US federal rules for tax year 2026" or "India, Income-tax Act, 2025, tax year 2026-27".
 6. Optional Key takeaways: 3-5 bullets, each one complete factual sentence.
 7. Body sections under H2s. Each section opens with a 40-55 word self-contained answer to its heading, then gives detail, exceptions and steps. For cross-border topics, use separate, clearly labelled "India side" and "US side" sections or table columns. Never blend the two countries' rules in one paragraph.
@@ -156,6 +157,7 @@ Topic checklist: a US company for an Indian founder or Indian company. Verify ea
 9. At least one HTML table for comparisons, thresholds, rates or deadlines. Use <th> headers, keep cells short, and add an "as of / for tax year" label and a source line.
 10. Practitioner note: one short first-hand insight in the firm's voice, taken only from the Fireflies questions or practitioner input in the brief, for example "In our work with Indian founders forming Delaware C-Corps, the most common miss is...". Anonymize it completely. If the brief gives no practitioner input, write [PRACTITIONER NOTE NEEDED]. Never invent experience.
 11. Common mistakes or edge cases, where useful.
+11a. What most guides miss: one section with the lesser-known parts of the rule that a careful reader values most, each from an official source: elections and safe harbors that are easy to miss, exceptions and thresholds, deadlines that differ between two forms, places where two rules or forms seem to contradict each other and how the official guidance resolves it, and rules that changed recently (say "Recently changed" with the date). Only lawful planning that the official source itself describes; never present a way to avoid a filing or hide income, and never use the word "loophole" in the post.
 12. FAQ: an H2 "Frequently asked questions" with 2-4 H3 questions (section 5).
 13. Disclaimer line: "This article is general information, not tax, legal or financial advice for your situation. Rules are stated as of <Last updated date>. Consult a qualified professional in each country before acting."
 14. One call to action from the brief, matched to intent (for example "Schedule a cross-border tax review"). It appears once, at the end. There is no second or mid-article mention. Contextual links to service or pillar pages in the body are ordinary informational links with descriptive anchors, not calls to action.
@@ -245,6 +247,7 @@ Length: follow the brief's word cap (default 1600 words for standard posts). Rul
 
 ## 10. Readability and craft
 
+- Write for a reader who should finish the post thinking "I did not know that": go deeper than the top results, explain the why behind each rule, and make every section earn its place. Depth and accuracy come before length.
 - Plain, precise language at about grade 10-12. Keep average sentence length at about 20 words or fewer and rarely go over 35. Keep paragraphs to 4 sentences or fewer.
 - Bold one or two key terms per section. Use bullets for lists and eligibility tests, and numbered steps for procedures.
 - Dashes: no em dashes anywhere, including the title, meta and alt text. Also never type "--" or "---" (WordPress turns them into dashes), and never use a spaced en dash as a pause. Use commas, colons, parentheses or full stops. Use a plain hyphen for ranges such as 2026-27.

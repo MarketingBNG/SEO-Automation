@@ -289,6 +289,7 @@ function withCache(systemPrompt, conversation) {
 // blog or strategy started again after it stopped pays only for the steps not done yet.
 // In Testing mode (lib/aiQueue.ts) the request waits for Claude Code instead of the API, and
 // automatic work does not start.
+const QUEUED_WHEN_AUTOMATIC = new Set(['team-training']);
 async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
   const ctx = replayScope();
   const { onActivity, idleMs, ...rest } = opts;
@@ -305,7 +306,9 @@ async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
   if (testing && opts.batch && isAutomatic() && (await pendingBatchId(batchParamsFor(systemPrompt, [...userMessages], opts)))) {
     result = await callClaudeLive(systemPrompt, userMessages, signal, { ...opts, collectOnly: true });
   } else if (testing) {
-    if (isAutomatic()) throw new TestingModeError();
+    // Automatic work does not start in Testing mode, except the daily training lessons: they wait in
+    // the queue for the scheduled Claude Code run (subscription), so training keeps coming every day.
+    if (isAutomatic() && !QUEUED_WHEN_AUTOMATIC.has(String(opts.feature || ''))) throw new TestingModeError();
     result = await askQueue(hash, systemPrompt, userMessages, signal, opts);
   } else {
     result = await callClaudeLive(systemPrompt, userMessages, signal, opts);

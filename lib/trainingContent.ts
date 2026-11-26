@@ -24,57 +24,96 @@ export const TRACK_LABEL: Record<Track, string> = { technical: 'Technical knowle
 // Know UIC is the third part of the Technical track; the page groups it there.
 export const TRACK_GROUP: Record<Track, 'Technical' | 'Marketing'> = { technical: 'Technical', uic: 'Technical', marketing: 'Marketing' };
 
-// Words to read and questions per lesson, by level. Technical asks the most; Know UIC and Marketing
-// a little fewer, so a level 5 day stays within about half an hour.
-export const LEVELS: Record<number, { words: number; questions: number; depth: string }> = {
-  1: { words: 350, questions: 5, depth: 'Definitions: what each term means, the form or rule it names, and who files or uses it, in plain words.' },
-  2: { words: 450, questions: 6, depth: 'Working knowledge: how it works in practice, documents needed, common client questions, which authority runs it.' },
-  3: { words: 600, questions: 8, depth: 'Applied: short client scenarios where the associate picks the right form, rule or next step; typical mistakes.' },
-  4: { words: 750, questions: 10, depth: 'Advanced: scenarios with exceptions, thresholds and "who it applies to", how recent changes affect clients, comparing options.' },
-  5: { words: 900, questions: 12, depth: 'Expert: multi-rule case scenarios with exceptions (residency, treaty relief, entity choice, reporting overlaps), advising a client end to end.' },
+// Twelve levels in four bands. Everyone starts at level 1 (Basic) and moves up one level at a time
+// with good test scores (lib/associateTraining adaptiveLevel), so the team builds from the ground up
+// to CPA-level depth. Questions per lesson stay small: a test day asks at most MAX_TEST_QUESTIONS.
+export const LEVEL_BANDS = ['Basic', 'Intermediate', 'Advanced', 'Expert'] as const;
+export type Band = (typeof LEVEL_BANDS)[number];
+export const bandOf = (level: number): Band => LEVEL_BANDS[Math.min(3, Math.max(0, Math.floor((Math.max(1, level) - 1) / 3)))];
+export const levelLabel = (level: number) => `Level ${level} (${bandOf(level)} ${((Math.max(1, level) - 1) % 3) + 1}/3)`;
+const BAND_DEPTH: Record<Band, string> = {
+  Basic: 'Basic: what the term, law or form is, who files or uses it, the official form name, the deadline, and the government fee or penalty if an official source states one. Plain words, no jargon left unexplained.',
+  Intermediate: 'Intermediate: how it works in practice for a client, documents needed, how it connects to other forms, common mistakes and penalties, and the thresholds that decide who must file.',
+  Advanced: 'Advanced: client scenarios with exceptions, elections and thresholds, how two rules or forms interact (or seem to contradict each other), and how recent changes affect clients.',
+  Expert: 'Expert (CPA level): multi-rule cases end to end (residency, treaty positions, entity choice, international information returns, penalty relief), what a CPA would check, and how to explain the advice to a client.',
 };
+export const LEVELS: Record<number, { words: number; questions: number; depth: string }> = Object.fromEntries(
+  [350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900].map((words, i) => {
+    const level = i + 1;
+    const questions = [4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8][i];
+    const step = (i % 3) + 1;
+    return [level, { words, questions, depth: `${BAND_DEPTH[bandOf(level)]} Step ${step} of 3 in this band${step === 1 ? ' (start of the band: keep it simple)' : step === 3 ? ' (end of the band: harder scenarios)' : ''}.` }];
+  }),
+);
 export const questionsFor = (track: Track, level: number) => {
   const n = (LEVELS[level] || LEVELS[1]).questions;
   return track === 'technical' ? n : Math.max(3, Math.ceil(n * 0.6));
 };
 // Typed (written-answer) questions per lesson. Kept small: each one is graded by an AI call, so this
 // is also the per-lesson grading cost. Two at the higher levels, one otherwise.
-export const writtenFor = (_track: Track, level: number) => (level >= 4 ? 2 : 1);
+export const writtenFor = (_track: Track, level: number) => (level >= 7 ? 2 : 1);
 
-// US-India cross-border tax and compliance: the terms and concepts the technical track rotates through.
-export const TECH_TOPICS = [
-  'FBAR (FinCEN Form 114): who files, accounts covered, how it differs from FATCA',
-  'FATCA and Form 8938: specified foreign financial assets, how it overlaps with FBAR',
-  'ITIN and Form W-7: who needs one, Certifying Acceptance Agents, renewals',
-  'EIN and Form SS-4: who needs one, applying without an SSN',
-  'SSN vs ITIN vs EIN: which number for which person or entity',
-  'Form 1040 vs Form 1040-NR: residents, nonresidents and dual-status years',
-  'US tax residency: green card test and substantial presence test',
-  'Forms W-8BEN, W-8BEN-E and W-9: who gives which form to whom, and why',
-  'Form 5472 and the pro forma Form 1120 for foreign-owned single-member LLCs',
-  'LLC vs C-Corporation for an Indian founder: tax treatment, Delaware and Wyoming',
-  'PFIC: Indian mutual funds held by US persons, Form 8621',
-  'DTAA (India-US tax treaty), foreign tax credit and Form 67 in India',
-  'Indian residential status: Resident and Ordinarily Resident, RNOR, NRI',
-  'Schedule FA in the Indian return: foreign assets of a resident',
-  'FEMA basics: current and capital account transactions',
-  'Overseas Direct Investment (ODI) by Indian residents and companies',
-  'Foreign Direct Investment (FDI) into India: routes and reporting',
-  'Liberalised Remittance Scheme (LRS) and TCS on foreign remittances',
-  'Form 15CA and 15CB: when a payment abroad needs them',
-  'Form 16 and Form 16A: TDS certificates for salary and non-salary, and how they tie to Form 26AS and the AIS',
-  'Form 13: the lower or nil TDS deduction certificate, who applies and when it helps an NRI',
-  'Form 10F and the Tax Residency Certificate (TRC): claiming India-US treaty benefits for a non-resident',
-  'TDS on payments to non-residents and lower deduction certificates',
-  'GST for exporters of services and the LUT',
-  'PAN: who needs one, PAN for NRIs and foreign companies',
-  'Income-tax Act, 2025: what changes from the Income-tax Act, 1961 and from when',
-  'Transfer pricing basics: arm\'s length price, associated enterprises, documentation',
-  'US state filings for a foreign-owned company: annual reports, franchise tax, registered agent',
-  'Capital gains for NRIs on Indian property and shares: TDS and treaty relief',
-  'Beneficial ownership reporting (FinCEN BOI): current status and who it applies to',
-  'US sales tax and nexus basics for Indian SaaS and e-commerce sellers',
-];
+// The technical curriculum: US taxation to CPA level (with the US-India cross-border rules our clients
+// meet), ordered from Basic to Expert. A level rotates through its band's list.
+export const TECH_CURRICULUM: Record<Band, string[]> = {
+  Basic: [
+    'How the US tax system works: the IRS, the Internal Revenue Code, the tax year and who must file',
+    'Form 1040: the main sections, filing status, and the standard vs itemized deduction',
+    'Forms W-2, 1099-NEC, 1099-MISC and 1099-INT: what each reports and who issues it',
+    'SSN vs ITIN vs EIN: which number for which person or entity, and Form W-7 and Form SS-4',
+    'US tax residency: the green card test and the substantial presence test',
+    'Filing deadlines, Form 4868 extension, and the failure-to-file vs failure-to-pay penalties',
+    'Estimated tax and Form 1040-ES: who pays quarterly and the underpayment penalty',
+    'Forms W-9, W-8BEN and W-8BEN-E: who gives which form to whom, and why',
+    'FBAR (FinCEN Form 114): who files, the account threshold, and how it differs from FATCA',
+    'The LLC, the C-Corporation and the S-Corporation in plain words: how each is taxed',
+    'IRS notices and letters: the common ones, what they mean and the response deadline',
+    'Form W-4 and payroll withholding basics',
+  ],
+  Intermediate: [
+    'Schedule C and self-employment tax (Schedule SE) for a sole proprietor or single-member LLC',
+    'Form 1120 (C-Corporation): corporate tax, estimated payments, and the due date',
+    'Form 1065 and Schedule K-1: partnership and multi-member LLC returns',
+    'Form 1120-S and the Form 2553 S-Corporation election: who qualifies (and why a nonresident cannot be a shareholder)',
+    'Form 8832 entity classification: check-the-box elections and their timing',
+    'Form 5472 with the pro forma Form 1120 for a foreign-owned single-member LLC, and its penalty',
+    'Form 1040-NR and dual-status years for people moving to or from the US',
+    'FATCA Form 8938: specified foreign financial assets, thresholds, and the overlap with FBAR',
+    'Foreign tax credit (Form 1116) vs the foreign earned income exclusion (Form 2555)',
+    'The India-US tax treaty: residency tie-breaker, Form 8833 treaty disclosure, and Form 67 on the India side',
+    'Payroll tax returns: Form 941, Form 940 and state payroll registration',
+    'Penalty relief: first-time abatement and reasonable cause',
+    'State income and franchise tax basics: Delaware, Wyoming, California and New York for a foreign owner',
+  ],
+  Advanced: [
+    'PFIC rules and Form 8621: Indian mutual funds held by US persons',
+    'Form 5471: US persons with foreign corporations, the filer categories and penalties',
+    'GILTI and Subpart F in plain words: when a US shareholder is taxed on a foreign company income',
+    'Forms 3520 and 3520-A: foreign gifts, inheritances and foreign trusts',
+    'Withholding on payments to foreign persons: Chapter 3 and 4, Form 1042 and Form 1042-S',
+    'Effectively connected income vs FDAP income, and the branch profits tax',
+    'FIRPTA and Form 8288: a nonresident selling US real estate',
+    'Qualified business income deduction (Section 199A) and who loses it',
+    'The research credit (Form 6765) for startups, including the payroll tax election',
+    'Sales tax nexus after Wayfair: economic nexus for SaaS and e-commerce sellers',
+    'International information return penalties and how they stack',
+    'Forms 15CA and 15CB, TDS on payments abroad, and how they interact with US treaty claims',
+  ],
+  Expert: [
+    'Choosing the structure for an Indian founder: US LLC vs C-Corporation vs Indian parent, end to end',
+    'Transfer pricing (IRC Section 482): arm\'s length pricing between a US company and its Indian subsidiary',
+    'Treaty positions in practice: limitation on benefits, permanent establishment, and Form 8833',
+    'Fixing past non-compliance: the Streamlined procedures and delinquent FBAR and information return submissions',
+    'IRS examinations and appeals: Form 2848 power of attorney, Form 8821, and Circular 230 limits on advice',
+    'Expatriation and Form 8854: covered expatriates and the exit tax',
+    'US estate and gift tax for nonresidents: Form 706-NA and Form 709',
+    'Qualified small business stock (Section 1202) and what an Indian founder must get right early',
+    'Where US and India rules seem to contradict each other: timing, residency and credits, and how a CPA resolves it',
+    'Reviewing a complete cross-border return package: what a CPA checks before signing',
+  ],
+};
+// Kept for older callers: every technical topic, Basic first.
+export const TECH_TOPICS = LEVEL_BANDS.flatMap((b) => TECH_CURRICULUM[b]);
 
 // Digital marketing for a cross-border tax and CFO firm, rotated the same way.
 export const MARKETING_TOPICS = [
@@ -101,7 +140,7 @@ const MANAGER_MKT = 'Manager level: plan and judge marketing work: choosing prio
 
 const dayNumber = (day: string) => Math.floor(Date.parse(`${day}T00:00:00Z`) / 86400000);
 export function topicFor(track: Track, day: string, level: number): string {
-  const list = track === 'marketing' ? MARKETING_TOPICS : TECH_TOPICS;
+  const list = track === 'marketing' ? MARKETING_TOPICS : TECH_CURRICULUM[bandOf(level)];
   return list[(((dayNumber(day) + level * 3) % list.length) + list.length) % list.length];
 }
 
@@ -109,6 +148,9 @@ export function topicFor(track: Track, day: string, level: number): string {
 export const RULES = `ACCURACY RULES (all required):
 - Use web search. For every rule, form, threshold, deadline, rate or section number, use an OFFICIAL source: irs.gov, fincen.gov, treasury.gov, sec.gov, state government sites, incometax.gov.in, incometaxindia.gov.in, cbic-gst.gov.in, gst.gov.in, rbi.org.in, fema.rbi.org.in, mca.gov.in, egazette.gov.in, indiacode.nic.in. Give its URL.
 - Never invent a figure, rate, threshold, date, deadline, form number, price or section number. If you cannot confirm it on an official source in this search, leave it out and say "check the current figure on <official site>" instead.
+- Government-approved information only: never rely on blogs, forums or firm websites for a rule, fee or deadline. If two official pages disagree, say so and give both.
+- Government fees and penalties: state the official fee (IRS user fee, state filing fee) and the penalty for late or missed filing ONLY when the official source states it, with its URL. If the official source says there is no fee, say so; if you cannot confirm, write "check the current fee on <official site>".
+- Recent changes: if the rule, form, threshold or fee changed in the last 12 months (or a change is announced), say so clearly in a line starting "Recently changed:" with the date and the official source. Never present an old rule as current.
 - Facts about USAIndiaCFO (what we do, our services, our process) come ONLY from usaindiacfo.com pages you open or from the catalogue given below. Never invent a service, a price, a client or a result.
 - Simple English, no em dashes, no hype.`;
 
@@ -157,15 +199,21 @@ export function lessonPrompt(a: LessonAsk) {
   const spec = LEVELS[a.level] || LEVELS[1];
   const n = questionsFor(a.track, a.level);
   const words = a.track === 'technical' ? spec.words : Math.round(spec.words * 0.75);
-  const head = `Today is ${a.day} (India). Track: ${TRACK_LABEL[a.track]}. Level ${a.level} of 5 (${a.audience === 'manager' ? 'managers' : 'associates'}).
+  const head = `Today is ${a.day} (India). Track: ${TRACK_LABEL[a.track]}. ${levelLabel(a.level)} of 12 (${a.audience === 'manager' ? 'managers' : 'associates'}).
 Level ${a.level}: ${spec.depth}
 Earlier lessons in this track and level (do not repeat them; build on them): ${a.earlier.join(' | ') || 'none yet'}.`;
   let body = '';
   if (a.track === 'technical') {
     const topic = topicFor('technical', a.day, a.level);
-    body = `CURRICULUM (US-India cross-border tax and compliance terms; the lessons rotate through FBAR, FATCA/Form 8938, ITIN, EIN, SSN, Form 1040/1040-NR, W-8BEN/W-8BEN-E/W-9, Form 5472, LLC vs C-Corp, PFIC, DTAA and Form 67, residency ROR/RNOR/NRI, Schedule FA, FEMA/ODI/FDI/LRS, Form 15CA/15CB, Form 16/16A and 26AS/AIS, Form 13, Form 10F/TRC, TDS, GST, PAN, Income-tax Act 2025 changes, transfer pricing basics and more).
+    body = `CURRICULUM (US taxation to CPA level, with the US-India cross-border rules our clients meet, taught from Basic to Expert. This lesson is in the ${bandOf(a.level)} band).
 Today's topic: ${topic}.
-Cover: what it is, who it applies to (and who it does not), the official form or rule, how it shows up for our clients, and at level 3 and above the exceptions. Always include at least one short WORKED EXAMPLE: a realistic client scenario with sample figures or details, clearly marked "Example" and clearly not a real client, walked through step by step so the concept is concrete. Add one current update on this topic from the last 60 days if an official source has one.
+The lesson MUST have these parts, each with its own <h3>:
+1. "What it is": the law or rule (with its Internal Revenue Code section or official name), the form, who it applies to and who it does not.
+2. "Deadlines, government fees and penalties": the due date, the official fee (or that there is none) and the penalty for late or missed filing, each from an official source as the rules above require.
+3. "Recently changed": what changed in the last 12 months, with the date and the official source, or "No change in the last 12 months on <official source>".
+4. "Example": a realistic client scenario with sample figures, clearly marked as an example and not a real client, worked step by step.
+5. "Using it in marketing and offers": how to explain it to a prospect in one or two lines, an offer or service angle it supports (only services on usaindiacfo.com), a lead question to ask, and which claims are compliance-safe (no guarantees, no unpublished prices, no figure without an official source).
+From the Advanced band, also cover the exceptions and where this rule interacts with, or seems to contradict, another rule or form. Always include at least one short WORKED EXAMPLE: a realistic client scenario with sample figures or details, clearly marked "Example" and clearly not a real client, walked through step by step so the concept is concrete. Add one current update on this topic from the last 60 days if an official source has one.
 ${a.focus ? `Services we sell (to link the topic to): ${a.focus}.` : ''}
 ${a.meetings ? `What clients asked about in recent meetings:\n${a.meetings}` : ''}
 ${a.audience === 'manager' ? MANAGER_TECH : ''}`;

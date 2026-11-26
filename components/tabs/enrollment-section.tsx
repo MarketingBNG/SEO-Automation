@@ -92,7 +92,7 @@ export function EnrollmentSection() {
         </label>
         <label className="grid gap-1 text-sm">
           <span className="text-muted-foreground">Level</span>
-          <Input className="w-20" type="number" min={1} max={5} value={level} onChange={(e) => setLevel(e.target.value)} />
+          <Input className="w-20" type="number" min={1} max={12} value={level} onChange={(e) => setLevel(e.target.value)} />
         </label>
         <Button onClick={enroll} disabled={busy === 'enroll' || !email.trim()}>{busy === 'enroll' ? 'Enrolling…' : 'Enroll'}</Button>
       </div>
@@ -119,7 +119,7 @@ export function EnrollmentSection() {
                     <div className="flex items-center gap-1">
                       <span>{r.level}</span>
                       <Button size="icon" variant="ghost" className="size-6" disabled={busy === r.email || (r.level ?? 1) <= 1} onClick={() => post({ op: 'level', email: r.email, level: (r.level ?? 1) - 1 }, r.email)} aria-label="Lower level">−</Button>
-                      <Button size="icon" variant="ghost" className="size-6" disabled={busy === r.email || (r.level ?? 1) >= 5} onClick={() => post({ op: 'level', email: r.email, level: (r.level ?? 1) + 1 }, r.email)} aria-label="Raise level">+</Button>
+                      <Button size="icon" variant="ghost" className="size-6" disabled={busy === r.email || (r.level ?? 1) >= 12} onClick={() => post({ op: 'level', email: r.email, level: (r.level ?? 1) + 1 }, r.email)} aria-label="Raise level">+</Button>
                     </div>
                   ) : <span className="text-muted-foreground">—</span>}
                 </td>

@@ -88,7 +88,10 @@ async function tick() {
 
   // Team Training: lessons and tests once a day after 09:00 IST.
   const { trainingTick } = await import('./associateTraining');
-  await trainingTick(now).catch((e: any) => console.error('Scheduler: training failed:', e.message));
+  // In Testing mode the lessons wait in the Claude Code queue (hours, until the scheduled run answers
+  // them), so the tick does not wait for them; runTrainingDay has its own lock against a second run.
+  const trainingRun = trainingTick(now).catch((e: any) => console.error('Scheduler: training failed:', e.message));
+  if ((await (await import('./aiQueue')).aiMode()) !== 'testing') await trainingRun;
 
   // The team's edits and uploads become writer lessons once a day, when there are new ones.
   const { changeLessonsTick } = await import('./learnFromChanges');

@@ -21,7 +21,7 @@ test('isCompanyEmail / clampLevel (pure)', () => {
   assert.equal(enroll.isCompanyEmail('a@gmail.com'), false);
   assert.equal(enroll.isCompanyEmail('not-an-email'), false);
   assert.equal(enroll.clampLevel(0), 1);
-  assert.equal(enroll.clampLevel(9), 5);
+  assert.equal(enroll.clampLevel(19), 12);
   assert.equal(enroll.clampLevel('3'), 3);
   assert.equal(enroll.clampLevel('x'), 1);
 });
@@ -55,8 +55,8 @@ test('setActive / setLevel / unblock', { skip: !db }, async () => {
   await enroll.ensureProfile('u@usaindiacfo.com', { level: 1, actor: 't' });
   await enroll.setActive('u@usaindiacfo.com', false, 't');
   assert.equal((await prisma.training_profiles.findUnique({ where: { email: 'u@usaindiacfo.com' } })).active, false);
-  await enroll.setLevel('u@usaindiacfo.com', 9, 't'); // clamps to 5
-  assert.equal((await prisma.training_profiles.findUnique({ where: { email: 'u@usaindiacfo.com' } })).level, 5);
+  await enroll.setLevel('u@usaindiacfo.com', 19, 't'); // clamps to 12
+  assert.equal((await prisma.training_profiles.findUnique({ where: { email: 'u@usaindiacfo.com' } })).level, 12);
   await enroll.unblock('u@usaindiacfo.com', 't');
   assert.equal((await prisma.team_members.findUnique({ where: { email: 'u@usaindiacfo.com' } })).blocked, false);
 });

@@ -739,7 +739,7 @@ function PersonPage({ p, data, readOnly, onDone, openReview }: { p: any; data: a
           </CardDescription>
           <CardAction>
             <div className="text-right text-sm">
-              <div className="font-semibold">Level {p.profile.level} of 5{p.profile.audience === 'manager' ? ' (manager)' : ''}</div>
+              <div className="font-semibold">Level {p.profile.level} of 12 ({['Basic', 'Intermediate', 'Advanced', 'Expert'][Math.min(3, Math.floor((p.profile.level - 1) / 3))]}){p.profile.audience === 'manager' ? ' (manager)' : ''}</div>
               <div className="text-xs text-muted-foreground">{lvl?.questions} technical questions a lesson</div>
             </div>
           </CardAction>
