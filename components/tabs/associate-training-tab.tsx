@@ -475,7 +475,8 @@ function LiveTests() {
       } catch {}
     };
     load();
-    const t = setInterval(() => onScreen('tab-associates') && load(), 5000);
+    // Every 15 s, only while the tab is on screen and the browser window is visible.
+    const t = setInterval(() => document.visibilityState === 'visible' && onScreen('tab-associates') && load(), 15000);
     return () => { on = false; clearInterval(t); };
   }, []);
   if (!live.length) return null;

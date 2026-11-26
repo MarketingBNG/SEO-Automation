@@ -13,6 +13,25 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/api/**/*': ['./skills/**/*', './assets/**/*'],
   },
+  // Security headers on every response: no framing (clickjacking on approve/publish buttons), no MIME
+  // sniffing of uploaded files, HTTPS only, and a strict referrer. A full script CSP is left out on
+  // purpose (Next's inline scripts and Google sign-in would need nonces); lesson and blog HTML is
+  // sanitized before it is rendered.
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

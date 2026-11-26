@@ -23,15 +23,24 @@ export async function reportActivity(email: string, apps: { app?: string; ms?: n
     create: { email: who, day, first_at: now, last_at: now },
     update: { last_at: now },
   });
+  // All the apps in one transaction (one round trip batch, not up to 50 one after another). Same app
+  // twice in one report is merged first, so the batch never updates one row twice.
+  const byApp = new Map<string, number>();
   for (const a of (Array.isArray(apps) ? apps : []).slice(0, 50)) {
     const app = String(a?.app || 'Unknown').slice(0, 200);
     const ms = Math.max(0, Math.min(Math.round(Number(a?.ms) || 0), 3600000));
-    if (!ms) continue;
-    await prisma.work_activity.upsert({
-      where: { email_day_app: { email: who, day, app } },
-      create: { email: who, day, app, active_ms: ms },
-      update: { active_ms: { increment: ms } },
-    });
+    if (ms) byApp.set(app, Math.min(3600000, (byApp.get(app) || 0) + ms));
+  }
+  if (byApp.size) {
+    await prisma.$transaction(
+      [...byApp].map(([app, ms]) =>
+        prisma.work_activity.upsert({
+          where: { email_day_app: { email: who, day, app } },
+          create: { email: who, day, app, active_ms: ms },
+          update: { active_ms: { increment: ms } },
+        }),
+      ),
+    );
   }
   return { ok: true };
 }

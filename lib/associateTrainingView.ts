@@ -3,6 +3,7 @@
 // per person marks, trend, level history, strengths and weak topics per track, streaks, surprise
 // tests (sortable on the page, downloadable as CSV). Shared by GET /api/associate-training and the
 // assistant's training_status. Taking a test stays on the page.
+import { sanitizeHtml } from './htmlSanitize';
 import { TRAINING_FRESH_START } from './trainingSchedule';
 import prismaClient from '@/lib/prisma';
 import * as settings from '@/lib/settings';
@@ -73,7 +74,8 @@ function lessonOut(l: any, read?: string | null, openedAt?: string | null) {
     audience: l.audience,
     topic: l.topic,
     title: l.title,
-    content_html: l.content_html,
+    // AI-written HTML (partly from web search): only safe tags reach the page (also older lessons).
+    content_html: sanitizeHtml(l.content_html || ''),
     sources: json(l.sources, []),
     slides: buildSlides({ title: l.title, content_html: l.content_html, extras }),
     videos: extras.videos || [],
@@ -261,14 +263,30 @@ export async function teamReport(only?: Set<string> | null): Promise<ReportRow[]
   const people = (await prisma.training_profiles.findMany({ orderBy: { email: 'asc' } })).filter((p) => isTrainee(roleOf.get(p.email) || 'user') && (!only || only.has(p.email.toLowerCase())));
   const sched = await getSchedule();
   const out: ReportRow[] = [];
+  // Everyone's rows in a few queries (not five per person): tests, games, level history, open repeats
+  // and the AI verdicts, then grouped by email.
+  const emails = people.map((p) => p.email);
+  const group = (rows: any[]) => { const m = new Map<string, any[]>(); for (const r of rows) m.set(r.email, [...(m.get(r.email) || []), r]); return m; };
+  const [allTests, allGames, allLevels, missCounts, verdictRows] = await Promise.all([
+    prisma.training_tests.findMany({ where: { email: { in: emails }, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' }, day: { gte: TRAINING_FRESH_START } }, orderBy: [{ day: 'desc' }, { id: 'desc' }] }),
+    prisma.training_games.findMany({ where: { email: { in: emails } }, select: { email: true, day: true } }),
+    prisma.training_level_history.findMany({ where: { email: { in: emails } }, orderBy: { id: 'asc' } }),
+    prisma.training_misses.groupBy({ by: ['email'], where: { email: { in: emails }, cleared: false }, _count: { _all: true } }),
+    prisma.settings.findMany({ where: { key: { in: emails.map((e) => `training_verdict:${e}`) } } }),
+  ]);
+  const testsBy = group(allTests);
+  const gamesBy = group(allGames);
+  const levelsBy = group(allLevels);
+  const missesBy = new Map<string, number>(missCounts.map((m: any) => [m.email, m._count._all]));
+  const verdictBy = new Map<string, any>(verdictRows.map((v: any) => [v.key.slice('training_verdict:'.length), json(v.value, null)]));
   for (const p of people) {
-    const tests = await prisma.training_tests.findMany({ where: { email: p.email, status: { notIn: ['open', 'marking'] }, kind: { not: 'qa' }, day: { gte: TRAINING_FRESH_START } }, orderBy: [{ day: 'desc' }, { id: 'desc' }], take: 60 });
+    const tests = (testsBy.get(p.email) || []).slice(0, 60);
     const pcts = tests.map((t) => pct(t));
     const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
     const a5 = avg(pcts.slice(0, 5));
     const b5 = avg(pcts.slice(5, 10));
     const stats = topicStats(tests.slice(0, 30));
-    const games = await prisma.training_games.findMany({ where: { email: p.email }, select: { day: true } });
+    const games = gamesBy.get(p.email) || [];
     const gs = gameStreak(games.map((x) => x.day), istDay());
     out.push({
       email: p.email,
@@ -285,14 +303,14 @@ export async function teamReport(only?: Set<string> | null): Promise<ReportRow[]
       badge: badgeFor(p.points, gs),
       tracks: stats.tracks,
       skills: stats.skills,
-      verdict: json(await settings.get(`training_verdict:${p.email}`), null),
+      verdict: verdictBy.get(p.email) ?? null,
       strengths: stats.strengths,
       weak: stats.weak,
       surprise: tests.filter((t) => t.kind === 'surprise').map((t) => ({ day: t.day, percent: pct(t), status: t.status })),
       series: tests.slice(0, 30).reverse().map((t) => ({ day: t.day, percent: pct(t), kind: t.kind, status: t.status })),
-      levels: (await prisma.training_level_history.findMany({ where: { email: p.email }, orderBy: { id: 'asc' } })).map((h) => ({ at: h.created_at, from: h.from_level, to: h.to_level, reason: h.reason })),
+      levels: (levelsBy.get(p.email) || []).map((h: any) => ({ at: h.created_at, from: h.from_level, to: h.to_level, reason: h.reason })),
       last: tests[0] ? { id: tests[0].id, day: tests[0].day, percent: pct(tests[0]), status: tests[0].status } : null,
-      dueAgain: await prisma.training_misses.count({ where: { email: p.email, cleared: false } }),
+      dueAgain: missesBy.get(p.email) || 0,
       testDays: testDatesForWeek(p.email, istDay(), sched),
     });
   }

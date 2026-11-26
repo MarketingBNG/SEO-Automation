@@ -63,7 +63,7 @@ export async function exchangeCode(code: string, email: string) {
     body: new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, code }),
   });
   const tokens: any = await res.json();
-  if (!res.ok || tokens.error || !tokens.refresh_token) throw new Error(`Zoho Projects connect failed: ${JSON.stringify(tokens)}`);
+  if (!res.ok || tokens.error || !tokens.refresh_token) throw new Error(`Zoho Projects connect failed: ${String(tokens.error || (tokens.refresh_token ? '' : 'no refresh token returned') || res.status)}${tokens.error_description ? ` (${String(tokens.error_description).slice(0, 200)})` : ''}`);
   tokens.obtained_at = Date.now();
   await writeTokens(provider(email), tokens);
   return { ok: true };
@@ -85,7 +85,7 @@ async function accessToken(email: string): Promise<string> {
       body: new URLSearchParams({ grant_type: 'refresh_token', client_id: clientId, client_secret: clientSecret, refresh_token: tokens.refresh_token }),
     });
     const refreshed: any = await res.json();
-    if (!res.ok || refreshed.error) throw new Error(`Zoho Projects token refresh failed: ${JSON.stringify(refreshed)}`);
+    if (!res.ok || refreshed.error) throw new Error(`Zoho Projects token refresh failed: ${String(refreshed.error || res.status)}`);
     const merged = { ...tokens, ...refreshed, obtained_at: Date.now() };
     await writeTokens(p, merged);
     return merged.access_token;

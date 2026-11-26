@@ -682,6 +682,8 @@ model training_tests {
   written_grades String? // JSON {questionId: {score, reason}} the AI's grade of each typed answer
 
   @@unique([email, day, kind])
+  @@index([status, live_at])
+  @@index([email, status])
 }
 
 // When a person first opened a lesson (not the same as reading it: the gate still needs "I have read").

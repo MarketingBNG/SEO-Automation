@@ -22,3 +22,9 @@ test('Zoho failure shapes are detected, success is not', () => {
   assert.equal(zp.zohoFailed({ response: { status: 0, result: [{ punchIn: '25-11-2026 10:36:07' }] } }), false);
   assert.equal(zp.zohoFailed([{ response: 'success' }]), false);
 });
+
+test('Zoho accounts server: only real Zoho data centres are accepted (no secret sent elsewhere)', async () => {
+  const { isZohoAccounts } = await import('../lib/zohoPeople');
+  for (const ok of ['https://accounts.zoho.com', 'https://accounts.zoho.in/', 'https://accounts.zoho.eu', 'https://accounts.zoho.com.au']) assert.equal(isZohoAccounts(ok), true, ok);
+  for (const bad of ['https://accounts.zoho.attacker.com', 'https://accounts.zoho.com.evil.io', 'http://accounts.zoho.com', 'https://accounts.zoho.com:8443', 'https://accounts.zoho.com/x', 'https://evil.com/?https://accounts.zoho.com']) assert.equal(isZohoAccounts(bad), false, bad);
+});

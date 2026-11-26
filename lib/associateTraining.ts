@@ -8,6 +8,7 @@
 // Levels move with recent scores (adaptiveLevel). After the test, a short game round is built from
 // the same lesson. Admins only watch. Lessons are made once per day, track, level and audience and
 // shared by everyone there, so AI calls stay few.
+import { sanitizeHtml } from './htmlSanitize';
 import { aiMode } from './aiQueue';
 import crypto from 'crypto';
 import prismaClient from './prisma';
@@ -190,7 +191,7 @@ async function makeLessonOnce(day: string, level: number, track: Track, audience
   const written = cleanWritten(j.written, `${day}-L${level}-${track}-${audience}`, writtenFor(track, level), track, topic);
   const extras = { terms: j.terms, steps: j.steps, cases: j.cases, blanks: j.blanks, slides: j.slides, videos: cleanVideos(j.videos), written, service: service ? { name: service.name, url: service.url } : null };
   try {
-    return await prisma.training_lessons.create({ data: { day, level, track, audience, topic, title: String(j.title || `Lesson ${day}`).slice(0, 200), content_html: String(j.content_html).replace(/—/g, ', '), sources: JSON.stringify(sources), questions: JSON.stringify(questions), extras: JSON.stringify(extras) } });
+    return await prisma.training_lessons.create({ data: { day, level, track, audience, topic, title: String(j.title || `Lesson ${day}`).slice(0, 200), content_html: sanitizeHtml(String(j.content_html).replace(/—/g, ', ')), sources: JSON.stringify(sources), questions: JSON.stringify(questions), extras: JSON.stringify(extras) } });
   } catch {
     // Made at the same moment by another run: use that one.
     return (await prisma.training_lessons.findUnique({ where: lessonKey(day, level, track, audience) }))!;

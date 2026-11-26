@@ -16,7 +16,17 @@ const provider = (email: string) => `zoho_people:${email.toLowerCase()}`;
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return ''; } };
 const dcTld = (host: string) => { const m = /\.zoho\.([a-z.]+)$/i.exec(host || ''); return m ? m[1].toLowerCase() : ''; };
 // Only accept an accounts server that is really a Zoho accounts host (no SSRF to an arbitrary URL).
-const isZohoAccounts = (u: string) => /^https:\/\/accounts\.zoho\.[a-z.]+\/?$/i.test(String(u || ''));
+// An exact allow-list of Zoho data centres: a loose pattern would accept accounts.zoho.attacker.com and
+// send the client secret there.
+const ZOHO_ACCOUNTS_HOSTS = new Set(['com', 'eu', 'in', 'com.au', 'com.cn', 'jp', 'sa', 'ca', 'uk'].map((tld) => `accounts.zoho.${tld}`));
+export const isZohoAccounts = (u: string) => {
+  try {
+    const x = new URL(String(u || ''));
+    return x.protocol === 'https:' && !x.port && (x.pathname === '/' || x.pathname === '') && !x.search && ZOHO_ACCOUNTS_HOSTS.has(x.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+};
 const accountsDefault = () => (process.env.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.com').replace(/\/+$/, '');
 
 export const REQUIRED_ACCESS = {
@@ -60,7 +70,8 @@ export async function exchangeCode(code: string, email: string, accountsServer?:
     body: new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, code }),
   });
   const tokens: any = await res.json();
-  if (!res.ok || tokens.error || !tokens.refresh_token) throw new Error(`Zoho People connect failed: ${JSON.stringify(tokens)}`);
+  // Only Zoho's error code and text: never echo tokens back to the page or the logs.
+  if (!res.ok || tokens.error || !tokens.refresh_token) throw new Error(`Zoho People connect failed: ${String(tokens.error || (tokens.refresh_token ? '' : 'no refresh token returned') || res.status)}${tokens.error_description ? ` (${String(tokens.error_description).slice(0, 200)})` : ''}`);
   tokens.obtained_at = Date.now();
   tokens.dc_accounts = accUrl;                 // where to refresh the token
   tokens.dc = dcTld(hostOf(accUrl)) || 'com';  // which data center (com / in / eu ...) for the People API
@@ -131,7 +142,7 @@ async function accessToken(email: string): Promise<string> {
       body: new URLSearchParams({ grant_type: 'refresh_token', client_id: clientId, client_secret: clientSecret, refresh_token: tokens.refresh_token }),
     });
     const refreshed: any = await res.json();
-    if (!res.ok || refreshed.error) throw new Error(`Zoho People token refresh failed: ${JSON.stringify(refreshed)}`);
+    if (!res.ok || refreshed.error) throw new Error(`Zoho People token refresh failed: ${String(refreshed.error || res.status)}`);
     const merged = { ...tokens, ...refreshed, obtained_at: Date.now() };
     await writeTokens(p, merged);
     return merged.access_token;
