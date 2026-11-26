@@ -209,6 +209,8 @@ export type ReportRow = {
   gameStreak: number;
   badge: string | null;
   tracks: Record<string, number | null>; // % right per track (last 30 tests)
+  skills: Record<string, number | null>; // % right per skill: recall, apply, judge
+  verdict: { at: string; text: string; improving: string; strong: string[]; weak: string[]; focus: string } | null;
   strengths: string[];
   weak: string[];
   surprise: { day: string; percent: number; status: string }[];
@@ -223,6 +225,7 @@ export type ReportRow = {
 export function topicStats(tests: { questions: string; answers: string | null; status: string; id: number }[]) {
   const track: Record<string, { right: number; all: number }> = {};
   const topic: Record<string, { right: number; all: number }> = {};
+  const skill: Record<string, { right: number; all: number }> = {};
   for (const t of tests) {
     if (t.status !== 'done') continue;
     const answers = json(t.answers, {});
@@ -231,6 +234,10 @@ export function topicStats(tests: { questions: string; answers: string | null; s
       const tr = q.track || 'technical';
       (track[tr] ||= { right: 0, all: 0 }).all++;
       if (right) track[tr].right++;
+      if (q.skill) {
+        (skill[q.skill] ||= { right: 0, all: 0 }).all++;
+        if (right) skill[q.skill].right++;
+      }
       if (q.topic) {
         (topic[q.topic] ||= { right: 0, all: 0 }).all++;
         if (right) topic[q.topic].right++;
@@ -241,6 +248,7 @@ export function topicStats(tests: { questions: string; answers: string | null; s
   const ranked = Object.entries(topic).filter(([, v]) => v.all >= 2).map(([k, v]) => ({ k, p: Math.round((v.right / v.all) * 100) }));
   return {
     tracks,
+    skills: Object.fromEntries(['recall', 'apply', 'judge'].map((k) => [k, skill[k] ? Math.round((skill[k].right / skill[k].all) * 100) : null])),
     strengths: ranked.filter((r) => r.p >= 80).sort((a, b) => b.p - a.p).slice(0, 3).map((r) => `${r.k} (${r.p}%)`),
     weak: ranked.filter((r) => r.p < 60).sort((a, b) => a.p - b.p).slice(0, 3).map((r) => `${r.k} (${r.p}%)`),
   };
@@ -276,6 +284,8 @@ export async function teamReport(only?: Set<string> | null): Promise<ReportRow[]
       gameStreak: gs,
       badge: badgeFor(p.points, gs),
       tracks: stats.tracks,
+      skills: stats.skills,
+      verdict: json(await settings.get(`training_verdict:${p.email}`), null),
       strengths: stats.strengths,
       weak: stats.weak,
       surprise: tests.filter((t) => t.kind === 'surprise').map((t) => ({ day: t.day, percent: pct(t), status: t.status })),

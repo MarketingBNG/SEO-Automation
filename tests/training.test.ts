@@ -36,11 +36,11 @@ const LESSON_EXTRAS = {
   ],
 };
 
-test('levels ask more questions as they go up, and the tracks are three', async () => {
+test('three questions per lesson at every level, and the tracks are three', async () => {
   const { LEVELS, questionsFor, TRACKS } = await content();
-  assert.deepEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((l) => LEVELS[l].questions), [4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8]);
+  assert.ok([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].every((l) => LEVELS[l].questions === 3));
   assert.deepEqual(TRACKS, ['technical', 'uic', 'marketing']);
-  assert.ok(questionsFor('marketing', 12) < questionsFor('technical', 12) && questionsFor('uic', 1) >= 3);
+  assert.ok(questionsFor('marketing', 12) === 3 && questionsFor('technical', 1) === 3 && questionsFor('uic', 1) === 3);
 });
 
 test('the prompts carry the curriculum, the marketing use, Know UIC and the official-source rule', async () => {
@@ -253,7 +253,7 @@ test('the daily gate: locks pages and API writes until lessons are read and test
     assert.equal(gate.unread.length, 3);
     assert.equal(gate.openTests.filter((t) => t.kind === 'daily').length, 1);
     const testRow = await prisma.training_tests.findFirst({ where: { email: assoc, day, kind: 'daily' } });
-    assert.equal(testRow.total, 4 + 3 + 3, 'questions from the three lessons of yesterday');
+    assert.equal(testRow.total, 3 + 3 + 3, 'questions from the three lessons of yesterday');
 
     // The proxy refuses API writes outside the training, keeps reads and the training itself open.
     const refused = await gateRefusal('POST', '/api/drafts/5', assoc, 'user', day);

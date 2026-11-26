@@ -91,6 +91,17 @@ async function tick() {
   // The lessons wait in the Claude Code queue (subscription) until the hourly scheduled run answers
   // them, so the tick never waits for them; runTrainingDay has its own lock against a second run.
   void trainingTick(now).catch((e: any) => console.error('Scheduler: training failed:', e.message));
+  void import('./associateTraining').then(({ weeklyVerdicts }) => weeklyVerdicts(now)).catch((e: any) => console.error('Scheduler: verdicts failed:', e.message));
+
+  // Zoho Projects timesheets: once an hour, queue every tracked person's prior worked days and post them.
+  const hourKey = new Date().toISOString().slice(0, 13);
+  if ((await settings.get('timesheet_last_hour')) !== hourKey) {
+    await settings.set('timesheet_last_hour', hourKey);
+    const { timesheetTick } = await import('./timesheetSync');
+    const { logTime } = await import('./zohoProjects');
+    void timesheetTick({ logTime: async (email, projectId, day, hours) => ({ zohoLogId: ((await logTime(email, projectId, day, hours)) as any)?.zohoLogId || null }) })
+      .catch((e: any) => console.error('Scheduler: timesheet sync failed:', e.message));
+  }
 
   // The team's edits and uploads become writer lessons once a day, when there are new ones.
   const { changeLessonsTick } = await import('./learnFromChanges');

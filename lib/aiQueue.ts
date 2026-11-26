@@ -85,7 +85,12 @@ export async function askQueue(hash: string, systemPrompt: string, userMessages:
     });
   }
   const id = job.id;
+  // A training lesson waits at most a few hours, then gives up like "AI paused": the day's run ends (its
+  // lock is freed for Prepare today now and enrolments) and the next catch-up asks again, reusing this
+  // same job (found by its hash above), so nothing is asked twice.
+  const deadline = opts.queueWaitMs ? Date.now() + Number(opts.queueWaitMs) : Infinity;
   for (;;) {
+    if (Date.now() > deadline) throw new CreditPausedError(`AI work is paused: waiting for the Claude Code queue (job #${id}).`);
     if (signal?.aborted) {
       await prisma.ai_jobs.updateMany({ where: { id, status: 'waiting' }, data: { status: 'cancelled', answered_at: sqlNow() } });
       throw signal.reason instanceof Error ? signal.reason : new Error('Stopped');

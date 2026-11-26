@@ -46,3 +46,15 @@ test('restart week: one test on Saturday 28 Nov, lessons on the other days; two 
   assert.deepEqual(testDatesForWeek('a@x.com', '2026-11-26', s), ['2026-11-28']);
   assert.equal(testDatesForWeek('a@x.com', '2026-12-02', s).length, 2);
 });
+
+test('timesheet project: team mapping, then ZOHO_PROJECT_DEFAULT for people with no team', async () => {
+  const { projectForTeam, PROJECT_BY_TEAM } = await import('../lib/zohoProjects');
+  assert.equal(projectForTeam('marketing'), PROJECT_BY_TEAM.marketing);
+  const old = process.env.ZOHO_PROJECT_DEFAULT;
+  delete process.env.ZOHO_PROJECT_DEFAULT;
+  assert.equal(projectForTeam(null), null);
+  process.env.ZOHO_PROJECT_DEFAULT = '123';
+  assert.equal(projectForTeam(null), '123');
+  assert.equal(projectForTeam('unknown-team'), '123');
+  if (old === undefined) delete process.env.ZOHO_PROJECT_DEFAULT; else process.env.ZOHO_PROJECT_DEFAULT = old;
+});

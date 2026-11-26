@@ -969,6 +969,80 @@ function Library({ items }: { items: any[] }) {
 
 type SortKey = 'name' | 'level' | 'average' | 'trend' | 'points' | 'streak' | 'tests';
 // The admin's and managers' report: sortable, with the trend line, CSV download.
+// ---------- Charts (inline SVG, theme colours via currentColor) ----------
+function BarList({ items }: { items: { label: string; value: number | null }[] }) {
+  return (
+    <div className="space-y-1.5">
+      {items.map((it) => (
+        <div key={it.label} className="flex items-center gap-2 text-xs">
+          <div className="w-28 shrink-0 truncate text-muted-foreground" title={it.label}>{it.label}</div>
+          <div className="h-3 flex-1 rounded bg-muted">
+            {it.value !== null && <div className={`h-3 rounded ${it.value >= 80 ? 'bg-emerald-500' : it.value >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${Math.max(2, it.value)}%` }} />}
+          </div>
+          <div className="w-10 text-right tabular-nums">{it.value === null ? '-' : `${it.value}%`}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function ScoreLine({ series }: { series: { day: string; percent: number; status: string }[] }) {
+  if (!series.length) return <div className="text-xs text-muted-foreground">No counted tests yet.</div>;
+  const w = 320, h = 110, pad = 18;
+  const x = (i: number) => pad + (series.length === 1 ? (w - 2 * pad) / 2 : (i * (w - 2 * pad)) / (series.length - 1));
+  const y = (p: number) => h - pad - (p / 100) * (h - 2 * pad);
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full max-w-md text-sky-600" role="img" aria-label="Test scores over time">
+      {[0, 50, 80, 100].map((g) => (
+        <g key={g}>
+          <line x1={pad} x2={w - pad} y1={y(g)} y2={y(g)} className="stroke-muted-foreground/20" strokeDasharray={g === 80 ? '3 3' : undefined} />
+          <text x={2} y={y(g) + 3} fontSize="8" className="fill-muted-foreground">{g}</text>
+        </g>
+      ))}
+      <polyline fill="none" stroke="currentColor" strokeWidth="2" points={series.map((s, i) => `${x(i)},${y(s.percent)}`).join(' ')} />
+      {series.map((s, i) => (
+        <circle key={i} cx={x(i)} cy={y(s.percent)} r="3" className={s.status === 'missed' ? 'fill-red-500' : 'fill-current'}>
+          <title>{`${s.day}: ${s.status === 'missed' ? 'missed' : `${s.percent}%`}`}</title>
+        </circle>
+      ))}
+    </svg>
+  );
+}
+function ProgressCard({ r }: { r: any }) {
+  const v = r.verdict;
+  return (
+    <div className="grid gap-4 rounded-lg border p-3 md:grid-cols-3">
+      <div>
+        <div className="mb-1 text-xs font-medium">Scores over time (dashed line = 80%, moves up)</div>
+        <ScoreLine series={r.series} />
+      </div>
+      <div className="space-y-3">
+        <div>
+          <div className="mb-1 text-xs font-medium">By subject</div>
+          <BarList items={[{ label: 'Technical', value: r.tracks.technical }, { label: 'Know UIC', value: r.tracks.uic }, { label: 'Marketing', value: r.tracks.marketing }]} />
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-medium">By skill</div>
+          <BarList items={[{ label: 'Recall (knows the fact)', value: r.skills?.recall ?? null }, { label: 'Apply (right form/step)', value: r.skills?.apply ?? null }, { label: 'Judge (spots the risk)', value: r.skills?.judge ?? null }]} />
+        </div>
+      </div>
+      <div className="text-sm">
+        <div className="mb-1 text-xs font-medium">AI verdict{v?.at ? ` (week of ${fmtDay(v.at)})` : ''}</div>
+        {v ? (
+          <div className="space-y-1.5">
+            <div><span className={`rounded px-1.5 py-0.5 text-xs font-medium ${v.improving === 'yes' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : v.improving === 'no' ? 'bg-red-500/15 text-red-700 dark:text-red-400' : 'bg-muted text-muted-foreground'}`}>Improving: {v.improving}</span></div>
+            <p>{v.text}</p>
+            {v.strong?.length > 0 && <div className="text-xs text-emerald-700 dark:text-emerald-400">Strong: {v.strong.join(', ')}</div>}
+            {v.weak?.length > 0 && <div className="text-xs text-red-600">Weak: {v.weak.join(', ')}</div>}
+            {v.focus && <div className="text-xs"><span className="font-medium">Next focus:</span> {v.focus}</div>}
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground">Made every Saturday after the test, from their scores.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TeamReport({ data, person, setPerson, admin, openReview }: { data: any; person: string; setPerson: (e: string) => void; admin: (a: string, x?: any) => void; openReview: (id: number) => void }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 });
   const rows = [...data.report].sort((a: any, b: any) => {
@@ -1021,6 +1095,11 @@ function TeamReport({ data, person, setPerson, admin, openReview }: { data: any;
                 </div>
               );
             })()}
+            <div className="rounded-lg border p-3">
+              <div className="mb-2 text-xs font-medium">Score by person (last 5 counted tests)</div>
+              <BarList items={rows.filter((r: any) => r.active).map((r: any) => ({ label: r.name || r.email, value: r.average }))} />
+            </div>
+            {(() => { const sel = rows.find((r: any) => r.email === person); return sel ? (<div><div className="mb-1 text-sm font-medium">{sel.name || sel.email}: progress</div><ProgressCard r={sel} /></div>) : <div className="text-xs text-muted-foreground">Click a name for their charts and AI verdict.</div>; })()}
             <table className="w-full min-w-[48rem] text-sm">
               <thead className="text-left text-xs text-muted-foreground">
                 <tr>
@@ -1041,6 +1120,7 @@ function TeamReport({ data, person, setPerson, admin, openReview }: { data: any;
                       <div className="text-xs text-muted-foreground">{r.role}</div>
                       {r.strengths.length > 0 && <div className="text-xs text-emerald-700 dark:text-emerald-400">Strong: {r.strengths.join(', ')}</div>}
                       {r.weak.length > 0 && <div className="text-xs text-red-600">Weak: {r.weak.join(', ')}</div>}
+                      {r.verdict && <div className="text-xs">AI: improving {r.verdict.improving}</div>}
                     </td>
                     <td className="pr-2">
                       {data.canManage ? (

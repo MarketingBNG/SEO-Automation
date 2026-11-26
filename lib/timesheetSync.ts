@@ -7,7 +7,7 @@
 import prismaClient from './prisma';
 import { sqlNow } from './time';
 import { istDay } from './topics';
-import { PROJECT_BY_TEAM } from './zohoProjects';
+import { projectForTeam } from './zohoProjects';
 
 const prisma: any = prismaClient;
 
@@ -34,8 +34,8 @@ export async function enqueuePriorDays(email: string, today: string = istDay()):
   const who = email.toLowerCase();
   const member = await prisma.team_members.findUnique({ where: { email: who }, select: { team: true, role: true } });
   if (!member || member.role === 'admin') return { queued: 0, reason: 'not a tracked person' };
-  const projectId = member.team ? PROJECT_BY_TEAM[member.team] : null;
-  if (!projectId) return { queued: 0, reason: `no project for team "${member.team || '(none)'}"` };
+  const projectId = projectForTeam(member.team);
+  if (!projectId) return { queued: 0, reason: `no Zoho project for team "${member.team || '(none)'}": set their team, or ZOHO_PROJECT_DEFAULT` };
   const atts = await prisma.work_attendance.findMany({ where: { email: who, day: { lt: today }, logged_at: null } });
   let queued = 0;
   for (const a of atts) {
@@ -54,8 +54,26 @@ export async function enqueuePriorDays(email: string, today: string = istDay()):
 
 // Drain pending/failed queue rows. Called by the scheduler/cron with the live Zoho deps; tests pass a
 // mock. Each day is posted under its own IST date to its captured project.
+const MAX_SYNC_ATTEMPTS = 6;
+
+// Once an hour from the scheduler: queue every tracked person's prior worked days (not only after an SEB
+// finish), then post the queue to Zoho Projects. Each person needs Zoho Projects connected; a person who
+// is not connected fails and is retried up to MAX_SYNC_ATTEMPTS times.
+export async function timesheetTick(deps: SyncDeps, today: string = istDay()) {
+  const people = await prisma.team_members.findMany({ where: { role: { not: 'admin' }, blocked: false }, select: { email: true } });
+  for (const p of people) await enqueuePriorDays(p.email, today).catch(() => null);
+  return processQueue(deps);
+}
+
 export async function processQueue(deps: SyncDeps, limit = 100) {
-  const rows = await prisma.timesheet_sync_queue.findMany({ where: { status: { in: ['pending', 'failed'] } }, orderBy: { day: 'asc' }, take: limit });
+  // Pending and failed rows (at most MAX_SYNC_ATTEMPTS tries), plus 'syncing' rows left behind by a
+  // restart mid-post (work_attendance.logged_at still prevents posting a day twice).
+  const stale = new Date(Date.now() - 10 * 60000).toISOString().replace('T', ' ').slice(0, 19);
+  const rows = await prisma.timesheet_sync_queue.findMany({
+    where: { attempts: { lt: MAX_SYNC_ATTEMPTS }, OR: [{ status: { in: ['pending', 'failed'] } }, { status: 'syncing', updated_at: { lt: stale } }] },
+    orderBy: { day: 'asc' },
+    take: limit,
+  });
   const out: any[] = [];
   for (const r of rows) out.push(await syncQueuedDay(r, deps));
   return out;

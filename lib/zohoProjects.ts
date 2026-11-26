@@ -22,6 +22,9 @@ export const PROJECT_BY_TEAM: Record<string, string> = {
   marketing: process.env.ZOHO_PROJECT_MARKETING || '283967000001053334', // Marketing_SGS_Zoho
   automation: process.env.ZOHO_PROJECT_AUTOMATION || '283967000006362390', // Automation team timesheet project
 };
+// The project for a team; people with no team (or an unmapped one) use ZOHO_PROJECT_DEFAULT when set.
+export const projectForTeam = (team: string | null | undefined): string | null =>
+  (team && PROJECT_BY_TEAM[team]) || process.env.ZOHO_PROJECT_DEFAULT || null;
 const SCOPES = ['ZohoProjects.portals.READ', 'ZohoProjects.projects.READ', 'ZohoProjects.tasks.ALL', 'ZohoProjects.timesheets.ALL'].join(',');
 const provider = (email: string) => `zoho_projects:${email.toLowerCase()}`;
 
@@ -151,7 +154,7 @@ export async function syncPersonDay(email: string, day: string = istDay()) {
   if (!(await isConnected(who))) return { email: who, ok: false, reason: 'Zoho not connected' };
   const member = await prisma.team_members.findUnique({ where: { email: who }, select: { team: true, role: true } });
   if (!member || member.role === 'admin') return { email: who, ok: false, reason: 'not a tracked person' };
-  const projectId = member.team ? PROJECT_BY_TEAM[member.team] : null;
+  const projectId = projectForTeam(member.team);
   if (!projectId) return { email: who, ok: false, reason: `no project mapped for team "${member.team || '(none)'}"` };
   const att = await prisma.work_attendance.findUnique({ where: { email_day: { email: who, day } } });
   if (!att) return { email: who, ok: false, reason: `no attendance recorded on ${day}` };

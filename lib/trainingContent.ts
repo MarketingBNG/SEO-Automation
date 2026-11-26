@@ -40,18 +40,18 @@ const BAND_DEPTH: Record<Band, string> = {
 export const LEVELS: Record<number, { words: number; questions: number; depth: string }> = Object.fromEntries(
   [350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900].map((words, i) => {
     const level = i + 1;
-    const questions = [4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8][i];
+    const questions = 3; // owner: 3 questions per lesson (one recall, one apply, one judge)
     const step = (i % 3) + 1;
     return [level, { words, questions, depth: `${BAND_DEPTH[bandOf(level)]} Step ${step} of 3 in this band${step === 1 ? ' (start of the band: keep it simple)' : step === 3 ? ' (end of the band: harder scenarios)' : ''}.` }];
   }),
 );
 export const questionsFor = (track: Track, level: number) => {
   const n = (LEVELS[level] || LEVELS[1]).questions;
-  return track === 'technical' ? n : Math.max(3, Math.ceil(n * 0.6));
+  return track === 'technical' ? n : Math.min(n, 3);
 };
 // Typed (written-answer) questions per lesson. Kept small: each one is graded by an AI call, so this
 // is also the per-lesson grading cost. Two at the higher levels, one otherwise.
-export const writtenFor = (_track: Track, level: number) => (level >= 7 ? 2 : 1);
+export const writtenFor = (_track: Track, _level: number) => 1;
 
 // The technical curriculum: US taxation to CPA level (with the US-India cross-border rules our clients
 // meet), ordered from Basic to Expert. A level rotates through its band's list.
@@ -158,6 +158,8 @@ export const QUESTION_RULES = `QUESTIONS (all required):
 - Scenario-based multiple choice: a short, realistic, anonymised client situation (US and India rules), then the question.
 - Exactly 4 options, ONE correct. The 3 wrong options are plausible (common confusions such as FBAR vs Form 8938, 1040 vs 1040-NR, W-8BEN vs W-9, ROR vs RNOR), never silly.
 - "explain": one line saying why the answer is right, and "source": the official URL that supports it.
+- "skill": what the question measures, so learning can be judged per skill. With 3 questions use each once: "recall" (knows the fact: the form, deadline, who files), "apply" (picks the right form, rule or step for a client situation), "judge" (spots the mistake, the exception or the risk in a situation).
+- One clear right answer that does not depend on opinion, so the answer can be checked automatically.
 - Every question can be answered from the lesson.
 - Inside string values never use a double quote: use single quotes, so the JSON stays valid.`;
 
@@ -174,7 +176,7 @@ const EXTRAS_SPEC = `Also return, built only from the lesson's own content (for 
 const writtenSpec = (n: number) => `WRITTEN QUESTIONS (${n}, all required):
 - ${n} open-ended question(s) the person answers by typing a few sentences (not multiple choice).
 - Each: a short realistic scenario or an "explain ..." ask that can be answered from the lesson.
-- Give a "model_answer" (3 to 5 sentences, correct and specific) and "key_points" (3 to 5 short points a full answer must contain), used later to grade the typed answer.
+- Give a "model_answer" (3 to 5 sentences, correct and specific) and exactly 3 "key_points": each one short, checkable fact or step (a form name, a deadline, who files, the next step), so a grader can tick each point as present or missing.
 - Inside string values use single quotes, never a double quote, so the JSON stays valid.`;
 
 const JSON_SHAPE = `Return ONLY JSON between ===JSON=== and ===END===:

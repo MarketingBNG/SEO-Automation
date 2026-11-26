@@ -69,7 +69,7 @@ export function capTest(fresh: Question[], repeats: Question[], max = MAX_TEST_Q
   return [...mcq, ...written, ...reps];
 }
 
-export type Question = { id: string; q: string; options: string[]; answer: number; explain: string; source?: string; track?: Track; topic?: string; repeat?: boolean; kind?: 'mcq' | 'written'; model?: string; points?: string[] };
+export type Question = { skill?: 'recall' | 'apply' | 'judge'; id: string; q: string; options: string[]; answer: number; explain: string; source?: string; track?: Track; topic?: string; repeat?: boolean; kind?: 'mcq' | 'written'; model?: string; points?: string[] };
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 const g = globalThis as unknown as { __trainingRun?: boolean };
@@ -88,6 +88,7 @@ function cleanQuestions(list: any[], prefix: string, max: number, track: Track, 
       ...(/^https?:\/\//.test(String(q.source || '')) ? { source: String(q.source).slice(0, 400) } : {}),
       track,
       topic: topic.slice(0, 160),
+      ...(['recall', 'apply', 'judge'].includes(String(q.skill)) ? { skill: String(q.skill) as 'recall' | 'apply' | 'judge' } : {}),
     }));
 }
 
@@ -250,7 +251,7 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
     // their level and audience). Test days are now per person and can be more than a week apart, so the
     // window runs from the last test (any kind), not a fixed number of days back. With no prior test, it
     // falls back to the last 8 days. A lesson is still only ever tested once (the filter below).
-    const lastTest = await prisma.training_tests.findFirst({ where: { email, day: { lt: day } }, orderBy: { day: 'desc' }, select: { day: true } });
+    const lastTest = await prisma.training_tests.findFirst({ where: { email, day: { lt: day }, kind: { not: 'qa' } }, orderBy: { day: 'desc' }, select: { day: true } });
     const since = lastTest ? lastTest.day : addDays(day, -8);
     const recent = await prisma.training_lessons.findMany({ where: { level: p.level, audience, day: { lt: day, gte: since } }, orderBy: [{ day: 'asc' }, { track: 'asc' }] });
     // A lesson is tested once: when a day's new lesson could not be made, the old one is not tested again.
@@ -282,9 +283,10 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
   if (lessonToday) {
     const lessons = { ...current };
     const have = await prisma.training_lessons.findMany({ where: { id: { in: Object.values(current).filter((x): x is number => Boolean(x)) } }, select: { id: true, day: true } });
-    for (const track of TRACKS) {
+    // The three tracks at once (their requests wait in the queue together).
+    await Promise.all(TRACKS.map(async (track) => {
       const cur = have.find((h) => h.id === current[track]);
-      if (cur?.day === day) continue;
+      if (cur?.day === day) return;
       try {
         const l = await makeLesson(day, p.level, track, audience, ask);
         if (l) lessons[track] = l.id;
@@ -292,7 +294,7 @@ export async function prepareDay(email: string, day: string, role?: string, ask 
       } catch (e) {
         firstError ||= e;
       }
-    }
+    }));
     await prisma.training_profiles.update({ where: { email }, data: { lesson_ids: JSON.stringify(lessons), lesson_id: lessons.technical ?? p.lesson_id } });
   }
   const { forgetGate } = await import('./trainingGate');
@@ -607,12 +609,16 @@ export async function runTrainingDay(now = new Date()) {
     // A person whose lessons stopped because AI work is paused gets them on a later run that day.
     let waiting = false;
     const failed: string[] = [];
-    for (const p of people)
-      await prepareDay(p.email, day, roleOf.get(p.email)!.role).catch((e) => {
+    // Everyone at once: the lessons wait in the Claude Code queue together (one job per level, track
+    // and audience, shared through makeLesson's `making` map), so the scheduled run answers them in one
+    // go, and nobody's test waits for someone else's lessons.
+    await Promise.all(people.map((p) =>
+      prepareDay(p.email, day, roleOf.get(p.email)!.role).catch((e) => {
         errors.push(`${p.email}: ${e.message}`);
         if (waitsForAi(e)) waiting = true;
         else failed.push(`${p.email}: ${e.message}`);
-      });
+      }),
+    ));
     await settings.set('training_last_run', JSON.stringify({ at: new Date().toISOString(), day, people: people.length, errors }));
     if (failed.length) await activity.log('training.failed', { details: failed.join('; ').slice(0, 300) });
     return { day, people: people.length, errors, waiting };
@@ -666,4 +672,40 @@ export async function trainingTick(now = new Date()) {
   } catch (e: any) {
     if (!(e instanceof AnotherRunGoing)) console.error('Training catch-up failed:', e?.message);
   }
+}
+
+// ---------- Weekly AI verdict per person ----------
+// Every Saturday from 16:00 IST (after the week's test), one short AI verdict per person from their
+// numbers: are they improving, strong and weak subjects and skills, and what to focus on next. Runs on
+// the Claude Code subscription (feature 'team-training' goes through the queue), so no API credits.
+// Stored in the setting training_verdict:<email> and shown in the team report and the person's page.
+export async function weeklyVerdicts(now = new Date(), ask = callClaude) {
+  const day = istDay(now);
+  if (new Date(`${day}T00:00:00Z`).getUTCDay() !== 6 || istHour(now) < 16) return;
+  if ((g as any).__verdictRun) return; // still waiting for the queue from an earlier tick
+  (g as any).__verdictRun = true;
+  await onceADay('training_verdict_day', day, async () => {
+    const { teamReport } = await import('./associateTrainingView');
+    const rows = await teamReport(null);
+    for (const r of rows.filter((x) => x.active && x.tests > 0)) {
+      const facts = {
+        level: r.level, tests: r.tests, last5Average: r.average, trendVsPrevious5: r.trend,
+        scoresOldestFirst: r.series.map((s) => `${s.day}: ${s.status === 'missed' ? 'missed' : `${s.percent}%`}`),
+        byTrack: r.tracks, bySkill: r.skills, strongTopics: r.strengths, weakTopics: r.weak,
+        levelChanges: r.levels.slice(-3).map((l) => `${l.at.slice(0, 10)} ${l.from}->${l.to}`), questionsDueAgain: r.dueAgain,
+      };
+      const sys = 'You are the training lead at USAIndiaCFO (US tax, cross-border compliance and marketing). You judge one employee\'s progress ONLY from the numbers given; never invent a score or event. Skills: recall = knows the fact, apply = picks the right form or step for a client, judge = spots the mistake, exception or risk. Simple English, no em dashes, no filler.';
+      const user = `Employee data (JSON): ${JSON.stringify(facts)}\nReply ONLY JSON between ===JSON=== and ===END===: {"improving":"yes|no|too early","text":"3 to 4 short sentences: overall progress, what is going well, what is not, said plainly","strong":["up to 3 subjects or skills"],"weak":["up to 3 subjects or skills"],"focus":"one concrete thing to study next week"}`;
+      try {
+        const { text } = (await ask(sys, [{ role: 'user', content: user }], undefined, { maxUses: 1, effort: 'low', feature: 'team-training' })) as { text: string };
+        const j: any = parseJson(text) || {};
+        if (!j.text) continue;
+        const v = { at: day, text: String(j.text).slice(0, 800), improving: String(j.improving || 'too early').slice(0, 20), strong: (Array.isArray(j.strong) ? j.strong : []).slice(0, 3).map(String), weak: (Array.isArray(j.weak) ? j.weak : []).slice(0, 3).map(String), focus: String(j.focus || '').slice(0, 300) };
+        await settings.set(`training_verdict:${r.email}`, JSON.stringify(v));
+      } catch (e) {
+        if (waitsForAi(e)) throw e; // the queue was not answered in time: the day stays open, tried again
+      }
+    }
+    return { ok: true };
+  }).catch((e) => console.error('Training verdicts:', e?.message)).finally(() => { (g as any).__verdictRun = false; });
 }

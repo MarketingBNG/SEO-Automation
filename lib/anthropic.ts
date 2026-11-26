@@ -311,7 +311,7 @@ async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
   if (testing && opts.batch && isAutomatic() && (await pendingBatchId(batchParamsFor(systemPrompt, [...userMessages], opts)))) {
     result = await callClaudeLive(systemPrompt, userMessages, signal, { ...opts, collectOnly: true });
   } else if (viaSubscription) {
-    result = await askQueue(hash, systemPrompt, userMessages, signal, opts);
+    result = await askQueue(hash, systemPrompt, userMessages, signal, { ...opts, queueWaitMs: 2 * 3600 * 1000 });
   } else if (testing) {
     // Automatic work does not start in Testing mode, except the daily training lessons: they wait in
     // the queue for the scheduled Claude Code run (subscription), so training keeps coming every day.
