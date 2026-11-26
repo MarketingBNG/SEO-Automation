@@ -17,8 +17,14 @@ const nextConfig: NextConfig = {
   // sniffing of uploaded files, HTTPS only, and a strict referrer. A full script CSP is left out on
   // purpose (Next's inline scripts and Google sign-in would need nonces); lesson and blog HTML is
   // sanitized before it is rendered.
+  // The logo, favicons and assistant pictures in public/ (the login page shows them to anyone):
+  // a day in browsers and at Cloudflare instead of max-age=0, which sent every view to the server.
+  // Only top-level files and public/assistant: /api/uploads/... stays private (it has more segments).
   async headers() {
+    const cache = [{ key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' }];
     return [
+      { source: '/:file([^/]+\\.(?:png|ico|webp|svg))', headers: cache },
+      { source: '/assistant/:file([^/]+\\.webp)', headers: cache },
       {
         source: '/:path*',
         headers: [

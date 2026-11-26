@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { canDo } from '@/lib/access';
+import { canDo, forgetLiveAccess } from '@/lib/access';
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { getMe } from '@/lib/auth';
@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
         throw e;
       });
   if (!row) return NextResponse.json({ error: `${email} was just added by someone else. Reload the Team list to see their role.` }, { status: 409 });
+  forgetLiveAccess(email);
   await activity.log('team.changed', { details: `${email}: ${notes.join(', ') || 'updated'}`, actor: me.name });
   return NextResponse.json(row);
 }

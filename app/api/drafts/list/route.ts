@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { methodNotAllowed } from '../../_lib/http';
 import { getMe } from '@/lib/auth';
+import { jsonResponse, sharedJson } from '@/lib/sharedRead';
 import { publishPlan } from '@/lib/strategy/core';
 import { istText } from '@/lib/time';
 
@@ -17,7 +17,15 @@ export const runtime = 'nodejs';
 
 // Was: SELECT drafts.*, keywords.keyword AS keyword, keywords.batch_name AS batch_name
 //      FROM drafts JOIN keywords ON keywords.id = drafts.keyword_id ORDER BY drafts.id DESC
+// Shared for 5 seconds between people of the same kind (admin or not) unless something changes
+// (lib/sharedRead.ts): Drafts & Review is opened by everyone and is the same list for all.
 export async function GET() {
+  const me = await getMe();
+  const admin = me?.role === 'admin' || me?.role === 'tester';
+  return jsonResponse(await sharedJson(`drafts:${admin ? 'admin' : 'all'}`, 5000, () => draftsList(admin)));
+}
+
+async function draftsList(admin: boolean) {
   // Light rows: the list never shows the article; the editor loads the full draft by id.
   const rows = await prisma.drafts.findMany({
     select: { id: true, keyword_id: true, title: true, status: true, production_state: true, validation_issues: true, repair_attempts: true, word_count: true, created_at: true, updated_at: true, wp_post_url: true, wp_post_id: true, author: true, featured_image_path: true, kind: true, keyword: { select: { keyword: true, batch_name: true } } },
@@ -25,18 +33,16 @@ export async function GET() {
     take: 500,
   });
   // Origin and history are for the admin (and those with admin rights) only.
-  const me = await getMe();
-  const admin = me?.role === 'admin' || me?.role === 'tester';
   const ids = rows.map((r) => r.id);
-  const sched = admin ? await prisma.blog_schedule.findMany({ where: { draft_id: { in: ids } } }) : [];
+  // Not the publish logs, rewrite notes and reject feedback: the origin line never shows them (as on Home).
+  const sched = admin ? await prisma.blog_schedule.findMany({ where: { draft_id: { in: ids } }, omit: { post_publish_log: true, revision_note: true, reject_feedback: true } }) : [];
   const byDraft = new Map(sched.map((s) => [s.draft_id, s]));
   // When each published draft actually went to the website (from the activity log).
   const pubLog = admin ? await prisma.activity_log.findMany({ where: { action: { in: ['site.published', 'wordpress.published', 'schedule.published'] }, entity_type: 'draft', entity_id: { in: ids } }, select: { entity_id: true, created_at: true }, orderBy: { id: 'asc' } }) : [];
   const publishedAt = new Map(pubLog.map((l) => [l.entity_id, l.created_at]));
   const now = new Date();
   const ist = (s: string) => istText(new Date(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z')));
-  return NextResponse.json(
-    rows.map(({ keyword, validation_issues, ...d }: any) => {
+  return rows.map(({ keyword, validation_issues, ...d }: any) => {
       // Why a draft needs attention, shown on the list without opening it: the issues left after the
       // automatic repairs, counted by kind, plus the first few in full.
       let issues: string[] = [];
@@ -80,8 +86,6 @@ export async function GET() {
           autoRepairs: d.repair_attempts || 0,
         },
       };
-    }),
-    { status: 200 }
-  );
+    });
 }
 export { methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

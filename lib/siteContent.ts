@@ -1,6 +1,7 @@
 // Content for the new custom website: pages (made of keyed sections) and blog posts, stored here
 // and read by the website through /api/site/v1 with a read key. When something changes, the
 // website is told through a signed webhook so it can refresh only that page.
+import { siteContentChanged } from './siteApiCache';
 import crypto from 'crypto';
 import prisma from './prisma';
 
@@ -88,5 +89,7 @@ export async function upsertContent(type: 'page' | 'post', item: any, actor?: st
   };
   const before = await prisma.site_content.findUnique({ where: { slug } });
   const row = await prisma.site_content.upsert({ where: { slug }, create: data, update: data });
+  // Before the website is told about the change, so it reads the new version.
+  siteContentChanged();
   return { row, created: !before };
 }

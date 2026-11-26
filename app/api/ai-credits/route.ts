@@ -10,13 +10,20 @@ import prisma from '@/lib/prisma';
 import { strategyProgress } from '@/lib/strategy/progress';
 import * as settings from '@/lib/settings';
 import { runningTimers } from '@/lib/jobTimer';
+import { jsonResponse, sharedJson } from '@/lib/sharedRead';
 
 export const runtime = 'nodejs';
 
 // GET: models in use, estimated spend and remaining credit, pause state.
 // ?days=N adds the spend of the last N days by kind of work and model.
+// The answer is the same for everyone and takes some 20 database queries: shared for 5 seconds
+// (lib/sharedRead.ts; a POST here, or any other change, makes the next read fresh).
 export async function GET(req: NextRequest) {
   const days = Math.min(90, Math.max(0, Number(req.nextUrl.searchParams.get('days')) || 0));
+  return jsonResponse(await sharedJson(`ai-credits:${days}`, 5000, () => creditsNow(days)));
+}
+
+async function creditsNow(days: number) {
   // What is running or paused right now, so a deploy can wait for (or pause) work in progress.
   const [blogs, strategies] = await Promise.all([
     prisma.keywords.findMany({ where: { status: 'generating' }, select: { keyword: true } }),
@@ -26,7 +33,7 @@ export async function GET(req: NextRequest) {
   // rewrites, refreshes, guides), the same list the header progress bar shows.
   const other = runningTimers().filter((t) => !t.key.startsWith('blog-')).map((t) => t.label);
   const running = { blogs: blogs.map((b) => b.keyword), strategies: strategies.map((s) => `#${s.id} ${s.status}`), other };
-  return NextResponse.json({ ...(await creditStatus()), running, ...(await queueStatus()), month: await thisMonth(), ...(days ? { window: await spendWindow(days) } : {}) });
+  return { ...(await creditStatus()), running, ...(await queueStatus()), month: await thisMonth(), ...(days ? { window: await spendWindow(days) } : {}) };
 }
 
 // This calendar month: what each kind of work has spent so far, and what the work still left in the
