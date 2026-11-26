@@ -165,16 +165,22 @@ export function startScheduler() {
         data: { status: 'pending', error: 'The previous run was cut off by a server restart.' },
       });
     })
-    .catch(() => {});
+    .catch((e: any) => console.error('Scheduler: start-up recovery failed (blogs cut off by the restart may need a manual restart):', e?.message || e));
   // Everything the scheduler starts is automatic work: in Testing mode it does not use AI (lib/aiQueue.ts).
   const run = async () => {
+    const g = globalThis as any;
     if (globalThis.__seoSchedulerRunning) {
-      // The previous tick is still going: only the heartbeat, so the status light stays green.
-      await import('./settings').then((st) => st.set('scheduler_heartbeat', new Date().toISOString())).catch(() => {});
-      console.log('Scheduler: previous run still going, this tick is skipped.');
-      return;
+      // A tick stuck for more than 45 minutes (a call that never returns) must not stop every later
+      // tick while the status light stays green: log it and run again.
+      if (Date.now() - (g.__seoSchedulerStartedAt || 0) < 45 * 60000) {
+        await import('./settings').then((st) => st.set('scheduler_heartbeat', new Date().toISOString())).catch(() => {});
+        console.log('Scheduler: previous run still going, this tick is skipped.');
+        return;
+      }
+      console.error('Scheduler: the previous run has been stuck for over 45 minutes; starting a new one.');
     }
     globalThis.__seoSchedulerRunning = true;
+    g.__seoSchedulerStartedAt = Date.now();
     try {
       await import('./aiQueue').then(({ runAutomatic }) => runAutomatic(tick));
     } catch (e: any) {

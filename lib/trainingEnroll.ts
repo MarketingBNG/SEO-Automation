@@ -52,7 +52,14 @@ export async function ensureProfile(email: string, opts: { level?: number; name?
   const existing = await prisma.training_profiles.findUnique({ where: { email: who } });
   if (existing) return { created: false, profile: existing };
   const level = clampLevel(opts.level ?? 1);
-  const profile = await prisma.training_profiles.create({ data: { email: who, name: opts.name || null, level, active: true } });
+  let profile;
+  try {
+    profile = await prisma.training_profiles.create({ data: { email: who, name: opts.name || null, level, active: true } });
+  } catch (e: any) {
+    // Two requests at once (double click, or login auto-enrol): the other one created it first.
+    if (e?.code !== 'P2002') throw e;
+    return { created: false, profile: await prisma.training_profiles.findUnique({ where: { email: who } }) };
+  }
   await activity.log('training.enrolled', { details: `${who}: enrolled at level ${level}`, actor: opts.actor });
   return { created: true, profile };
 }

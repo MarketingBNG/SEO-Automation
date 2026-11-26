@@ -88,7 +88,8 @@ export async function askQueue(hash: string, systemPrompt: string, userMessages:
   // A training lesson waits at most a few hours, then gives up like "AI paused": the day's run ends (its
   // lock is freed for Prepare today now and enrolments) and the next catch-up asks again, reusing this
   // same job (found by its hash above), so nothing is asked twice.
-  const deadline = opts.queueWaitMs ? Date.now() + Number(opts.queueWaitMs) : Infinity;
+  // Any other job waits at most a day, then stops like paused AI work, so it never holds its run forever.
+  const deadline = Date.now() + (Number(opts.queueWaitMs) || 24 * 3600 * 1000);
   for (;;) {
     if (Date.now() > deadline) throw new CreditPausedError(`AI work is paused: waiting for the Claude Code queue (job #${id}).`);
     if (signal?.aborted) {

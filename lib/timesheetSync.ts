@@ -60,6 +60,16 @@ const MAX_SYNC_ATTEMPTS = 6;
 // finish), then post the queue to Zoho Projects. Each person needs Zoho Projects connected; a person who
 // is not connected fails and is retried up to MAX_SYNC_ATTEMPTS times.
 export async function timesheetTick(deps: SyncDeps, today: string = istDay()) {
+  const g = globalThis as any;
+  if (g.__timesheetRun) return []; // the previous hour's run is still posting
+  g.__timesheetRun = true;
+  try {
+    return await timesheetTickOnce(deps, today);
+  } finally {
+    g.__timesheetRun = false;
+  }
+}
+async function timesheetTickOnce(deps: SyncDeps, today: string) {
   const people = await prisma.team_members.findMany({ where: { role: { not: 'admin' }, blocked: false }, select: { email: true } });
   for (const p of people) await enqueuePriorDays(p.email, today).catch(() => null);
   return processQueue(deps);

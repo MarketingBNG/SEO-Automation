@@ -140,7 +140,7 @@ test('the system prompt names only tools that exist, and says what stays in the 
   for (const t of TOOLS.filter((x: any) => x.kind === 'write')) assert.ok(SYSTEM_PROMPT.includes(t.name), `prompt lists ${t.name}`);
   assert.match(SYSTEM_PROMPT, /approval card/);
   assert.match(SYSTEM_PROMPT, /STAYS IN THE DASHBOARD/);
-  for (const w of ['Team & Roles', 'Testing / Live mode', 'OAuth', 'Associate Training test', 'approving the monthly strategy', 'Smartlead', 'make_word_file', 'set a level', 'importing a meeting insight', 'keyword suggestions for an older draft', 'Surfer terms', 'try again after someone presses Resume', 'keyword_research and serp_top_results are paid']) assert.ok(SYSTEM_PROMPT.includes(w), w);
+  for (const w of ['Team & Roles', 'Testing / Live mode', 'OAuth', 'Team Training test', 'approving the monthly strategy', 'Smartlead', 'make_word_file', 'set a level', 'importing a meeting insight', 'keyword suggestions for an older draft', 'Surfer terms', 'try again after someone presses Resume', 'keyword_research and serp_top_results are paid']) assert.ok(SYSTEM_PROMPT.includes(w), w);
   assert.doesNotMatch(SYSTEM_PROMPT, /You cannot change the company website/);
 });
 
