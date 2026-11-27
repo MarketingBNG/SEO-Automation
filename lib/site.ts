@@ -212,18 +212,27 @@ export async function listPosts({ perPage = 50, page = 1 } = {}) {
 }
 
 // Every live post. full: with the article text (read one by one when the list leaves it out).
-export async function livePosts({ full = false, fresh = false } = {}): Promise<Post[]> {
+export async function livePosts({ full = false, fresh = false, budgetMs = 0 } = {}): Promise<Post[]> {
   need();
   const live = (await sitePosts(fresh)).filter((p) => isLive(p.status));
   if (!full) return live.map(toPost);
   const out: Post[] = [];
-  // One post at a time with a short pause, so a full read of hundreds of posts stays under the
-  // website's rate limit (it answers 429 when asked too fast).
-  for (const p of live) {
-    if (p.content) { out.push(toPost(p)); continue; }
-    out.push(toPost((await sitePost(p.slug)) || p));
-    await new Promise((r) => setTimeout(r, 250));
-  }
+  // Each post's text is kept in memory and read again only when the post changed (its updated date), so
+  // a report reads only new or edited posts, three at a time (the connector waits and retries when the
+  // website says "too many requests"). With budgetMs, posts not read in time keep their list entry.
+  const g = globalThis as any;
+  const textCache: Map<string, { stamp: string; post: any }> = (g.__postTextCache ||= new Map());
+  const started = Date.now();
+  const toRead = live.filter((p) => !p.content && textCache.get(p.slug)?.stamp !== String(p.updated_at || p.published_at || ''));
+  let i = 0;
+  await Promise.all(Array.from({ length: 3 }, async () => {
+    while (i < toRead.length && (!budgetMs || Date.now() - started < budgetMs)) {
+      const p = toRead[i++];
+      const full = await sitePost(p.slug).catch(() => null);
+      if (full) textCache.set(p.slug, { stamp: String(p.updated_at || p.published_at || ''), post: full });
+    }
+  }));
+  for (const p of live) out.push(toPost(p.content ? p : textCache.get(p.slug)?.post || p));
   return out;
 }
 

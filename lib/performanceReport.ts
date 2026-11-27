@@ -88,7 +88,8 @@ const gaDate = (v) => `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
 
 // The website's live posts with their text (FAQ and freshness counts).
 async function sitePosts() {
-  return livePosts({ full: true });
+  // At most 25 s on post texts per report; the rest come from the cache on the next load.
+  return livePosts({ full: true, budgetMs: 25000 });
 }
 
 function contentStats(posts) {
