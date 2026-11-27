@@ -4,6 +4,9 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-27
+- (seo) Performance report sources: the website connector retries when the site answers 429 (rate limit), waiting as the site asks, and a full read of all posts is paced so it stays under the limit; when Search Console refuses GSC_SITE_URL, the dashboard finds the same site's property the Google service account can read (e.g. sc-domain:) and uses it; GA4 retries a dropped connection once and names the real cause.
+
 ## 2026-11-26
 - (ops) The dashboard now runs on several CPU cores (npm start = scripts/cluster.mjs): one main process keeps every job, Stop/Pause and the scheduler as before, while pages, sign-in, laptop reports, SEB and the website content API are spread over all processes; a crashed process restarts by itself. WEB_CONCURRENCY sets the number of processes (default: cores, at most 4); WEB_CONCURRENCY=1 goes back to a single process.
 - (ops) End-to-end audit fixes. Security: the Zoho connect only accepts the real Zoho accounts servers (a look-alike host could have received the client secret: rotate the Zoho client secret), Zoho errors no longer echo tokens, AI-written lesson HTML is sanitized, and security headers block framing and MIME sniffing. Speed: the team report reads everyone in a few queries, laptop activity reports are written in one batch, an explicit database pool, new test indexes, a slower live-test poll. Stability: a scheduler run stuck for 45 minutes no longer stops all background work, queued AI jobs wait at most 24 hours, timesheet runs cannot overlap, a double-click enrolment no longer errors.

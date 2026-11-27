@@ -217,7 +217,13 @@ export async function livePosts({ full = false, fresh = false } = {}): Promise<P
   const live = (await sitePosts(fresh)).filter((p) => isLive(p.status));
   if (!full) return live.map(toPost);
   const out: Post[] = [];
-  for (const p of live) out.push(toPost(p.content ? p : (await sitePost(p.slug)) || p));
+  // One post at a time with a short pause, so a full read of hundreds of posts stays under the
+  // website's rate limit (it answers 429 when asked too fast).
+  for (const p of live) {
+    if (p.content) { out.push(toPost(p)); continue; }
+    out.push(toPost((await sitePost(p.slug)) || p));
+    await new Promise((r) => setTimeout(r, 250));
+  }
   return out;
 }
 

@@ -37,9 +37,32 @@ async function listAccessibleSites() {
 }
 
 function getSiteUrl() {
+  if (resolvedSiteUrl) return resolvedSiteUrl;
   const siteUrl = process.env.GSC_SITE_URL;
   if (!siteUrl) throw new Error('GSC_SITE_URL is not set in .env');
   return siteUrl;
+}
+
+// When GSC_SITE_URL is refused ("User does not have sufficient permission"), the service account may
+// still have the same site under another property name (sc-domain:usaindiacfo.com, or with www).
+// Find it in the properties the service account can read, use it from then on, and say which.
+let resolvedSiteUrl = '';
+function domainOf(u: string) {
+  return String(u || '').replace(/^sc-domain:/, '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').toLowerCase();
+}
+async function withSiteFallback<T>(run: (siteUrl: string) => Promise<T>): Promise<T> {
+  try {
+    return await run(getSiteUrl());
+  } catch (e: any) {
+    if (resolvedSiteUrl || !/sufficient permission|forbidden|403/i.test(String(e?.message || e))) throw e;
+    const want = domainOf(process.env.GSC_SITE_URL || '');
+    const sites = (await listAccessibleSites().catch(() => [])).filter((s: any) => s.permissionLevel !== 'siteUnverifiedUser' && domainOf(s.siteUrl) === want);
+    const pick = sites.find((s: any) => String(s.siteUrl).startsWith('sc-domain:')) || sites[0];
+    if (!pick) throw new Error(`${e.message} The Google service account has no access to any Search Console property for ${want}: add its email as a user in Search Console (Settings > Users and permissions).`);
+    resolvedSiteUrl = String(pick.siteUrl);
+    console.log(`Search Console: ${process.env.GSC_SITE_URL} was refused; using ${resolvedSiteUrl} (set GSC_SITE_URL to it).`);
+    return run(resolvedSiteUrl);
+  }
 }
 
 // Top queries/pages for the last N days - the core "what are people finding us for" signal
@@ -72,8 +95,8 @@ async function getTopQueries({ days = 28, rowLimit = 25 }: any = {}) {
 async function querySearchAnalytics({ startDate, endDate, dimensions = ['query'], rowLimit = 25, filters = [] }: any) {
   const auth = getAuth();
   const searchconsole = google.searchconsole({ version: 'v1', auth });
-  const res = await searchconsole.searchanalytics.query({
-    siteUrl: getSiteUrl(),
+  const res = await withSiteFallback((siteUrl) => searchconsole.searchanalytics.query({
+    siteUrl,
     requestBody: {
       startDate,
       endDate,
@@ -81,7 +104,7 @@ async function querySearchAnalytics({ startDate, endDate, dimensions = ['query']
       rowLimit,
       ...(filters.length ? { dimensionFilterGroups: [{ filters }] } : {}),
     },
-  });
+  }));
   return res.data.rows || [];
 }
 

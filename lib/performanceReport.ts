@@ -69,11 +69,16 @@ async function ga4Report(body) {
   if (!propertyId) throw new Error('GA4_PROPERTY_ID is not set');
   const client = await googleAuth(['https://www.googleapis.com/auth/analytics.readonly']).getClient();
   const token = (await client.getAccessToken()).token;
-  const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`, {
+  const call = () => fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`, {
     signal: AbortSignal.timeout(60000),
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+  // A dropped connection ("fetch failed") is tried once more; the error then names the real cause.
+  const res = await call().catch(async () => {
+    await new Promise((r) => setTimeout(r, 2000));
+    return call().catch((e: any) => { throw new Error(`GA4 could not be reached: ${e?.cause?.code || e?.cause?.message || e?.message || e}`); });
   });
   const json = await res.json();
   if (!res.ok) throw new Error(`GA4: ${json.error?.message || res.status}`);

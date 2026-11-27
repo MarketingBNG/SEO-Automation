@@ -56,7 +56,8 @@ export async function connectorCall(action: string, data: Record<string, unknown
   const secret = process.env.SITE_CONNECTOR_SECRET;
   if (!url || !secret) throw new SiteNotSetUpError();
   let lastErr: any;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let wait = 0;
+  for (let attempt = 0; attempt < 4; attempt++) {
     // The site accepts each signed request once: a random nonce makes every request (and every
     // retry) unique, even two identical ones in the same second.
     const body = JSON.stringify({ action, data, nonce: crypto.randomBytes(12).toString('hex') });
@@ -78,7 +79,15 @@ export async function connectorCall(action: string, data: Record<string, unknown
       const message = json?.error || String(text).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 200);
       const err: any = new Error(`Website ${action} failed (${res.status}): ${message}`);
       err.status = res.status;
-      // Only a dropped connection or a server error is worth a second try.
+      // A dropped connection, a server error or the site's rate limit (429) is worth another try; for
+      // 429 wait as long as the site asks (Retry-After), at least a few seconds.
+      if (res.status === 429) {
+        const ra = Number(res.headers.get('retry-after'));
+        wait = Math.min(30000, Math.max(3000 * (attempt + 1), Number.isFinite(ra) && ra > 0 ? ra * 1000 : 0));
+        lastErr = err;
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
       if (res.status < 500) throw err;
       lastErr = err;
     } catch (e: any) {
