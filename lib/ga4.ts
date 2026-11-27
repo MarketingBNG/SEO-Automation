@@ -29,7 +29,10 @@ async function runReport(requestBody, { signal }: any = {}) {
       },
       body: JSON.stringify(requestBody),
     }
-  );
+  ).catch((e: any) => {
+    // "fetch failed" alone says nothing: give the network cause (ENETUNREACH, ETIMEDOUT, ENOTFOUND...).
+    throw new Error(`GA4 could not be reached: ${e?.cause?.code || e?.cause?.message || e?.message || e}`);
+  });
   const json = await res.json();
   if (!res.ok) {
     throw new Error(`GA4 API error: ${json.error?.message || res.status}`);
