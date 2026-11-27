@@ -1,16 +1,21 @@
-import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as settings from '@/lib/settings';
 import { needsExpertReview, publishPlan, reviewOverdue } from '@/lib/strategy/core';
 import { calendarRowsWhere } from '@/lib/strategy/calendarRows';
 import { expertReviewers, requireExpert } from '@/lib/reviewers';
 import { methodNotAllowed } from '../_lib/http';
+import { jsonResponse, sharedJson } from '@/lib/sharedRead';
 
 export const runtime = 'nodejs';
 
 // The Home page: what waits for a decision, what publishes next, what needs attention, and what
 // went live recently. One call, a handful of small queries, no external services.
+// The same for everyone: shared for 5 seconds unless something changes (lib/sharedRead.ts).
 export async function GET() {
+  return jsonResponse(await sharedJson('home', 5000, homeNow));
+}
+
+async function homeNow() {
   const now = new Date();
   const [strategy, generating, failedKeywords, pendingKeywords, pendingDrafts, onCalendar, recentDrafts, aiPaused, aiPausedReason, creditStamp, creditAlert] = await Promise.all([
     prisma.seo_strategies.findFirst({ where: { status: 'approved', plan_json: { not: null } }, orderBy: { id: 'desc' }, select: { id: true, period: true, end_date: true } }),
@@ -91,7 +96,7 @@ export async function GET() {
   for (const r of approvals.filter((x) => x.overdue)) attention.push({ kind: 'overdue', title: `Review overdue: ${r.title}`, detail: 'It has waited more than 48 hours. Approve or reject it.', href: `/?tab=drafts&draft=${r.draft_id}` });
   if (failedNames.length) attention.push({ kind: 'keywords', title: `${failedNames.length} keyword blog${failedNames.length === 1 ? '' : 's'} failed`, detail: `${failedNames.slice(0, 3).join(', ')}${failedNames.length > 3 ? ' and more' : ''}. Open Keywords and press "Try again".`, href: '/?tab=keywords' });
 
-  return NextResponse.json({
+  return {
     strategy: strategy ? { id: strategy.id, period: strategy.period, end_date: strategy.end_date } : null,
     reviewers,
     approvals,
@@ -101,6 +106,6 @@ export async function GET() {
     recent: recentDrafts,
     pendingKeywords,
     checkedAt: now.toISOString(),
-  });
+  };
 }
 export { methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import * as settings from '@/lib/settings';
 import { publishPlan } from '@/lib/strategy/core';
@@ -6,6 +5,7 @@ import { blogRuns } from '@/lib/blogRuns';
 import { methodNotAllowed } from '../_lib/http';
 import { calendarRowsWhere } from '@/lib/strategy/calendarRows';
 import { istText } from '@/lib/time';
+import { jsonResponse, sharedJson } from '@/lib/sharedRead';
 
 export const runtime = 'nodejs';
 
@@ -16,7 +16,13 @@ const toMs = (s: string) => Date.parse(String(s).replace(' ', 'T') + (String(s).
 // The status light in the header: is the automation alive, did its last run go cleanly, and what
 // does it do next. Green = running; amber = running with problems or waiting for a person;
 // red = stopped (no check for over 20 minutes, AI paused, or no approved strategy).
+// The light is the same for everyone and every open tab polls it: one answer is shared for 5 seconds
+// (lib/sharedRead.ts; it read the whole calendar for each poll: 5 queries and about 800 rows).
 export async function GET() {
+  return jsonResponse(await sharedJson('status', 5000, light));
+}
+
+async function light() {
   const now = Date.now();
   const st = await settings.getMany(['scheduler_heartbeat', 'scheduler_last_run', 'ai_paused', 'ai_paused_reason']);
   const beat = st.scheduler_heartbeat ? Date.parse(st.scheduler_heartbeat) : null;
@@ -74,6 +80,6 @@ export async function GET() {
   if (nextPub) notes.push(`Next to publish: "${nextPub.title}". ${publishPlan(nextPub, new Date(now)).headline}.`);
   if (last?.at) notes.push(`Last full run finished ${fmt(Date.parse(last.at))}${last.published || last.drafted || last.opened ? `: ${last.drafted} written, ${last.opened} sent for review, ${last.published} published` : ''}.`);
 
-  return NextResponse.json({ level, label: level === 'green' ? 'Automation running' : level === 'amber' ? 'Running, needs attention' : 'Automation stopped', heartbeat: beat ? new Date(beat).toISOString() : null, problems, notes, strategy: strategy?.period || null });
+  return { level, label: level === 'green' ? 'Automation running' : level === 'amber' ? 'Running, needs attention' : 'Automation stopped', heartbeat: beat ? new Date(beat).toISOString() : null, problems, notes, strategy: strategy?.period || null };
 }
 export { methodNotAllowed as POST, methodNotAllowed as PUT, methodNotAllowed as PATCH, methodNotAllowed as DELETE };

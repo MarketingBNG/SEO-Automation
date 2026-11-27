@@ -4,6 +4,7 @@
 import prisma from '@/lib/prisma';
 import * as activity from '@/lib/activity';
 import { normalizeSlug, notifyWebsite, toPage, toPost, upsertContent } from '@/lib/siteContent';
+import { siteContentChanged } from '@/lib/siteApiCache';
 
 type Result = { status: number; body: any };
 
@@ -53,6 +54,7 @@ export async function siteContentAction(body: any, email: string | null | undefi
       const row = await prisma.site_content.findUnique({ where: { slug } });
       if (!row) return { status: 404, body: { error: 'Not found' } };
       await prisma.site_content.delete({ where: { slug } });
+      siteContentChanged();
       const hook = await notifyWebsite(row.type === 'page' ? 'page.updated' : 'post.unpublished', row.type, slug);
       await activity.log('site.content', { details: `Deleted ${row.type} ${slug}`, actor: email });
       return { status: 200, body: { ok: true, webhook: hook } };

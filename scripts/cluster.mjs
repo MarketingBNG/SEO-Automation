@@ -22,7 +22,9 @@ import { poolRoute } from './pool-route.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const nextBin = path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next');
 const PORT = Number(process.env.PORT) || 3000;
-const HOST = process.env.HOSTNAME || '0.0.0.0';
+// Not HOSTNAME: Docker sets it to the container ID, which can resolve to an IPv6-only address the
+// proxy cannot reach (502). LISTEN_HOST overrides; the default listens on every address.
+const HOST = process.env.LISTEN_HOST || '0.0.0.0';
 const cores = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
 const COUNT = Math.max(1, Math.min(Number(process.env.WEB_CONCURRENCY) || Math.min(cores, 4), 16));
 

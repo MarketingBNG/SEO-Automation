@@ -53,17 +53,36 @@ export async function canDo(me: { email: string; role: Role; blocked?: boolean }
 // API call for them, reads included.
 export type LiveAccess = { member: boolean; role: Role; blocked: boolean; access: Access | null; grants: Grant[] };
 const LIVE_MS = 30_000;
-const liveCache = new Map<string, { at: number; value: LiveAccess }>();
+// On globalThis: proxy.ts and the route handlers are separate bundles, and a change saved by a route
+// must clear the copy proxy.ts reads.
+const gl = globalThis as unknown as { __liveAccess?: Map<string, { at: number; value: LiveAccess }>; __liveAccessLoading?: Map<string, Promise<LiveAccess>> };
+const liveCache = (gl.__liveAccess ||= new Map<string, { at: number; value: LiveAccess }>());
+
+// Many requests from the same person at once (a page opening several lists) share one lookup.
+const liveLoading = (gl.__liveAccessLoading ||= new Map<string, Promise<LiveAccess>>());
 
 export async function liveAccessFor(email: string): Promise<LiveAccess> {
   const e = email.toLowerCase();
   const hit = liveCache.get(e);
   if (hit && Date.now() - hit.at < LIVE_MS) return hit.value;
-  const { memberFor } = await import('./team');
-  const m = await memberFor(e);
-  // Not on the team list: no access until the admin adds them (same as the session callback).
-  const value: LiveAccess = m ? { member: true, role: m.role, blocked: m.blocked, ...(await accessFor(m.email, m.role)) } : { member: false, role: 'user', blocked: true, access: null, grants: [] };
-  liveCache.set(e, { at: Date.now(), value });
-  if (liveCache.size > 500) liveCache.delete(liveCache.keys().next().value!);
-  return value;
+  let job = liveLoading.get(e);
+  if (!job) {
+    job = (async () => {
+      const { memberFor } = await import('./team');
+      const m = await memberFor(e);
+      // Not on the team list: no access until the admin adds them (same as the session callback).
+      const value: LiveAccess = m ? { member: true, role: m.role, blocked: m.blocked, ...(await accessFor(m.email, m.role)) } : { member: false, role: 'user', blocked: true, access: null, grants: [] };
+      liveCache.set(e, { at: Date.now(), value });
+      if (liveCache.size > 500) liveCache.delete(liveCache.keys().next().value!);
+      return value;
+    })().finally(() => liveLoading.delete(e));
+    liveLoading.set(e, job);
+  }
+  return job;
+}
+
+// A change on the Team page or in role access applies at once on this server, not after 30 seconds.
+export function forgetLiveAccess(email?: string) {
+  if (email) liveCache.delete(email.toLowerCase());
+  else liveCache.clear();
 }

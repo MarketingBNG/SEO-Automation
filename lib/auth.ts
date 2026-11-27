@@ -54,8 +54,13 @@ export const authOptions: NextAuthOptions = {
       }
       const firstSignIn = Boolean(account && token.email);
       if (token.email) {
+        // At sign-in the team entry is read fresh (and the name filled in). Every later read of the
+        // session (each getMe() in a route, /api/auth/session) uses the same 30-second copy proxy.ts
+        // checks requests with: it was two to three database queries on every API call.
         const { memberFor } = await import('./team');
-        const m = await memberFor(token.email, token.name).catch(() => null);
+        const { accessFor, liveAccessFor } = await import('./access');
+        const live = account ? null : await liveAccessFor(token.email).catch(() => null);
+        const m = live ? (live.member ? { email: token.email.toLowerCase(), role: live.role, blocked: live.blocked } : null) : await memberFor(token.email, token.name).catch(() => null);
         if (m) {
           token.role = m.role;
           token.blocked = m.blocked;
@@ -65,8 +70,7 @@ export const authOptions: NextAuthOptions = {
             await import('./trainingEnroll').then((e) => e.autoEnrollOnLogin(String(token.email), (token.name as string) || null, m.role)).catch(() => {});
           }
           // Pages and actions this person may use (role access plus their own grants).
-          const { accessFor } = await import('./access');
-          const a = await accessFor(m.email, m.role).catch(() => null);
+          const a = live && live.access ? { access: live.access, grants: live.grants } : await accessFor(m.email, m.role).catch(() => null);
           if (a) {
             token.access = a.access;
             token.grants = a.grants;
