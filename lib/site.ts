@@ -91,7 +91,7 @@ export function draftsRefused(status: string): string | null {
 // Settings > Website connection: the site answers a signed ping.
 export async function testConnection() {
   need();
-  const j = await connectorCall('ping');
+  const j = await connectorCall('ping', {}, { quick: true });
   return { site: j.site || null, storage: j.storage || null, drafts: draftsAllowed() };
 }
 

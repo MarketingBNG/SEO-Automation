@@ -5,6 +5,7 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 affects most: writer, fact-check, ops, seo, publisher, social.
 
 ## 2026-11-27
+- (publisher) Test website connection answers at once again: the test makes one short try and shows the website's answer (e.g. 429 rate limit) instead of waiting out retries.
 - (ops) Outgoing connections prefer IPv4: on the server, Node's fetch tried Google's IPv6 address first and failed (GA4 "fetch failed"). GA4 errors now name the network cause.
 - (seo) The SEO performance page loads quickly again: each live post's text is kept in memory and read from the website only when the post changed, three at a time, and a report spends at most 25 seconds on post texts (the earlier fixed pause per post made it hang on Loading).
 - (seo) Performance report sources: the website connector retries when the site answers 429 (rate limit), waiting as the site asks, and a full read of all posts is paced so it stays under the limit; when Search Console refuses GSC_SITE_URL, the dashboard finds the same site's property the Google service account can read (e.g. sc-domain:) and uses it; GA4 retries a dropped connection once and names the real cause.

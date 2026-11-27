@@ -51,13 +51,14 @@ export function siteOrigin(): string {
 export const publicSite = () => siteOrigin() || 'https://usaindiacfo.com';
 export const publicHost = () => publicSite().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
 
-export async function connectorCall(action: string, data: Record<string, unknown> = {}): Promise<any> {
+// quick: a person is waiting on the answer (the Test button): no waiting out a 429, one short try.
+export async function connectorCall(action: string, data: Record<string, unknown> = {}, { quick = false } = {}): Promise<any> {
   const url = process.env.SITE_CONNECTOR_URL;
   const secret = process.env.SITE_CONNECTOR_SECRET;
   if (!url || !secret) throw new SiteNotSetUpError();
   let lastErr: any;
   let wait = 0;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < (quick ? 1 : 4); attempt++) {
     // The site accepts each signed request once: a random nonce makes every request (and every
     // retry) unique, even two identical ones in the same second.
     const body = JSON.stringify({ action, data, nonce: crypto.randomBytes(12).toString('hex') });
@@ -68,7 +69,7 @@ export async function connectorCall(action: string, data: Record<string, unknown
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Dashboard-Timestamp': ts, 'X-Dashboard-Signature': sig },
         body,
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(quick ? 20000 : 60000),
       });
       const text = await res.text();
       let json: any = null;
@@ -81,7 +82,7 @@ export async function connectorCall(action: string, data: Record<string, unknown
       err.status = res.status;
       // A dropped connection, a server error or the site's rate limit (429) is worth another try; for
       // 429 wait as long as the site asks (Retry-After), at least a few seconds.
-      if (res.status === 429) {
+      if (res.status === 429 && !quick) {
         const ra = Number(res.headers.get('retry-after'));
         wait = Math.min(30000, Math.max(3000 * (attempt + 1), Number.isFinite(ra) && ra > 0 ? ra * 1000 : 0));
         lastErr = err;
