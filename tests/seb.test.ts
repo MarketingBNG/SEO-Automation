@@ -113,11 +113,11 @@ async function seedTrainee(email: string, lessonId: number, day: string) {
   await prisma.training_lessons.create({ data: { id: lessonId, day, level: 1, title: 'L', content_html: '<p>x</p>', questions: Q, track: 'technical', audience: 'associate', extras: '{}', created_at: `${day} 02:00:00` } });
 }
 
-test('same-day resume: unread -> pending; after read -> done; re-check stays done', { skip: !db }, async () => {
+test('a lesson never locks (only a test does): unread -> open; after read -> done; re-check stays done', { skip: !db }, async () => {
   await wipe();
-  const day = '2026-11-26'; // Thursday, a lesson day
+  const day = '2026-12-03'; // Thursday, a lesson day (after the 30 Nov restart)
   await seedTrainee('s@x.com', 7001, day);
-  assert.equal((await trainingGate('s@x.com', 'user', day)).locked, true, 'unread -> locked (pending)');
+  assert.equal((await trainingGate('s@x.com', 'user', day)).locked, false, 'an unread lesson does not lock (owner: SEB only on test days)');
   await markRead('s@x.com', 7001);
   const g1 = await trainingGate('s@x.com', 'user', day);
   assert.equal(g1.locked, false);

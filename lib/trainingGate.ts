@@ -84,7 +84,9 @@ async function computeGate(email: string, day: string): Promise<Gate> {
   const sched = await getSchedule();
   const scheduled = isLessonDay(day, sched) || isTestDay(day, sched);
   const generated = all.length > 0 || tests.length > 0;
-  const locked = unread.length > 0 || openTests.length > 0;
+  // Only a TEST locks (the laptop's SEB and the dashboard). Lessons are read on the dashboard and never
+  // lock: on a lesson day SEB does not open (owner's rule).
+  const locked = openTests.length > 0;
   if (locked) return { locked, unread, openTests, notice: null };
   const openReason = openReasonFor(scheduled, generated);
   if (late) return { ...OPEN, openReason, notice: `Today's training was ready late (after ${GATE_CUTOFF_HOUR_IST}:00 IST), so it does not lock the dashboard today. Please do it today; from tomorrow the dashboard waits for it again.` };

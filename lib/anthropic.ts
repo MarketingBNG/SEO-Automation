@@ -307,7 +307,7 @@ async function callClaude(systemPrompt, userMessages, signal, opts: any = {}) {
   // Training lessons always run on the Claude Code subscription (the queue, answered by the hourly
   // scheduled run), in Live mode too, so training never uses API credits while blogs keep using the API
   // at once. Setting training_via_subscription = 'off' sends them back to the API.
-  const viaSubscription = QUEUED_WHEN_AUTOMATIC.has(String(opts.feature || '')) && (await settingValue('training_via_subscription')) !== 'off';
+  const viaSubscription = QUEUED_WHEN_AUTOMATIC.has(String(opts.feature || '')) && (await settingValue('training_via_subscription')) === 'on'; // off by default: lessons use the API (owner)
   if (testing && opts.batch && isAutomatic() && (await pendingBatchId(batchParamsFor(systemPrompt, [...userMessages], opts)))) {
     result = await callClaudeLive(systemPrompt, userMessages, signal, { ...opts, collectOnly: true });
   } else if (viaSubscription) {

@@ -4,6 +4,9 @@ What changed in the dashboard, newest first. Claude Code adds a line with every 
 `main`. Format: `- (part) what changed and what it means for the work`, where the part is the one it
 affects most: writer, fact-check, ops, seo, publisher, social.
 
+## 2026-11-28
+- (ops) Training (owner): only a TEST locks the laptop (SEB) and the dashboard; lessons never lock and are read on the dashboard, so on a lesson day SEB does not open. No test this week: Saturday 28 Nov's untaken tests are removed, and training (lessons and tests) restarts on Monday 30 Nov with two tests a week per person. Daily lessons are made by the API again at 08:00 IST (the Claude Code subscription queue for lessons is off; setting training_via_subscription = 'on' turns it back on).
+
 ## 2026-11-27
 - (publisher) Test website connection answers at once again: the test makes one short try and shows the website's answer (e.g. 429 rate limit) instead of waiting out retries.
 - (ops) Outgoing connections prefer IPv4: on the server, Node's fetch tried Google's IPv6 address first and failed (GA4 "fetch failed"). GA4 errors now name the network cause.

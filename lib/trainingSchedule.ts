@@ -25,7 +25,9 @@ export const LESSONS_ONLY_UNTIL = '2026-11-30';
 // (marked "practice") but no longer count toward scores, averages, trends or levels.
 export const TRAINING_FRESH_START = '2026-11-27';
 // One test for everyone in the restart week (before the twice-a-week rhythm begins on LESSONS_ONLY_UNTIL).
-export const EXTRA_TEST_DAYS = ['2026-11-28'];
+export const EXTRA_TEST_DAYS: string[] = []; // none: no test in the restart week (owner)
+// No lessons and no tests before this day (the restart begins on Monday 30 Nov).
+export const TRAINING_STARTS = '2026-11-30';
 export const DEFAULT_GRAND_START = '2026-12-01'; // next month: the monthly grand test starts then
 const LESSON_DOW = [1, 2, 4, 5]; // Mon, Tue, Thu, Fri (used only for the old shared helpers)
 const TEST_DOW = [3, 6]; // Wed, Sat (week 1, and the old shared helpers)
@@ -39,7 +41,7 @@ function mondayOf(day: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-export type Schedule = { on: boolean; patternStart: string; surpriseStart: string; grandStart: string };
+export type Schedule = { on: boolean; patternStart: string; surpriseStart: string; grandStart: string; startsOn?: string };
 
 export async function getSchedule(): Promise<Schedule> {
   const settings = await import('./settings');
@@ -47,13 +49,14 @@ export async function getSchedule(): Promise<Schedule> {
   const surpriseStart = String((await settings.get('training_surprise_start')) ?? DEFAULT_SURPRISE_START).trim();
   const grandStart = String((await settings.get('training_grand_start')) ?? DEFAULT_GRAND_START).trim();
   const on = Boolean(patternStart);
-  return { on, patternStart: on && patternStart < LESSONS_ONLY_UNTIL ? LESSONS_ONLY_UNTIL : patternStart, surpriseStart, grandStart };
+  return { on, patternStart: on && patternStart < LESSONS_ONLY_UNTIL ? LESSONS_ONLY_UNTIL : patternStart, surpriseStart, grandStart, startsOn: TRAINING_STARTS };
 }
 
 // --- The old shared helpers (kept for the gate's "is this a working day" check and existing tests).
 // isLessonDay OR isTestDay is still exactly "a non-Sunday working day", which is all the gate needs.
 export function isLessonDay(day: string, s: Schedule): boolean {
   if (!s.on) return true;
+  if (s.startsOn && day < s.startsOn) return false;
   const d = dow(day);
   if (d === 0) return false;
   if (day < s.patternStart) return true;
@@ -61,6 +64,7 @@ export function isLessonDay(day: string, s: Schedule): boolean {
 }
 export function isTestDay(day: string, s: Schedule): boolean {
   if (!s.on) return true;
+  if (s.startsOn && day < s.startsOn) return false;
   if (day < s.patternStart) return false;
   return TEST_DOW.includes(dow(day));
 }
@@ -105,6 +109,7 @@ export function testWeekdaysFor(email: string, day: string, s: Schedule, secret 
 export function isTestDayFor(email: string, day: string, s: Schedule, secret?: string): boolean {
   if (!s.on) return true;
   if (dow(day) === 0) return false;
+  if (s.startsOn && day < s.startsOn) return false;
   if (EXTRA_TEST_DAYS.includes(day)) return true;
   if (day < s.patternStart) return false;
   return testWeekdaysFor(email, day, s, secret).includes(dow(day));
@@ -115,6 +120,7 @@ export function isTestDayFor(email: string, day: string, s: Schedule, secret?: s
 export function isLessonDayFor(email: string, day: string, s: Schedule, secret?: string): boolean {
   if (!s.on) return true;
   if (dow(day) === 0) return false;
+  if (s.startsOn && day < s.startsOn) return false;
   if (isGrandTestDay(day, s)) return false; // the grand test day is test-only
   return !isTestDayFor(email, day, s, secret);
 }

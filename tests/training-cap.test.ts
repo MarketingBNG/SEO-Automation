@@ -38,13 +38,13 @@ test('twelve levels in four bands, everyone can reach Expert', () => {
   assert.ok(TECH_CURRICULUM.Expert.includes(topicFor('technical', '2026-11-26', 11)));
 });
 
-test('restart week: one test on Saturday 28 Nov, lessons on the other days; two a week from 30 Nov', async () => {
+test('restart: nothing before Monday 30 Nov (no lesson, no test), then 2 tests a week', async () => {
   const { isTestDayFor, isLessonDayFor, testDatesForWeek } = await import('../lib/trainingSchedule');
-  const s = { on: true, patternStart: '2026-11-30', surpriseStart: '2026-12-07', grandStart: '2026-12-01' };
-  for (const d of ['2026-11-26', '2026-11-27']) assert.ok(!isTestDayFor('a@x.com', d, s) && isLessonDayFor('a@x.com', d, s), d);
-  assert.ok(isTestDayFor('a@x.com', '2026-11-28', s) && !isLessonDayFor('a@x.com', '2026-11-28', s));
-  assert.deepEqual(testDatesForWeek('a@x.com', '2026-11-26', s), ['2026-11-28']);
+  const s = { on: true, patternStart: '2026-11-30', surpriseStart: '2026-12-07', grandStart: '2026-12-01', startsOn: '2026-11-30' };
+  for (const d of ['2026-11-26', '2026-11-27', '2026-11-28']) assert.ok(!isTestDayFor('a@x.com', d, s) && !isLessonDayFor('a@x.com', d, s), d);
+  assert.deepEqual(testDatesForWeek('a@x.com', '2026-11-26', s), []);
   assert.equal(testDatesForWeek('a@x.com', '2026-12-02', s).length, 2);
+  assert.equal(testDatesForWeek('a@x.com', '2026-12-09', s).length, 2);
 });
 
 test('timesheet project: team mapping, then ZOHO_PROJECT_DEFAULT for people with no team', async () => {
